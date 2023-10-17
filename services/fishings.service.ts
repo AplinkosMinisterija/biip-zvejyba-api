@@ -47,7 +47,7 @@ interface Fields extends CommonFields {
 
 interface Populates extends CommonPopulates {}
 
-export type FishType<
+export type FishingType<
   P extends keyof Populates = never,
   F extends keyof (Fields & Populates) = keyof Fields
 > = Table<Fields, Populates, P, F>;
