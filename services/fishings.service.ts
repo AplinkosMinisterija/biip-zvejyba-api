@@ -1,7 +1,7 @@
 "use strict";
 
 import moleculer, { Context } from "moleculer";
-import { Action, Method, Service } from "moleculer-decorators";
+import { Action, Service } from "moleculer-decorators";
 import PostgisMixin from "moleculer-postgis";
 import DbConnection from "../mixins/database.mixin";
 import {
@@ -15,7 +15,6 @@ import {
 
 import transformation from "transform-coordinates";
 import ProfileMixin from "../mixins/profile.mixin";
-import { AuthUserRole, UserAuthMeta } from "./api.service";
 
 enum LocationType {
   LAGOON = "LAGOON",
@@ -161,7 +160,7 @@ export default class FishTypesService extends moleculer.Service {
   }
 
   @Action({
-    rest: "POST /:id/finish",
+    rest: "PATCH /:id/finish",
     params: {
       id: "number|convert",
     },
@@ -171,19 +170,5 @@ export default class FishTypesService extends moleculer.Service {
       id: ctx.params.id,
       endDate: new Date(),
     });
-  }
-  @Method
-  async beforeCreate(ctx: Context<any, UserAuthMeta>) {
-    if (
-      ![AuthUserRole.ADMIN, AuthUserRole.SUPER_ADMIN].some(
-        (role) => role === ctx.meta.authUser.type
-      )
-    ) {
-      const profile = ctx.meta.profile;
-      const userId = ctx.meta.user.id;
-      ctx.params.tenant = profile || null;
-      ctx.params.user = !profile ? userId : null;
-    }
-    return ctx;
   }
 }

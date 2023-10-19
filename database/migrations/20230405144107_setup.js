@@ -57,7 +57,22 @@ exports.up = function (knex) {
     })
     .raw(`CREATE EXTENSION IF NOT EXISTS postgis;`)
     .raw(`ALTER TABLE fishings ADD COLUMN geom geometry(point, 3346)`)
-    .raw(`CREATE INDEX fishings_geom_idx ON fishings USING GIST (geom)`);
+    .raw(`CREATE INDEX fishings_geom_idx ON fishings USING GIST (geom)`)
+    .createTable("toolTypes", (table) => {
+      table.increments("id");
+      table.string("label");
+      commonFields(table);
+    })
+    .createTable("tools", (table) => {
+      table.increments("id");
+      table.string("sealNr");
+      table.integer("eyeSize");
+      table.integer("netLength");
+      table.integer("toolTypeId").unsigned();
+      table.integer("tenantId").unsigned();
+      table.integer("userId").unsigned();
+      commonFields(table);
+    });
 };
 
 exports.down = function (knex) {
@@ -66,5 +81,7 @@ exports.down = function (knex) {
     .dropTable("tenants")
     .dropTable("users")
     .dropTable("fishTypes")
-    .dropTable("fishings");
+    .dropTable("fishings")
+    .dropTable("toolTypes")
+    .dropTable("tools");
 };

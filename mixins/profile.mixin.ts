@@ -30,5 +30,18 @@ export default {
       ctx.params.sort = "-createdAt";
       return ctx;
     },
+    beforeCreate(ctx: Context<any, UserAuthMeta>) {
+      if (
+        ![AuthUserRole.ADMIN, AuthUserRole.SUPER_ADMIN].some(
+          (role) => role === ctx.meta.authUser.type
+        )
+      ) {
+        const profile = ctx.meta.profile;
+        const userId = ctx.meta.user.id;
+        ctx.params.tenant = profile || null;
+        ctx.params.user = !profile ? userId : null;
+      }
+      return ctx;
+    },
   },
 };
