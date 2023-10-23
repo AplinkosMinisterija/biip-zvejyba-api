@@ -13,6 +13,11 @@ import {
   Table,
 } from "../types";
 
+enum Type {
+  NET = "NET",
+  CATCHER = "CATCHER",
+}
+
 interface Fields extends CommonFields {
   id: number;
   label: string;
@@ -36,6 +41,7 @@ export type ToolType<
         secure: true,
       },
       label: "string|required",
+      type: "string",
       ...COMMON_FIELDS,
     },
     scopes: {
@@ -48,18 +54,14 @@ export default class ToolTypesService extends moleculer.Service {
   @Method
   async seedDB() {
     await this.createEntities(null, [
-      { label: "Statomieji tinklaičiai" },
-      { label: "Marinės gaudyklės" },
-      { label: "Nėginės gaudyklės" },
-      { label: "Stambiaakės gaudyklės" },
-      { label: "Stintinės gaudyklės" },
-      { label: "Pūgžlinės-dyglinės gaudyklės" },
-      { label: "Stintų tinklaičiai" },
-      { label: "Ūdos" },
-      { label: "Traukiamasis tinklas" },
-      { label: "Nėgių gaudymo bučiukai" },
-      { label: "Traukiamasis tinklas stintų žvejybai" },
-      { label: "Ungurinė gaudyklė" },
+      { label: "Statomasis tinklaitis", type: Type.NET },
+      { label: "Stintinis tinklaitis", type: Type.NET },
+      { label: "Traukiamasis tinklas", type: Type.NET },
+      { label: "Marinė gaudyklė", type: Type.CATCHER },
+      { label: "Nėginė gaudyklė", type: Type.CATCHER },
+      { label: "Stambiaakė gaudyklė", type: Type.CATCHER },
+      { label: "Stintinė gaudyklė", type: Type.CATCHER },
+      { label: "Ungurinė gaudyklė", type: Type.CATCHER },
     ]);
   }
 }

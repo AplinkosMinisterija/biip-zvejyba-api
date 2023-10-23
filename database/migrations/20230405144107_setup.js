@@ -50,7 +50,7 @@ exports.up = function (knex) {
       table.timestamp("startDate");
       table.timestamp("endDate");
       table.timestamp("skipDate");
-      table.enu("type", ["LAGOON", "POLDERS", "INLAND_WATERS"]);
+      table.enu("type", ["ESTUARY", "POLDERS", "INLAND_WATERS"]);
       table.integer("tenantId").unsigned();
       table.integer("userId").unsigned();
       commonFields(table);
@@ -61,13 +61,15 @@ exports.up = function (knex) {
     .createTable("toolTypes", (table) => {
       table.increments("id");
       table.string("label");
+      table.enum("type", ["NET", "CATCHER"]);
       commonFields(table);
     })
     .createTable("tools", (table) => {
       table.increments("id");
       table.string("sealNr");
-      table.integer("eyeSize");
-      table.integer("netLength");
+      table.double("eyeSize");
+      table.double("eyeSize2");
+      table.double("netLength");
       table.integer("toolTypeId").unsigned();
       table.integer("tenantId").unsigned();
       table.integer("userId").unsigned();

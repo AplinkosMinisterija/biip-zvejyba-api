@@ -1,11 +1,9 @@
 "use strict";
 
-import moleculer from "moleculer";
+import moleculer, { Context } from "moleculer";
 import { Method, Service } from "moleculer-decorators";
-
 import DbConnection from "../mixins/database.mixin";
 import ProfileMixin from "../mixins/profile.mixin";
-
 import {
   COMMON_DEFAULT_SCOPES,
   COMMON_FIELDS,
@@ -14,6 +12,7 @@ import {
   CommonPopulates,
   Table,
 } from "../types";
+import { TenantUser } from "./tenantUsers.service";
 
 interface Fields extends CommonFields {
   id: number;
@@ -38,12 +37,13 @@ export type Tool<
         secure: true,
       },
       sealNr: "string",
-      eyeSize: "number",
-      netLength: "number",
+      eyeSize: "number|convert",
+      eyeSize2: "number|convert",
+      netLength: "number|convert",
       toolType: {
         type: "number",
         columnType: "integer",
-        columnName: "tenantId",
+        columnName: "toolTypeId",
         populate: {
           action: "toolTypes.resolve",
           params: {
@@ -79,10 +79,11 @@ export type Tool<
       ...COMMON_SCOPES,
     },
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
+    defaultPopulates: ["toolType"],
   },
   hooks: {
     before: {
-      create: ["beforeCreate"],
+      create: ["beforeCreate", "validateTool"],
       list: ["beforeSelect"],
       find: ["beforeSelect"],
       count: ["beforeSelect"],
@@ -93,20 +94,20 @@ export type Tool<
 })
 export default class ToolTypesService extends moleculer.Service {
   @Method
-  async seedDB() {
-    await this.createEntities(null, [
-      { label: "Statomieji tinklaičiai" },
-      { label: "Marinės gaudyklės" },
-      { label: "Nėginės gaudyklės" },
-      { label: "Stambiaakės gaudyklės" },
-      { label: "Stintinės gaudyklės" },
-      { label: "Pūgžlinės-dyglinės gaudyklės" },
-      { label: "Stintų tinklaičiai" },
-      { label: "Ūdos" },
-      { label: "Traukiamasis tinklas" },
-      { label: "Nėgių gaudymo bučiukai" },
-      { label: "Traukiamasis tinklas stintų žvejybai" },
-      { label: "Ungurinė gaudyklė" },
-    ]);
+  async validateTool(ctx: Context<any>) {
+    console.log("new tool", ctx.params);
+    const existing: TenantUser[] = await this.findEntities(null, {
+      query: {
+        sealNr: ctx.params.sealNr,
+      },
+    });
+
+    if (existing?.length) {
+      throw new moleculer.Errors.MoleculerClientError(
+        "Already exists",
+        422,
+        "ALREADY_EXISTS"
+      );
+    }
   }
 }

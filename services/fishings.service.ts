@@ -1,7 +1,7 @@
 "use strict";
 
 import moleculer, { Context } from "moleculer";
-import { Action, Service } from "moleculer-decorators";
+import { Action, Method, Service } from "moleculer-decorators";
 import PostgisMixin from "moleculer-postgis";
 import DbConnection from "../mixins/database.mixin";
 import {
@@ -15,29 +15,8 @@ import {
 
 import transformation from "transform-coordinates";
 import ProfileMixin from "../mixins/profile.mixin";
-
-enum LocationType {
-  LAGOON = "LAGOON",
-  POLDERS = "POLDERS",
-  INLAND_WATERS = "INLAND_WATERS",
-}
-
-export function coordinatesToGeometry(coordinates: { x: number; y: number }) {
-  const transform = transformation("EPSG:4326", "3346");
-  const transformed = transform.forward(coordinates);
-  return {
-    type: "FeatureCollection",
-    features: [
-      {
-        type: "Feature",
-        geometry: {
-          type: "Point",
-          coordinates: [transformed.x, transformed.y],
-        },
-      },
-    ],
-  };
-}
+import { AuthUserRole, UserAuthMeta } from "./api.service";
+import { coordinatesToGeometry } from "./location.service";
 
 interface Fields extends CommonFields {
   id: number;
@@ -118,8 +97,8 @@ export type FishingType<
   },
   hooks: {
     before: {
-      newFishing: ["beforeCreate"],
-      skipFishing: ["beforeCreate"],
+      newFishing: ["beforeCreateFishing"],
+      skipFishing: ["beforeCreateFishing"],
       list: ["beforeSelect"],
       find: ["beforeSelect"],
       count: ["beforeSelect"],
@@ -142,7 +121,9 @@ export default class FishTypesService extends moleculer.Service {
       startDate: new Date(),
     };
     if (ctx.params.coordinates) {
-      params.geom = coordinatesToGeometry(ctx.params.coordinates);
+      const transform = transformation("EPSG:4326", "3346");
+      const transformed = transform.forward(ctx.params.coordinates);
+      params.geom = coordinatesToGeometry(transformed);
     }
     return this.createEntity(ctx, params);
   }
@@ -170,5 +151,44 @@ export default class FishTypesService extends moleculer.Service {
       id: ctx.params.id,
       endDate: new Date(),
     });
+  }
+
+  @Action({
+    rest: "GET /current",
+  })
+  async currentFishing(ctx: Context<{}, UserAuthMeta>) {
+    let entities = [];
+    if (!!ctx.meta?.profile) {
+      entities = await this.findEntities(ctx, {
+        query: {
+          tenant: ctx.meta.profile,
+          user: ctx.meta.user.id,
+          $raw: "end_date is null",
+        },
+      });
+    } else {
+      entities = await this.findEntities(ctx, {
+        query: {
+          user: ctx.meta.user.id,
+          $raw: "tenant_id is null AND end_date is null",
+        },
+      });
+    }
+    return entities[0];
+  }
+
+  @Method
+  async beforeCreateFishing(ctx: Context<any, UserAuthMeta>) {
+    if (
+      ![AuthUserRole.ADMIN, AuthUserRole.SUPER_ADMIN].some(
+        (role) => role === ctx.meta.authUser.type
+      )
+    ) {
+      const profile = ctx.meta.profile;
+      const userId = ctx.meta.user.id;
+      ctx.params.tenant = profile || null;
+      ctx.params.user = userId;
+    }
+    return ctx;
   }
 }
