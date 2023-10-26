@@ -1,7 +1,7 @@
 "use strict";
 
 import moleculer, { Context } from "moleculer";
-import { Method, Service } from "moleculer-decorators";
+import { Action, Method, Service } from "moleculer-decorators";
 import DbConnection from "../mixins/database.mixin";
 import ProfileMixin from "../mixins/profile.mixin";
 import {
@@ -13,10 +13,21 @@ import {
   Table,
 } from "../types";
 import { TenantUser } from "./tenantUsers.service";
+import { Tenant } from "./tenants.service";
+import { ToolGroup } from "./toolGroups.service";
+import { ToolType } from "./toolTypes.service";
+import { User } from "./users.service";
 
 interface Fields extends CommonFields {
   id: number;
-  label: string;
+  sealNr: string;
+  eyeSize: number;
+  eyeSize2: number;
+  netLength: number;
+  toolType: ToolType["id"];
+  toolGroup: ToolGroup["id"];
+  tenant: Tenant["id"];
+  user: User["id"];
 }
 
 interface Populates extends CommonPopulates {}
@@ -46,6 +57,17 @@ export type Tool<
         columnName: "toolTypeId",
         populate: {
           action: "toolTypes.resolve",
+          params: {
+            scope: false,
+          },
+        },
+      },
+      toolGroup: {
+        type: "number",
+        columnType: "integer",
+        columnName: "toolGroupId",
+        populate: {
+          action: "toolGroups.resolve",
           params: {
             scope: false,
           },
@@ -93,15 +115,24 @@ export type Tool<
   },
 })
 export default class ToolTypesService extends moleculer.Service {
+  @Action({
+    rest: "GET /available",
+  })
+  async availableTools(ctx: Context<any>) {
+    return this.findEntities(ctx, {
+      query: {
+        toolGroup: { $exists: false },
+      },
+    });
+  }
+
   @Method
   async validateTool(ctx: Context<any>) {
-    console.log("new tool", ctx.params);
     const existing: TenantUser[] = await this.findEntities(null, {
       query: {
         sealNr: ctx.params.sealNr,
       },
     });
-
     if (existing?.length) {
       throw new moleculer.Errors.MoleculerClientError(
         "Already exists",

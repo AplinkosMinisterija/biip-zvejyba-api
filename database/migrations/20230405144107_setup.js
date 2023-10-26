@@ -73,8 +73,25 @@ exports.up = function (knex) {
       table.integer("toolTypeId").unsigned();
       table.integer("tenantId").unsigned();
       table.integer("userId").unsigned();
+      table.integer("toolGroupId").unsigned();
       commonFields(table);
-    });
+    })
+    .createTable("toolGroups", (table) => {
+      table.increments("id");
+      table.jsonb("tools");
+      table.timestamp("startDate");
+      table.integer("startFishingId").unsigned();
+      table.timestamp("endDate");
+      table.integer("endFishingId").unsigned();
+      table.integer("tenantId").unsigned();
+      table.integer("userId").unsigned();
+      table.integer("locationId");
+      table.string("locationName");
+      table.enu("locationType", ["ESTUARY", "POLDERS", "INLAND_WATERS"]);
+      commonFields(table);
+    })
+    .raw(`ALTER TABLE tool_groups ADD COLUMN geom geometry(point, 3346)`)
+    .raw(`CREATE INDEX tool_groups_geom_idx ON tool_groups USING GIST (geom)`);
 };
 
 exports.down = function (knex) {
@@ -85,5 +102,6 @@ exports.down = function (knex) {
     .dropTable("fishTypes")
     .dropTable("fishings")
     .dropTable("toolTypes")
-    .dropTable("tools");
+    .dropTable("tools")
+    .dropTable("toolGroups");
 };

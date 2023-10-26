@@ -16,16 +16,25 @@ import {
 import transformation from "transform-coordinates";
 import ProfileMixin from "../mixins/profile.mixin";
 import { AuthUserRole, UserAuthMeta } from "./api.service";
+import { FishType } from "./fishTypes.service";
 import { coordinatesToGeometry } from "./location.service";
+import { Tenant } from "./tenants.service";
+import { User } from "./users.service";
 
 interface Fields extends CommonFields {
   id: number;
-  label: string;
+  startDate: Date;
+  endDate: Date;
+  skipDate: Date;
+  geom: any;
+  type: FishType;
+  tenant: Tenant["id"];
+  user: User["id"];
 }
 
 interface Populates extends CommonPopulates {}
 
-export type FishingType<
+export type Fishing<
   P extends keyof Populates = never,
   F extends keyof (Fields & Populates) = keyof Fields
 > = Table<Fields, Populates, P, F>;
@@ -163,14 +172,15 @@ export default class FishTypesService extends moleculer.Service {
         query: {
           tenant: ctx.meta.profile,
           user: ctx.meta.user.id,
-          $raw: "end_date is null",
+          endDate: { $exists: false },
         },
       });
     } else {
       entities = await this.findEntities(ctx, {
         query: {
           user: ctx.meta.user.id,
-          $raw: "tenant_id is null AND end_date is null",
+          tenant: { $exists: false },
+          endDate: { $exists: false },
         },
       });
     }
