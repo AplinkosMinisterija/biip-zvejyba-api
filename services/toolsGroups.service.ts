@@ -36,7 +36,7 @@ interface Fields extends CommonFields {
 
 interface Populates extends CommonPopulates {}
 
-export type ToolGroup<
+export type ToolsGroup<
   P extends keyof Populates = never,
   F extends keyof (Fields & Populates) = keyof Fields
 > = Table<Fields, Populates, P, F>;
@@ -61,7 +61,7 @@ export type ToolGroup<
         type: 'array',
         columnName: 'tools',
         default: () => [],
-        async populate(ctx: Context, values: number[], entities: ToolGroup[]) {
+        async populate(ctx: Context, values: number[], entities: ToolsGroup[]) {
           try {
             const toolsMap: any = {};
             for (const toolId of values) {
@@ -131,25 +131,6 @@ export type ToolGroup<
 })
 export default class ToolsGroupsService extends moleculer.Service {
   @Action({
-    rest: 'GET /current',
-  })
-  async toolsGroupsByLocation(ctx: Context<any>) {
-    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
-    if (!currentFishing) {
-      throw new moleculer.Errors.ValidationError('Fishing not started');
-    }
-    const locationId = JSON.parse(ctx.params.query)?.locationId;
-    return this.findEntities(ctx, {
-      query: {
-        endDate: { $exists: false },
-        endFishing: { $exists: false },
-        locationId,
-      },
-      populate: ['tools'],
-    });
-  }
-
-  @Action({
     rest: 'POST /build',
     params: {
       tools: 'array',
@@ -187,6 +168,24 @@ export default class ToolsGroupsService extends moleculer.Service {
       )
     );
     return group;
+  }
+  @Action({
+    rest: 'GET /current',
+  })
+  async toolsGroupsByLocation(ctx: Context<any>) {
+    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
+    if (!currentFishing) {
+      throw new moleculer.Errors.ValidationError('Fishing not started');
+    }
+    const locationId = JSON.parse(ctx.params.query)?.locationId;
+    return this.findEntities(ctx, {
+      query: {
+        endDate: { $exists: false },
+        endFishing: { $exists: false },
+        locationId,
+      },
+      populate: ['tools'],
+    });
   }
 
   @Action({
