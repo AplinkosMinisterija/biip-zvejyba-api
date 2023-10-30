@@ -3,9 +3,9 @@
 import moleculer, { Context } from 'moleculer';
 import { Action, Service } from 'moleculer-decorators';
 import PostgisMixin from 'moleculer-postgis';
-import transformation from 'transform-coordinates';
 import DbConnection from '../mixins/database.mixin';
 import ProfileMixin from '../mixins/profile.mixin';
+import { coordinatesToGeometry } from '../modules/geometry';
 import {
   COMMON_DEFAULT_SCOPES,
   COMMON_FIELDS,
@@ -15,8 +15,8 @@ import {
   Table,
 } from '../types';
 import { Fishing } from './fishings.service';
-import { coordinatesToGeometry } from './location.service';
 import { Tenant } from './tenants.service';
+import { ToolsGroupHistoryTypes } from './toolsGroups.histories.service';
 import { User } from './users.service';
 
 interface Fields extends CommonFields {
@@ -123,61 +123,84 @@ export type ToolsGroup<
 })
 export default class ToolsGroupsService extends moleculer.Service {
   @Action({
+    rest: 'POST /build/:id',
+    params: {
+      id: 'number|convert|optional',
+      coordinates: 'object',
+      location: {
+        type: 'object',
+        properties: {
+          id: 'string',
+          name: 'string',
+          municipality: {
+            type: 'object',
+            properties: {
+              id: 'number',
+              name: 'string',
+            },
+          },
+        },
+      },
+    },
+  })
+  async buildGroup(ctx: Context<any>) {
+    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
+    if (!currentFishing) {
+      throw new moleculer.Errors.ValidationError('Fishing not started');
+    }
+    const geom = coordinatesToGeometry(ctx.params.coordinates);
+
+    const group = this.findEntity(ctx, { id: ctx.params.id });
+    if (!group) {
+      throw new moleculer.Errors.ValidationError('Invalid tools group');
+    }
+
+    await ctx.call('toolsGroups.histories.create', {
+      type: ToolsGroupHistoryTypes.BUILD_TOOLS,
+      geom,
+      location: ctx.params.location,
+      toolsGroup: group.id,
+      fishing: currentFishing.id,
+    });
+
+    return this.findEntity(ctx, { id: group.id });
+  }
+
+  @Action({
     rest: 'POST /build',
     params: {
-      tools: 'array',
+      tools: 'array|optional',
       coordinates: 'object',
       location: 'number|convert',
       locationName: 'string',
     },
   })
   async buildTools(ctx: Context<any>) {
-    if (!ctx.params.tools?.length) {
-      throw new moleculer.Errors.ValidationError('No tools added');
+    if (!ctx.params.tools) {
+      throw new moleculer.Errors.ValidationError('No tools selected');
     }
+
     const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
     if (!currentFishing) {
       throw new moleculer.Errors.ValidationError('Fishing not started');
     }
-    const transform = transformation('EPSG:4326', '3346');
-    const transformed = transform.forward(ctx.params.coordinates);
-    const geom = coordinatesToGeometry(transformed);
+
+    const geom = coordinatesToGeometry(ctx.params.coordinates);
+
     const group = await this.createEntity(ctx, {
+      ...ctx.params,
       tools: ctx.params.tools,
-      startFishing: currentFishing.id,
-      startDate: new Date(),
+    });
+
+    await ctx.call('toolsGroups.histories.create', {
+      type: ToolsGroupHistoryTypes.BUILD_TOOLS,
       geom,
-      locationId: ctx.params.location,
-      locationName: ctx.params.locationName,
-      locationType: currentFishing.type,
+      location: ctx.params.location,
+      toolsGroup: group.id,
+      fishing: currentFishing.id,
     });
-    await Promise.all(
-      group.tools?.map((id: number) =>
-        ctx.call('tools.update', {
-          id,
-          toolsGroup: group.id,
-        })
-      )
-    );
-    return group;
-  }
-  @Action({
-    rest: 'GET /current',
-  })
-  async toolsGroupsByLocation(ctx: Context<any>) {
-    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
-    if (!currentFishing) {
-      throw new moleculer.Errors.ValidationError('Fishing not started');
-    }
-    const locationId = JSON.parse(ctx.params.query)?.locationId;
-    return this.findEntities(ctx, {
-      query: {
-        endDate: { $exists: false },
-        endFishing: { $exists: false },
-        locationId,
-      },
-      populate: ['tools'],
-    });
+
+    return this.findEntity(ctx, { id: group.id });
   }
 
   @Action({
@@ -210,5 +233,23 @@ export default class ToolsGroupsService extends moleculer.Service {
       )
     );
     return group;
+  }
+  @Action({
+    rest: 'GET /current',
+  })
+  async toolsGroupsByLocation(ctx: Context<any>) {
+    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
+    if (!currentFishing) {
+      throw new moleculer.Errors.ValidationError('Fishing not started');
+    }
+    const locationId = JSON.parse(ctx.params.query)?.locationId;
+    return this.findEntities(ctx, {
+      query: {
+        endDate: { $exists: false },
+        endFishing: { $exists: false },
+        locationId,
+      },
+      populate: ['tools'],
+    });
   }
 }

@@ -83,7 +83,13 @@ export type ToolsGroupsHistory<
         properties: {
           id: 'string',
           name: 'string',
-          municipality: 'object',
+          municipality: {
+            type: 'object',
+            properties: {
+              id: 'number',
+              name: 'string',
+            },
+          },
         },
       },
       data: {

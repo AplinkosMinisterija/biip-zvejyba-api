@@ -15,7 +15,7 @@ import {
 import { TenantUser } from './tenantUsers.service';
 import { Tenant } from './tenants.service';
 import { ToolType } from './toolTypes.service';
-import { ToolGroup } from './toolsGroups.service';
+import { ToolsGroup } from './toolsGroups.service';
 import { User } from './users.service';
 
 interface Fields extends CommonFields {
@@ -25,7 +25,7 @@ interface Fields extends CommonFields {
   eyeSize2: number;
   netLength: number;
   toolType: ToolType['id'];
-  toolGroup: ToolGroup['id'];
+  toolGroup: ToolsGroup['id'];
   tenant: Tenant['id'];
   user: User['id'];
 }
