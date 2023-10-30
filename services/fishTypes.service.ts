@@ -80,6 +80,7 @@ export default class FishTypesService extends moleculer.Service {
   })
   async upload(ctx: Context<{}, UserAuthMeta>) {
     const folder = getFolderName(ctx.meta?.user, ctx.meta?.profile);
+
     return ctx.call('minio.uploadFile', {
       payload: ctx.params,
       isPrivate: false,

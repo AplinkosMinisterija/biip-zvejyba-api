@@ -1,8 +1,8 @@
 'use strict';
-// @ts-ignore
-import MinioMixin from 'moleculer-minio';
 import Moleculer, { Context } from 'moleculer';
 import { Action, Method, Service } from 'moleculer-decorators';
+// @ts-ignore
+import MinioMixin from 'moleculer-minio';
 import moment from 'moment';
 import {
   getExtention,
@@ -17,7 +17,7 @@ import {
 } from '../types';
 import { UserAuthMeta } from './api.service';
 
-export const BUCKET_NAME = () => process.env.MINIO_BUCKET || 'turizmas';
+export const BUCKET_NAME = () => process.env.MINIO_BUCKET || 'zvejyba';
 
 @Service({
   name: 'minio',
@@ -288,10 +288,7 @@ export default class MinioService extends Moleculer.Service {
                   AWS: ['*'],
                 },
                 Action: ['s3:GetObject'],
-                Resource: [
-                  `arn:aws:s3:::${BUCKET_NAME()}/uploads/species/*`,
-                  `arn:aws:s3:::${BUCKET_NAME()}/uploads/forms/*`,
-                ],
+                Resource: [`arn:aws:s3:::${BUCKET_NAME()}/uploads/fishTypes/*`],
               },
             ],
           })
