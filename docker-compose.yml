@@ -20,18 +20,18 @@ services:
       - internal
     ports:
       - 5691:6379
-
   minio:
     image: minio/minio:latest
     ports:
-      - 9020:9000
-      - 9021:9001
+      - 9140:9000
+      - 9141:9001
     networks:
       - internal
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
     command: server --console-address :9001 /data
+
 
 networks:
   internal:

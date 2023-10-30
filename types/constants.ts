@@ -113,4 +113,12 @@ export function throwUnauthorizedError(
   );
 }
 
+export function throwNotFoundError(message?: string): Errors.MoleculerError {
+  throw new Moleculer.Errors.MoleculerClientError(
+    message || `Not found.`,
+    404,
+    'NOT_FOUND'
+  );
+}
+
 export const COMMON_DEFAULT_SCOPES = ['notDeleted'];
