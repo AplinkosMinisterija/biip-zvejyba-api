@@ -2,7 +2,11 @@
 
 import moleculer, { Context } from 'moleculer';
 import { Action, Event, Method, Service } from 'moleculer-decorators';
-import { EntityChangedParams, RestrictionType } from '../types';
+import {
+  EntityChangedParams,
+  RestrictionType,
+  throwUnauthorizedError,
+} from '../types';
 import {
   AuthGroupRole,
   TenantUser,
@@ -13,16 +17,6 @@ import { User, UserType } from './users.service';
 import authMixin from 'biip-auth-nodejs/mixin';
 import { UserAuthMeta } from './api.service';
 import { Tenant } from './tenants.service';
-
-type UsersMap = Record<
-  string,
-  { id?: User['id']; authUser: number; row: any[] }
->;
-
-type TenantsMap = Record<
-  string,
-  { id?: Tenant['id']; authGroup: number; row: any[] }
->;
 
 @Service({
   name: 'auth',
@@ -100,11 +94,7 @@ export default class AuthService extends moleculer.Service {
         return data;
       }
 
-      throw new moleculer.Errors.MoleculerClientError(
-        'Invalid user type.',
-        401,
-        'INVALID_TYPE',
-      );
+      throwUnauthorizedError('Invalid user type.');
     }
 
     let user: User = await ctx.call('users.findOne', {
@@ -131,13 +121,13 @@ export default class AuthService extends moleculer.Service {
         id: authUser?.id,
         populate: 'groups',
       },
-      { meta },
+      { meta }
     );
     const authGroups: any[] = authUserGroups?.groups || [];
 
     const isFreelancer = authGroups.some(
       (authGroup: any) =>
-        authGroup.id === Number(process.env.FREELANCER_GROUP_ID),
+        authGroup.id === Number(process.env.FREELANCER_GROUP_ID)
     );
 
     // update user info from e-vartai
@@ -229,19 +219,6 @@ export default class AuthService extends moleculer.Service {
     return ctx;
   }
 
-  @Action({
-    rest: 'GET /assignees',
-    auth: RestrictionType.ADMIN,
-  })
-  async getAssignees(ctx: Context<any>) {
-    return await ctx.call('auth.users.list', {
-      query: { type: UserType.ADMIN },
-      ...ctx.params,
-      pageSize: 100,
-    });
-    //TODO: fix temporary solution page size
-  }
-
   @Event()
   async 'users.updated'(ctx: Context<EntityChangedParams<User>>) {
     const user = ctx.params.data as User;
@@ -271,7 +248,7 @@ export default class AuthService extends moleculer.Service {
     await ctx.call(
       'auth.users.remove',
       { id: user.authUser },
-      { meta: ctx.meta },
+      { meta: ctx.meta }
     );
   }
 
@@ -285,7 +262,7 @@ export default class AuthService extends moleculer.Service {
         id: tenantUser.id,
         populate: 'user,tenant',
         scope: false,
-      },
+      }
     );
 
     await ctx.call('auth.users.unassignFromGroup', {
@@ -315,7 +292,7 @@ export default class AuthService extends moleculer.Service {
         id: tenantUser.id,
         populate: 'user,tenant',
         scope: false,
-      },
+      }
     );
 
     await ctx.call('auth.users.assignToGroup', {
