@@ -194,7 +194,9 @@ export default class ApiService extends moleculer.Service {
     }
   }
 
-  @Action()
+  @Action({
+    auth: RestrictionType.PUBLIC
+  })
   ping() {
     return {
       timestamp: Date.now(),
