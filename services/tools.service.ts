@@ -1,9 +1,9 @@
-"use strict";
+'use strict';
 
-import moleculer, { Context } from "moleculer";
-import { Action, Method, Service } from "moleculer-decorators";
-import DbConnection from "../mixins/database.mixin";
-import ProfileMixin from "../mixins/profile.mixin";
+import moleculer, { Context } from 'moleculer';
+import { Action, Method, Service } from 'moleculer-decorators';
+import DbConnection from '../mixins/database.mixin';
+import ProfileMixin from '../mixins/profile.mixin';
 import {
   COMMON_DEFAULT_SCOPES,
   COMMON_FIELDS,
@@ -11,12 +11,12 @@ import {
   CommonFields,
   CommonPopulates,
   Table,
-} from "../types";
-import { TenantUser } from "./tenantUsers.service";
-import { Tenant } from "./tenants.service";
-import { ToolGroup } from "./toolGroups.service";
-import { ToolType } from "./toolTypes.service";
-import { User } from "./users.service";
+} from '../types';
+import { TenantUser } from './tenantUsers.service';
+import { Tenant } from './tenants.service';
+import { ToolGroup } from './toolGroups.service';
+import { ToolType } from './toolTypes.service';
+import { User } from './users.service';
 
 interface Fields extends CommonFields {
   id: number;
@@ -24,10 +24,10 @@ interface Fields extends CommonFields {
   eyeSize: number;
   eyeSize2: number;
   netLength: number;
-  toolType: ToolType["id"];
-  toolGroup: ToolGroup["id"];
-  tenant: Tenant["id"];
-  user: User["id"];
+  toolType: ToolType['id'];
+  toolGroup: ToolGroup['id'];
+  tenant: Tenant['id'];
+  user: User['id'];
 }
 
 interface Populates extends CommonPopulates {}
@@ -38,38 +38,38 @@ export type Tool<
 > = Table<Fields, Populates, P, F>;
 
 @Service({
-  name: "tools",
+  name: 'tools',
   mixins: [DbConnection(), ProfileMixin],
   settings: {
     fields: {
       id: {
-        type: "number",
+        type: 'number',
         primaryKey: true,
         secure: true,
       },
-      sealNr: "string",
-      eyeSize: "number|convert",
-      eyeSize2: "number|convert",
-      netLength: "number|convert",
+      sealNr: 'string',
+      eyeSize: 'number|convert',
+      eyeSize2: 'number|convert',
+      netLength: 'number|convert',
       toolType: {
-        type: "number",
-        columnType: "integer",
-        columnName: "toolTypeId",
+        type: 'number',
+        columnType: 'integer',
+        columnName: 'toolTypeId',
         populate: {
-          action: "toolTypes.resolve",
+          action: 'toolTypes.resolve',
           params: {
             scope: false,
           },
         },
       },
       toolGroup: {
-        type: "number",
+        type: 'number',
         readonly: true,
         virtual: true,
         async populate(ctx: any, _values: any, tools: Tool[]) {
           return Promise.all(
             tools.map((tool: Tool) => {
-              return ctx.call("toolGroups.find", {
+              return ctx.call('toolGroups.find', {
                 query: {
                   $raw: `tools::jsonb @> '${tool.id}'`,
                 },
@@ -79,22 +79,22 @@ export type Tool<
         },
       },
       tenant: {
-        type: "number",
-        columnType: "integer",
-        columnName: "tenantId",
+        type: 'number',
+        columnType: 'integer',
+        columnName: 'tenantId',
         populate: {
-          action: "tenants.resolve",
+          action: 'tenants.resolve',
           params: {
             scope: false,
           },
         },
       },
       user: {
-        type: "number",
-        columnType: "integer",
-        columnName: "userId",
+        type: 'number',
+        columnType: 'integer',
+        columnName: 'userId',
         populate: {
-          action: "users.resolve",
+          action: 'users.resolve',
           params: {
             scope: false,
           },
@@ -106,29 +106,29 @@ export type Tool<
       ...COMMON_SCOPES,
     },
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
-    defaultPopulates: ["toolType", "toolGroup"],
+    defaultPopulates: ['toolType', 'toolGroup'],
   },
   hooks: {
     before: {
-      create: ["beforeCreate", "validateTool"],
-      list: ["beforeSelect"],
-      find: ["beforeSelect"],
-      count: ["beforeSelect"],
-      get: ["beforeSelect"],
-      all: ["beforeSelect"],
+      create: ['beforeCreate', 'validateTool'],
+      list: ['beforeSelect'],
+      find: ['beforeSelect'],
+      count: ['beforeSelect'],
+      get: ['beforeSelect'],
+      all: ['beforeSelect'],
     },
   },
 })
 export default class ToolTypesService extends moleculer.Service {
   @Action({
-    rest: "GET /available",
+    rest: 'GET /available',
   })
   async availableTools(ctx: Context<any>) {
     return this.findEntities(ctx, {
       query: {
         toolGroup: { $exists: false },
       },
-      populate: ["toolGroup"],
+      populate: ['toolGroup'],
     });
   }
 
@@ -141,9 +141,9 @@ export default class ToolTypesService extends moleculer.Service {
     });
     if (existing?.length) {
       throw new moleculer.Errors.MoleculerClientError(
-        "Already exists",
+        'Already exists',
         422,
-        "ALREADY_EXISTS"
+        'ALREADY_EXISTS'
       );
     }
   }

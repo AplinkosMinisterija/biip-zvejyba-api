@@ -1,25 +1,26 @@
-"use strict";
+'use strict';
 
-import moleculer, { Context } from "moleculer";
-import { Action, Method, Service } from "moleculer-decorators";
-import PostgisMixin from "moleculer-postgis";
-import DbConnection from "../mixins/database.mixin";
+import moleculer, { Context } from 'moleculer';
+import { Action, Service } from 'moleculer-decorators';
+import PostgisMixin from 'moleculer-postgis';
+import DbConnection from '../mixins/database.mixin';
 import {
   COMMON_DEFAULT_SCOPES,
   COMMON_FIELDS,
   COMMON_SCOPES,
   CommonFields,
   CommonPopulates,
+  RestrictionType,
   Table,
-} from "../types";
+} from '../types';
 
-import transformation from "transform-coordinates";
-import ProfileMixin from "../mixins/profile.mixin";
-import { AuthUserRole, UserAuthMeta } from "./api.service";
-import { FishType } from "./fishTypes.service";
-import { coordinatesToGeometry } from "./location.service";
-import { Tenant } from "./tenants.service";
-import { User } from "./users.service";
+import transformation from 'transform-coordinates';
+import ProfileMixin from '../mixins/profile.mixin';
+import { UserAuthMeta } from './api.service';
+import { FishType } from './fishTypes.service';
+import { coordinatesToGeometry } from './location.service';
+import { Tenant } from './tenants.service';
+import { User } from './users.service';
 
 interface Fields extends CommonFields {
   id: number;
@@ -28,8 +29,8 @@ interface Fields extends CommonFields {
   skipDate: Date;
   geom: any;
   type: FishType;
-  tenant: Tenant["id"];
-  user: User["id"];
+  tenant: Tenant['id'];
+  user: User['id'];
 }
 
 interface Populates extends CommonPopulates {}
@@ -40,7 +41,7 @@ export type Fishing<
 > = Table<Fields, Populates, P, F>;
 
 @Service({
-  name: "fishings",
+  name: 'fishings',
   mixins: [
     DbConnection(),
     PostgisMixin({
@@ -51,42 +52,42 @@ export type Fishing<
   settings: {
     fields: {
       id: {
-        type: "number",
+        type: 'number',
         primaryKey: true,
         secure: true,
       },
       startDate: {
-        type: "date",
-        columnType: "datetime",
+        type: 'date',
+        columnType: 'datetime',
         readonly: true,
         onCreate: () => new Date(),
       },
-      endDate: "date",
-      skipDate: "date",
+      endDate: 'date',
+      skipDate: 'date',
       geom: {
-        type: "any",
+        type: 'any',
         geom: {
-          types: ["Point"],
+          types: ['Point'],
         },
       },
-      type: "string",
+      type: 'string',
       tenant: {
-        type: "number",
-        columnType: "integer",
-        columnName: "tenantId",
+        type: 'number',
+        columnType: 'integer',
+        columnName: 'tenantId',
         populate: {
-          action: "tenants.resolve",
+          action: 'tenants.resolve',
           params: {
             scope: false,
           },
         },
       },
       user: {
-        type: "number",
-        columnType: "integer",
-        columnName: "userId",
+        type: 'number',
+        columnType: 'integer',
+        columnName: 'userId',
         populate: {
-          action: "users.resolve",
+          action: 'users.resolve',
           params: {
             scope: false,
           },
@@ -103,46 +104,68 @@ export type Fishing<
     create: {
       rest: null,
     },
+    update: {
+      auth: RestrictionType.ADMIN,
+    },
   },
   hooks: {
     before: {
-      newFishing: ["beforeCreateFishing"],
-      skipFishing: ["beforeCreateFishing"],
-      list: ["beforeSelect"],
-      find: ["beforeSelect"],
-      count: ["beforeSelect"],
-      get: ["beforeSelect"],
-      all: ["beforeSelect"],
+      startFishing: ['beforeCreate'],
+      skipFishing: ['beforeCreate'],
+      list: ['beforeSelect'],
+      find: ['beforeSelect'],
+      count: ['beforeSelect'],
+      get: ['beforeSelect'],
+      all: ['beforeSelect'],
     },
   },
 })
 export default class FishTypesService extends moleculer.Service {
   @Action({
-    rest: "POST /",
+    rest: 'POST /start',
     params: {
-      type: "string",
-      coordinates: "object",
+      type: 'string',
+      coordinates: 'object',
     },
   })
-  async newFishing(ctx: Context<any>) {
-    const params = {
+  async startFishing(
+    ctx: Context<
+      { type: FishType; coordinates: { x: number; y: number } },
+      UserAuthMeta
+    >
+  ) {
+    //Single active fishing validation
+    const current = await this.currentFishing(ctx);
+    if (current) {
+      throw new moleculer.Errors.ValidationError('Fishing already started');
+    }
+
+    //Tenant tools validation. Tenant should have at least one tool.
+    const toolsCount: number = await ctx.call('tools.count');
+    if (toolsCount < 1) {
+      throw new moleculer.Errors.ValidationError('No tools in storage');
+    }
+
+    const params: Partial<Fishing> = {
       ...ctx.params,
       startDate: new Date(),
     };
     if (ctx.params.coordinates) {
-      const transform = transformation("EPSG:4326", "3346");
+      const transform = transformation('EPSG:4326', '3346');
       const transformed = transform.forward(ctx.params.coordinates);
       params.geom = coordinatesToGeometry(transformed);
     }
     return this.createEntity(ctx, params);
   }
+
   @Action({
-    rest: "POST /skip",
+    rest: 'POST /skip',
     params: {
-      type: "string",
+      type: 'string',
     },
   })
   async skipFishing(ctx: Context<any>) {
+    //To skip fishing, create new fishing and mark it as skipped.
     return this.createEntity(ctx, {
       ...ctx.params,
       skipDate: new Date(),
@@ -150,22 +173,26 @@ export default class FishTypesService extends moleculer.Service {
   }
 
   @Action({
-    rest: "PATCH /:id/finish",
-    params: {
-      id: "number|convert",
-    },
+    rest: 'PATCH /finish',
   })
-  async finishFishing(ctx: Context<any>) {
+  async finishFishing(ctx: Context<any, UserAuthMeta>) {
+    //Single active fishing validation
+    const current = await this.currentFishing(ctx);
+    if (!current) {
+      throw new moleculer.Errors.ValidationError('Fishing not started');
+    }
+    //TODO: validate if caught fish was weighed on shore
     return this.updateEntity(ctx, {
-      id: ctx.params.id,
+      id: current.id,
       endDate: new Date(),
     });
   }
 
   @Action({
-    rest: "GET /current",
+    rest: 'GET /current',
   })
-  async currentFishing(ctx: Context<{}, UserAuthMeta>) {
+  async currentFishing(ctx: Context<any, UserAuthMeta>) {
+    //Users in the same tenant do not share fishing. Each person should start and finish his/her own fishing.
     let entities = [];
     if (!!ctx.meta?.profile) {
       entities = await this.findEntities(ctx, {
@@ -185,20 +212,5 @@ export default class FishTypesService extends moleculer.Service {
       });
     }
     return entities[0];
-  }
-
-  @Method
-  async beforeCreateFishing(ctx: Context<any, UserAuthMeta>) {
-    if (
-      ![AuthUserRole.ADMIN, AuthUserRole.SUPER_ADMIN].some(
-        (role) => role === ctx.meta.authUser.type
-      )
-    ) {
-      const profile = ctx.meta.profile;
-      const userId = ctx.meta.user.id;
-      ctx.params.tenant = profile || null;
-      ctx.params.user = userId;
-    }
-    return ctx;
   }
 }
