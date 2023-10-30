@@ -123,7 +123,6 @@ export interface User {
               ctx.call("tenantUsers.find", {
                 query: {
                   user: user.id,
-                  // tenant: { $in: Object.keys(user.tenants)
                 },
                 populate: ["tenant"],
               })
@@ -366,7 +365,6 @@ export default class UsersService extends moleculer.Service {
     }>
   ) {
     const { personalCode, email, phone, firstName, lastName } = ctx.params;
-
     // it will throw error if user already exists
     const authUser: any = await ctx.call("auth.users.invite", {
       personalCode,

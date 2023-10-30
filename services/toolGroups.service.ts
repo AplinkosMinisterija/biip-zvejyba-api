@@ -148,7 +148,7 @@ export type ToolGroup<
   },
   hooks: {
     before: {
-      create: ["beforeCreate"],
+      buildTools: ["beforeCreate"],
       list: ["beforeSelect"],
       find: ["beforeSelect"],
       count: ["beforeSelect"],

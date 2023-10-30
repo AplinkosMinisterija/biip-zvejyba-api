@@ -64,13 +64,18 @@ export type Tool<
       },
       toolGroup: {
         type: "number",
-        columnType: "integer",
-        columnName: "toolGroupId",
-        populate: {
-          action: "toolGroups.resolve",
-          params: {
-            scope: false,
-          },
+        readonly: true,
+        virtual: true,
+        async populate(ctx: any, _values: any, tools: Tool[]) {
+          return Promise.all(
+            tools.map((tool: Tool) => {
+              return ctx.call("toolGroups.find", {
+                query: {
+                  $raw: `tools::jsonb @> '${tool.id}'`,
+                },
+              });
+            })
+          );
         },
       },
       tenant: {
@@ -101,7 +106,7 @@ export type Tool<
       ...COMMON_SCOPES,
     },
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
-    defaultPopulates: ["toolType"],
+    defaultPopulates: ["toolType", "toolGroup"],
   },
   hooks: {
     before: {
@@ -123,6 +128,7 @@ export default class ToolTypesService extends moleculer.Service {
       query: {
         toolGroup: { $exists: false },
       },
+      populate: ["toolGroup"],
     });
   }
 
