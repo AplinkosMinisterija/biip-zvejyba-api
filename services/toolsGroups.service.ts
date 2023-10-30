@@ -22,14 +22,6 @@ import { User } from './users.service';
 interface Fields extends CommonFields {
   id: number;
   tools: any[];
-  startDate: Date;
-  startFishing: Fishing['id'];
-  endDate: Date;
-  endFishing: Fishing['id'];
-  geom: any;
-  locationType: string;
-  locationId: number;
-  locationName: string;
   tenant: Tenant['id'];
   user: User['id'];
 }
