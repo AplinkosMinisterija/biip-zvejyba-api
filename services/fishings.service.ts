@@ -104,6 +104,9 @@ export type Fishing<
     create: {
       rest: null,
     },
+    delete: {
+      rest: null,
+    },
     update: {
       auth: RestrictionType.ADMIN,
     },
