@@ -20,9 +20,6 @@ COPY . .
 # Build the application
 RUN yarn build
 
-# Copy DB migrations
-COPY database ./dist/database
-
 # Stage 3: Final production image
 FROM base
 
@@ -36,6 +33,14 @@ RUN yarn install --immutable --immutable-cache --inline-builds --production \
 
 # Copy built artifacts from builder stage
 COPY --from=builder /app/dist/ ./dist/
+COPY --from=builder /app/database/ ./database/
+
+# Docker build args and environment variables
+ARG VERSION
+ENV VERSION=${VERSION}
+
+ARG ENVIRONMENT
+ENV ENVIRONMENT=${ENVIRONMENT}
 
 # Set default environment variables
 ENV NODE_ENV=production
@@ -46,3 +51,6 @@ EXPOSE 3000
 
 # Start the server
 CMD ["sh", "-c", "yarn start"]
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 CMD wget -qO- http://localhost:3000/zvejyba/ping || exit 1
