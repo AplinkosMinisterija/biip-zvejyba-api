@@ -1,9 +1,9 @@
-"use strict";
+'use strict';
 
-import moleculer from "moleculer";
-import { Method, Service } from "moleculer-decorators";
+import moleculer from 'moleculer';
+import { Method, Service } from 'moleculer-decorators';
 
-import DbConnection from "../mixins/database.mixin";
+import DbConnection from '../mixins/database.mixin';
 import {
   COMMON_DEFAULT_SCOPES,
   COMMON_FIELDS,
@@ -11,16 +11,17 @@ import {
   CommonFields,
   CommonPopulates,
   Table,
-} from "../types";
+} from '../types';
 
-enum Type {
-  NET = "NET",
-  CATCHER = "CATCHER",
+export enum Type {
+  NET = 'NET',
+  CATCHER = 'CATCHER',
 }
 
 interface Fields extends CommonFields {
   id: number;
   label: string;
+  type: Type;
 }
 
 interface Populates extends CommonPopulates {}
@@ -31,17 +32,17 @@ export type ToolType<
 > = Table<Fields, Populates, P, F>;
 
 @Service({
-  name: "toolTypes",
+  name: 'toolTypes',
   mixins: [DbConnection()],
   settings: {
     fields: {
       id: {
-        type: "number",
+        type: 'number',
         primaryKey: true,
         secure: true,
       },
-      label: "string|required",
-      type: "string",
+      label: 'string|required',
+      type: 'string',
       ...COMMON_FIELDS,
     },
     scopes: {
@@ -54,14 +55,14 @@ export default class ToolTypesService extends moleculer.Service {
   @Method
   async seedDB() {
     await this.createEntities(null, [
-      { label: "Statomasis tinklaitis", type: Type.NET },
-      { label: "Stintinis tinklaitis", type: Type.NET },
-      { label: "Traukiamasis tinklas", type: Type.NET },
-      { label: "Marinė gaudyklė", type: Type.CATCHER },
-      { label: "Nėginė gaudyklė", type: Type.CATCHER },
-      { label: "Stambiaakė gaudyklė", type: Type.CATCHER },
-      { label: "Stintinė gaudyklė", type: Type.CATCHER },
-      { label: "Ungurinė gaudyklė", type: Type.CATCHER },
+      { label: 'Statomasis tinklaitis', type: Type.NET },
+      { label: 'Stintinis tinklaitis', type: Type.NET },
+      { label: 'Traukiamasis tinklas', type: Type.NET },
+      { label: 'Marinė gaudyklė', type: Type.CATCHER },
+      { label: 'Nėginė gaudyklė', type: Type.CATCHER },
+      { label: 'Stambiaakė gaudyklė', type: Type.CATCHER },
+      { label: 'Stintinė gaudyklė', type: Type.CATCHER },
+      { label: 'Ungurinė gaudyklė', type: Type.CATCHER },
     ]);
   }
 }
