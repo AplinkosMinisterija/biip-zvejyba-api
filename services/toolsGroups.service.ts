@@ -1,11 +1,11 @@
-"use strict";
+'use strict';
 
-import moleculer, { Context } from "moleculer";
-import { Action, Service } from "moleculer-decorators";
-import PostgisMixin from "moleculer-postgis";
-import transformation from "transform-coordinates";
-import DbConnection from "../mixins/database.mixin";
-import ProfileMixin from "../mixins/profile.mixin";
+import moleculer, { Context } from 'moleculer';
+import { Action, Service } from 'moleculer-decorators';
+import PostgisMixin from 'moleculer-postgis';
+import transformation from 'transform-coordinates';
+import DbConnection from '../mixins/database.mixin';
+import ProfileMixin from '../mixins/profile.mixin';
 import {
   COMMON_DEFAULT_SCOPES,
   COMMON_FIELDS,
@@ -13,25 +13,25 @@ import {
   CommonFields,
   CommonPopulates,
   Table,
-} from "../types";
-import { Fishing } from "./fishings.service";
-import { coordinatesToGeometry } from "./location.service";
-import { Tenant } from "./tenants.service";
-import { User } from "./users.service";
+} from '../types';
+import { Fishing } from './fishings.service';
+import { coordinatesToGeometry } from './location.service';
+import { Tenant } from './tenants.service';
+import { User } from './users.service';
 
 interface Fields extends CommonFields {
   id: number;
   tools: any[];
   startDate: Date;
-  startFishing: Fishing["id"];
+  startFishing: Fishing['id'];
   endDate: Date;
-  endFishing: Fishing["id"];
+  endFishing: Fishing['id'];
   geom: any;
   locationType: string;
   locationId: number;
   locationName: string;
-  tenant: Tenant["id"];
-  user: User["id"];
+  tenant: Tenant['id'];
+  user: User['id'];
 }
 
 interface Populates extends CommonPopulates {}
@@ -42,7 +42,7 @@ export type ToolGroup<
 > = Table<Fields, Populates, P, F>;
 
 @Service({
-  name: "toolGroups",
+  name: 'toolsGroups',
   mixins: [
     DbConnection(),
     PostgisMixin({
@@ -53,52 +53,19 @@ export type ToolGroup<
   settings: {
     fields: {
       id: {
-        type: "number",
+        type: 'number',
         primaryKey: true,
         secure: true,
       },
-      startDate: "date",
-      startFishing: {
-        type: "number",
-        columnType: "integer",
-        columnName: "startFishingId",
-        populate: {
-          action: "fishing.resolve",
-          params: {
-            scope: false,
-          },
-        },
-      },
-      endDate: "date",
-      endFishing: {
-        type: "number",
-        columnType: "integer",
-        columnName: "endFishingId",
-        populate: {
-          action: "fishing.resolve",
-          params: {
-            scope: false,
-          },
-        },
-      },
-      geom: {
-        type: "any",
-        geom: {
-          types: ["Point"],
-        },
-      },
-      locationType: "string",
-      locationId: "number",
-      locationName: "string",
       tools: {
-        type: "array",
-        columnName: "tools",
+        type: 'array',
+        columnName: 'tools',
         default: () => [],
         async populate(ctx: Context, values: number[], entities: ToolGroup[]) {
           try {
             const toolsMap: any = {};
             for (const toolId of values) {
-              const tool = await ctx.call("tools.get", {
+              const tool = await ctx.call('tools.get', {
                 id: toolId,
                 scope: false,
               });
@@ -117,22 +84,22 @@ export type ToolGroup<
         },
       },
       tenant: {
-        type: "number",
-        columnType: "integer",
-        columnName: "tenantId",
+        type: 'number',
+        columnType: 'integer',
+        columnName: 'tenantId',
         populate: {
-          action: "tenants.resolve",
+          action: 'tenants.resolve',
           params: {
             scope: false,
           },
         },
       },
       user: {
-        type: "number",
-        columnType: "integer",
-        columnName: "userId",
+        type: 'number',
+        columnType: 'integer',
+        columnName: 'userId',
         populate: {
-          action: "users.resolve",
+          action: 'users.resolve',
           params: {
             scope: false,
           },
@@ -144,16 +111,16 @@ export type ToolGroup<
       ...COMMON_SCOPES,
     },
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
-    defaultPopulates: ["toolType"],
+    defaultPopulates: ['toolType'],
   },
   hooks: {
     before: {
-      buildTools: ["beforeCreate"],
-      list: ["beforeSelect"],
-      find: ["beforeSelect"],
-      count: ["beforeSelect"],
-      get: ["beforeSelect"],
-      all: ["beforeSelect"],
+      buildTools: ['beforeCreate'],
+      list: ['beforeSelect'],
+      find: ['beforeSelect'],
+      count: ['beforeSelect'],
+      get: ['beforeSelect'],
+      all: ['beforeSelect'],
     },
   },
   actions: {
@@ -162,14 +129,14 @@ export type ToolGroup<
     },
   },
 })
-export default class ToolGroupsService extends moleculer.Service {
+export default class ToolsGroupsService extends moleculer.Service {
   @Action({
-    rest: "GET /current",
+    rest: 'GET /current',
   })
-  async toolGroupsByLocation(ctx: Context<any>) {
-    const currentFishing: Fishing = await ctx.call("fishings.currentFishing");
+  async toolsGroupsByLocation(ctx: Context<any>) {
+    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
     if (!currentFishing) {
-      throw new moleculer.Errors.ValidationError("Fishing not started");
+      throw new moleculer.Errors.ValidationError('Fishing not started');
     }
     const locationId = JSON.parse(ctx.params.query)?.locationId;
     return this.findEntities(ctx, {
@@ -178,28 +145,28 @@ export default class ToolGroupsService extends moleculer.Service {
         endFishing: { $exists: false },
         locationId,
       },
-      populate: ["tools"],
+      populate: ['tools'],
     });
   }
 
   @Action({
-    rest: "POST /",
+    rest: 'POST /build',
     params: {
-      tools: "array",
-      coordinates: "object",
-      location: "number|convert",
-      locationName: "string",
+      tools: 'array',
+      coordinates: 'object',
+      location: 'number|convert',
+      locationName: 'string',
     },
   })
   async buildTools(ctx: Context<any>) {
     if (!ctx.params.tools?.length) {
-      throw new moleculer.Errors.ValidationError("No tools added");
+      throw new moleculer.Errors.ValidationError('No tools added');
     }
-    const currentFishing: Fishing = await ctx.call("fishings.currentFishing");
+    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
     if (!currentFishing) {
-      throw new moleculer.Errors.ValidationError("Fishing not started");
+      throw new moleculer.Errors.ValidationError('Fishing not started');
     }
-    const transform = transformation("EPSG:4326", "3346");
+    const transform = transformation('EPSG:4326', '3346');
     const transformed = transform.forward(ctx.params.coordinates);
     const geom = coordinatesToGeometry(transformed);
     const group = await this.createEntity(ctx, {
@@ -213,9 +180,9 @@ export default class ToolGroupsService extends moleculer.Service {
     });
     await Promise.all(
       group.tools?.map((id: number) =>
-        ctx.call("tools.update", {
+        ctx.call('tools.update', {
           id,
-          toolGroup: group.id,
+          toolsGroup: group.id,
         })
       )
     );
@@ -223,18 +190,18 @@ export default class ToolGroupsService extends moleculer.Service {
   }
 
   @Action({
-    rest: "PATCH /return/:id",
+    rest: 'PATCH /return/:id',
     params: {},
   })
   async removeTools(ctx: Context<any>) {
     const toolsGroup = await this.findEntity(ctx, { id: ctx.params.id });
     if (!toolsGroup) {
-      throw new moleculer.Errors.ValidationError("Invalid id");
+      throw new moleculer.Errors.ValidationError('Invalid id');
     }
 
-    const currentFishing: Fishing = await ctx.call("fishings.currentFishing");
+    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
     if (!currentFishing) {
-      throw new moleculer.Errors.ValidationError("Fishing not started");
+      throw new moleculer.Errors.ValidationError('Fishing not started');
     }
 
     const group = await this.updateEntity(ctx, {
@@ -245,9 +212,9 @@ export default class ToolGroupsService extends moleculer.Service {
 
     await Promise.all(
       group.tools?.map((id: number) =>
-        ctx.call("tools.update", {
+        ctx.call('tools.update', {
           id,
-          toolGroup: null,
+          toolsGroup: null,
         })
       )
     );
