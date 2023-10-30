@@ -68,7 +68,9 @@ export enum AuthUserRole {
         // The gateway will dynamically build the full routes from service schema.
         autoAliases: true,
 
-        aliases: {},
+        aliases: {
+          'GET /ping': 'api.ping',
+        },
 
         // Calling options. More info: https://moleculer.services/docs/0.14/moleculer-web.html#Calling-options
         callingOptions: {},
@@ -119,7 +121,7 @@ export default class ApiService extends moleculer.Service {
   async authenticate(
     ctx: Context<Record<string, unknown>, UserAuthMeta>,
     _route: any,
-    req: RequestMessage,
+    req: RequestMessage
   ): Promise<unknown> {
     const restrictionType = this.getRestrictionType(req);
 
@@ -132,7 +134,7 @@ export default class ApiService extends moleculer.Service {
     if (!auth?.startsWith?.('Bearer')) {
       throw new ApiGateway.Errors.UnAuthorizedError(
         ApiGateway.Errors.ERR_INVALID_TOKEN,
-        null,
+        null
       );
     }
 
@@ -162,7 +164,7 @@ export default class ApiService extends moleculer.Service {
   async authorize(
     ctx: Context<Record<string, unknown>, UserAuthMeta>,
     _route: any,
-    req: RequestMessage,
+    req: RequestMessage
   ): Promise<unknown> {
     const restrictionType = this.getRestrictionType(req);
 
@@ -192,7 +194,9 @@ export default class ApiService extends moleculer.Service {
     }
   }
 
-  @Action()
+  @Action({
+    auth: RestrictionType.PUBLIC
+  })
   ping() {
     return {
       timestamp: Date.now(),
