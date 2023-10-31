@@ -20,10 +20,10 @@
   resolved "https://registry.yarnpkg.com/@aplinkosministerija/biip-prettier-config/-/biip-prettier-config-1.1.0.tgz#f62b0dde76107ab3f646cce2d54d02bd783ce388"
   integrity sha512-DxWGfBY2KuK8OgP2KUb96ieGlqE5gYuxI22Yt1FfoIldlDENW5I8kXj+YFB4iG65i7e1neXPZd9RGHmxxDxxSQ==
 
-"@aplinkosministerija/eslint-config-biip@^1.0.0":
+"@aplinkosministerija/eslint-config-biip-api@^1.0.0":
   version "1.0.0"
-  resolved "https://registry.yarnpkg.com/@aplinkosministerija/eslint-config-biip/-/eslint-config-biip-1.0.0.tgz#4e3d4aba776c561ab93794e576f24f79ae077a0f"
-  integrity sha512-uBV4tEmzRQB+s9BuxjmkjQUccMmw+WBr8BeodzVE/FunWeJXMjxd86NNr94wY6j/rMeoHUbYIEE9CtkNc/FieA==
+  resolved "https://registry.yarnpkg.com/@aplinkosministerija/eslint-config-biip-api/-/eslint-config-biip-api-1.0.0.tgz#73b5bbe0293613caf9672c0a5d6f3007bed90b2f"
+  integrity sha512-pjZUTahsui7NhcDaT/n3n/6R6MGpRJUkFX14rIBLyRpNXqHHWC3ZtKU0IHorrPuceINmZE7mWvemwGAedTu+SA==
 
 "@babel/code-frame@^7.0.0", "@babel/code-frame@^7.12.13", "@babel/code-frame@^7.22.13":
   version "7.22.13"
