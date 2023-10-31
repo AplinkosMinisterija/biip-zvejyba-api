@@ -249,7 +249,7 @@ export default class ToolsGroupsService extends moleculer.Service {
   }
 
   @Action({
-    rest: 'PATCH /remove/:id',
+    rest: 'POST /remove/:id',
     params: {
       id: 'number|convert',
       coordinates: 'object',
@@ -272,23 +272,25 @@ export default class ToolsGroupsService extends moleculer.Service {
   async removeTools(ctx: Context<any>) {
     const group = await this.findEntity(ctx, { id: ctx.params.id });
     if (!group) {
-      throw new moleculer.Errors.ValidationError('Invalid id');
+      throw new moleculer.Errors.ValidationError('Invalid group');
     }
 
-    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
-    if (!currentFishing) {
-      throw new moleculer.Errors.ValidationError('Fishing not started');
+    if (!group.removeEvent) {
+      const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
+      if (!currentFishing) {
+        throw new moleculer.Errors.ValidationError('Fishing not started');
+      }
+
+      const geom = coordinatesToGeometry(ctx.params.coordinates);
+
+      await ctx.call('toolsGroupsHistories.create', {
+        type: ToolsGroupHistoryTypes.REMOVE_TOOLS,
+        geom,
+        location: ctx.params.location,
+        toolsGroup: group.id,
+        fishing: currentFishing.id,
+      });
     }
-
-    const geom = coordinatesToGeometry(ctx.params.coordinates);
-
-    await ctx.call('toolsGroups.histories.create', {
-      type: ToolsGroupHistoryTypes.REMOVE_TOOLS,
-      geom,
-      location: ctx.params.location,
-      toolsGroup: group.id,
-      fishing: currentFishing.id,
-    });
 
     return this.findEntity(ctx, { id: group.id });
   }
@@ -297,18 +299,6 @@ export default class ToolsGroupsService extends moleculer.Service {
     rest: 'GET /current',
   })
   async toolsGroupsByLocation(ctx: Context<any>) {
-    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
-    if (!currentFishing) {
-      throw new moleculer.Errors.ValidationError('Fishing not started');
-    }
-    const locationId = JSON.parse(ctx.params.query)?.locationId;
-    return this.findEntities(ctx, {
-      query: {
-        endDate: { $exists: false },
-        endFishing: { $exists: false },
-        locationId,
-      },
-      populate: ['tools'],
-    });
+    return [] as any[];
   }
 }
