@@ -179,7 +179,6 @@ export default class ToolTypesService extends moleculer.Service {
 
     const invalidTool =
       toolType.type === ToolCategory.NET ? invalidNet : invalidCatcher;
-    console.log('tool---', invalidTool, invalidNet, toolType);
 
     if (invalidTool) {
       throw new moleculer.Errors.ValidationError('Invalid tool data');

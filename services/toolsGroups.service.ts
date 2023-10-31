@@ -219,11 +219,6 @@ export default class ToolsGroupsService extends moleculer.Service {
     }
     const geom = coordinatesToGeometry(ctx.params.coordinates);
 
-    console.log(
-      'geom!!!!',
-      util.inspect(geom, { showHidden: false, depth: null, colors: true })
-    );
-
     const group = await this.createEntity(ctx, {
       ...ctx.params,
       tools: ctx.params.tools,
