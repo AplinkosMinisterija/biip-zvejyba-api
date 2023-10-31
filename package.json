@@ -26,6 +26,7 @@
   "author": "",
   "devDependencies": {
     "@aplinkosministerija/biip-prettier-config": "^1.1.0",
+    "@aplinkosministerija/eslint-config-biip": "^1.0.0",
     "@faker-js/faker": "^7.6.0",
     "@jest/globals": "^29.5.0",
     "@types/jest": "^29.5.0",
@@ -109,5 +110,8 @@
         "tsconfig": "tsconfig.json"
       }
     }
+  },
+  "eslintConfig": {
+    "extends": "@aplinkosministerija/eslint-config-biip"
   }
 }
