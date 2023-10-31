@@ -3,6 +3,7 @@
 import moleculer from 'moleculer';
 import { Service } from 'moleculer-decorators';
 
+import PostgisMixin from 'moleculer-postgis';
 import DbConnection from '../mixins/database.mixin';
 import {
   COMMON_DEFAULT_SCOPES,
@@ -51,15 +52,17 @@ export type ToolsGroupsHistory<
 > = Table<Fields, Populates, P, F>;
 
 @Service({
-  name: 'toolsGroups.histories',
+  name: 'toolsGroupsHistories',
 
   mixins: [
     DbConnection({
       collection: 'toolsGroupsHistories',
       rest: false,
     }),
+    PostgisMixin({
+      srid: 3346,
+    }),
   ],
-
   settings: {
     fields: {
       id: {

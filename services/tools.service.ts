@@ -25,12 +25,17 @@ interface Fields extends CommonFields {
   eyeSize2: number;
   netLength: number;
   toolType: ToolType['id'];
-  toolGroup: ToolsGroup['id'];
+  toolsGroup: ToolsGroup['id'];
   tenant: Tenant['id'];
   user: User['id'];
 }
 
-interface Populates extends CommonPopulates {}
+interface Populates extends CommonPopulates {
+  toolType: ToolType;
+  toolsGroup: ToolsGroup;
+  tenant: Tenant;
+  user: User;
+}
 
 export type Tool<
   P extends keyof Populates = never,
@@ -69,7 +74,7 @@ export type Tool<
         async populate(ctx: any, _values: any, tools: Tool[]) {
           return Promise.all(
             tools.map((tool: Tool) => {
-              return ctx.call('toolsGroups.find', {
+              return ctx.call('toolsGroups.findOne', {
                 query: {
                   $raw: `tools::jsonb @> '${tool.id}'`,
                 },
