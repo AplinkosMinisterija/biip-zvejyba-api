@@ -14,10 +14,9 @@ import {
   Table,
 } from '../types';
 
-import { coordinatesToGeometry } from '../modules/geometry';
-import { AuthUserRole } from './api.service';
 import transformation from 'transform-coordinates';
 import ProfileMixin from '../mixins/profile.mixin';
+import { coordinatesToGeometry } from '../modules/geometry';
 import { UserAuthMeta } from './api.service';
 import { FishType } from './fishTypes.service';
 import { Tenant } from './tenants.service';
@@ -119,9 +118,6 @@ export type Fishing<
   },
   actions: {
     create: {
-      rest: null,
-    },
-    delete: {
       rest: null,
     },
     update: {

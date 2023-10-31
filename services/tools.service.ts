@@ -14,7 +14,7 @@ import {
 } from '../types';
 import { AuthUserRole, UserAuthMeta } from './api.service';
 import { Tenant } from './tenants.service';
-import { ToolCategory, ToolType } from "./toolTypes.service";
+import { ToolCategory, ToolType } from './toolTypes.service';
 import { ToolsGroup } from './toolsGroups.service';
 import { User } from './users.service';
 
@@ -57,8 +57,8 @@ export type Tool<
         type: 'object',
         properties: {
           eyeSize: 'number|convert',
-          eyeSize2: 'number|convert',
-          netLength: 'number|convert',
+          eyeSize2: 'number|convert|optional',
+          netLength: 'number|convert|optional',
         },
       },
       toolType: {
@@ -164,7 +164,7 @@ export default class ToolTypesService extends moleculer.Service {
     }
 
     //Tool type validation
-    const toolType: ToolType = await ctx.call('toolType.get', {
+    const toolType: ToolType = await ctx.call('toolTypes.get', {
       id: ctx.params.toolType,
     });
 
@@ -175,10 +175,11 @@ export default class ToolTypesService extends moleculer.Service {
     //Tool data validation
     const invalidNet = !ctx.params.data?.eyeSize || !ctx.params.data?.netLength;
     const invalidCatcher =
-      !ctx.params.data?.eyeSize || !ctx.params.data?.eysSize2;
+      !ctx.params.data?.eyeSize || !ctx.params.data?.eyeSize2;
 
     const invalidTool =
       toolType.type === ToolCategory.NET ? invalidNet : invalidCatcher;
+    console.log('tool---', invalidTool, invalidNet, toolType);
 
     if (invalidTool) {
       throw new moleculer.Errors.ValidationError('Invalid tool data');
