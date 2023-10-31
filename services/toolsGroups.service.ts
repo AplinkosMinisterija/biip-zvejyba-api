@@ -58,18 +58,15 @@ export type ToolsGroup<
         default: () => [],
         async populate(ctx: Context, values: number[], entities: ToolsGroup[]) {
           try {
-            const toolsMap: any = {};
-            for (const toolId of values) {
-              const tool = await ctx.call('tools.get', {
-                id: toolId,
-                scope: false,
-              });
-              toolsMap[toolId] = tool;
-            }
-
+            const tools: Tool[] = await ctx.call('tools.find', {
+              query: {
+                id: { $in: values },
+              },
+              populate: ['toolType'],
+            });
             return entities?.map((entity) => {
               return entity.tools?.map((toolId) => {
-                const tool = toolsMap[toolId.toString()];
+                const tool = tools.find((t) => t.id === toolId);
                 return tool;
               });
             });
@@ -134,7 +131,7 @@ export type ToolsGroup<
       ...COMMON_SCOPES,
     },
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
-    defaultPopulates: ['toolType'],
+    defaultPopulates: ['toolType', 'tools'],
   },
   hooks: {
     before: {
