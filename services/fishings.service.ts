@@ -1,7 +1,7 @@
 'use strict';
 
 import moleculer, { Context } from 'moleculer';
-import { Action, Method, Service } from 'moleculer-decorators';
+import { Action, Service } from 'moleculer-decorators';
 import PostgisMixin from 'moleculer-postgis';
 import DbConnection from '../mixins/database.mixin';
 import {
@@ -10,13 +10,15 @@ import {
   COMMON_SCOPES,
   CommonFields,
   CommonPopulates,
+  RestrictionType,
   Table,
 } from '../types';
 
+import { coordinatesToGeometry } from '../modules/geometry';
+import { AuthUserRole } from './api.service';
 import transformation from 'transform-coordinates';
 import ProfileMixin from '../mixins/profile.mixin';
-import { coordinatesToGeometry } from '../modules/geometry';
-import { AuthUserRole, UserAuthMeta } from './api.service';
+import { UserAuthMeta } from './api.service';
 import { FishType } from './fishTypes.service';
 import { Tenant } from './tenants.service';
 import { User } from './users.service';
@@ -119,11 +121,17 @@ export type Fishing<
     create: {
       rest: null,
     },
+    delete: {
+      rest: null,
+    },
+    update: {
+      auth: RestrictionType.ADMIN,
+    },
   },
   hooks: {
     before: {
-      newFishing: ['beforeCreateFishing'],
-      skipFishing: ['beforeCreateFishing'],
+      startFishing: ['beforeCreate'],
+      skipFishing: ['beforeCreate'],
       list: ['beforeSelect'],
       find: ['beforeSelect'],
       count: ['beforeSelect'],
@@ -134,14 +142,31 @@ export type Fishing<
 })
 export default class FishTypesService extends moleculer.Service {
   @Action({
-    rest: 'POST /',
+    rest: 'POST /start',
     params: {
       type: 'string',
       coordinates: 'object',
     },
   })
-  async newFishing(ctx: Context<any>) {
-    const params = {
+  async startFishing(
+    ctx: Context<
+      { type: FishType; coordinates: { x: number; y: number } },
+      UserAuthMeta
+    >
+  ) {
+    //Single active fishing validation
+    const current = await this.currentFishing(ctx);
+    if (current) {
+      throw new moleculer.Errors.ValidationError('Fishing already started');
+    }
+
+    //Tenant tools validation. Tenant should have at least one tool.
+    const toolsCount: number = await ctx.call('tools.count');
+    if (toolsCount < 1) {
+      throw new moleculer.Errors.ValidationError('No tools in storage');
+    }
+
+    const params: Partial<Fishing> = {
       ...ctx.params,
       startDate: new Date(),
     };
@@ -152,6 +177,7 @@ export default class FishTypesService extends moleculer.Service {
     }
     return this.createEntity(ctx, params);
   }
+
   @Action({
     rest: 'POST /skip',
     params: {
@@ -159,6 +185,7 @@ export default class FishTypesService extends moleculer.Service {
     },
   })
   async skipFishing(ctx: Context<any>) {
+    //To skip fishing, create new fishing and mark it as skipped.
     return this.createEntity(ctx, {
       ...ctx.params,
       skipDate: new Date(),
@@ -166,14 +193,17 @@ export default class FishTypesService extends moleculer.Service {
   }
 
   @Action({
-    rest: 'PATCH /:id/finish',
-    params: {
-      id: 'number|convert',
-    },
+    rest: 'PATCH /finish',
   })
-  async finishFishing(ctx: Context<any>) {
+  async finishFishing(ctx: Context<any, UserAuthMeta>) {
+    //Single active fishing validation
+    const current = await this.currentFishing(ctx);
+    if (!current) {
+      throw new moleculer.Errors.ValidationError('Fishing not started');
+    }
+    //TODO: validate if caught fish was weighed on shore
     return this.updateEntity(ctx, {
-      id: ctx.params.id,
+      id: current.id,
       endDate: new Date(),
     });
   }
@@ -181,7 +211,8 @@ export default class FishTypesService extends moleculer.Service {
   @Action({
     rest: 'GET /current',
   })
-  async currentFishing(ctx: Context<{}, UserAuthMeta>) {
+  async currentFishing(ctx: Context<any, UserAuthMeta>) {
+    //Users in the same tenant do not share fishing. Each person should start and finish his/her own fishing.
     let entities = [];
     if (!!ctx.meta?.profile) {
       entities = await this.findEntities(ctx, {
@@ -201,20 +232,5 @@ export default class FishTypesService extends moleculer.Service {
       });
     }
     return entities[0];
-  }
-
-  @Method
-  async beforeCreateFishing(ctx: Context<any, UserAuthMeta>) {
-    if (
-      ![AuthUserRole.ADMIN, AuthUserRole.SUPER_ADMIN].some(
-        (role) => role === ctx.meta.authUser.type
-      )
-    ) {
-      const profile = ctx.meta.profile;
-      const userId = ctx.meta.user.id;
-      ctx.params.tenant = profile || null;
-      ctx.params.user = userId;
-    }
-    return ctx;
   }
 }
