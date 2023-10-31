@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "My Moleculer-based microservices project",
   "private": true,
+  "prettier": "@aplinkosministerija/biip-prettier-config",
   "scripts": {
     "db:migrate": "knex migrate:latest",
     "build": "tsc --build tsconfig.json",
@@ -23,6 +24,7 @@
   ],
   "author": "",
   "devDependencies": {
+    "@aplinkosministerija/biip-prettier-config": "^1.1.0",
     "@faker-js/faker": "^7.6.0",
     "@jest/globals": "^29.5.0",
     "@types/jest": "^29.5.0",
