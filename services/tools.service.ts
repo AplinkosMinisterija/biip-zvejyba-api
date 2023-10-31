@@ -77,13 +77,15 @@ export type Tool<
         readonly: true,
         virtual: true,
         async populate(ctx: any, _values: any, tools: Tool[]) {
+          //TODO: reikia geresnio sprendimo, nes toolGroups'u laikui begant dauges
           return Promise.all(
-            tools.map((tool: Tool) => {
-              return ctx.call('toolsGroups.findOne', {
+            tools.map(async (tool: Tool) => {
+              const toolGroups = await ctx.call('toolsGroups.find', {
                 query: {
                   $raw: `tools::jsonb @> '${tool.id}'`,
                 },
               });
+              return toolGroups.find((group: ToolsGroup) => !group.removeEvent);
             })
           );
         },
@@ -116,13 +118,13 @@ export type Tool<
       ...COMMON_SCOPES,
     },
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
-    defaultPopulates: ['toolType'],
+    defaultPopulates: ['toolType', 'toolsGroup'],
   },
   hooks: {
     before: {
       create: ['beforeCreateOrUpdate', 'beforeCreate'],
       update: ['beforeCreateOrUpdate'],
-      delete: ['beforeDelete'],
+      remove: ['beforeDelete'],
       availableTools: ['beforeSelect'],
       list: ['beforeSelect'],
       find: ['beforeSelect'],
@@ -197,15 +199,18 @@ export default class ToolTypesService extends moleculer.Service {
         id: ctx.params.id,
         query: {
           tenant: ctx.meta.profile ? ctx.meta.profile : { $exists: false },
-          user: ctx.meta.profile ? { $exists: true } : ctx.params.user.id,
+          user: ctx.meta.profile ? { $exists: true } : ctx.meta.user.id,
         },
         populate: ['toolsGroup'],
       });
       if (!tool) {
         throw new moleculer.Errors.ValidationError('Cannot delete tool');
       }
+      //validate if tool is in the water
+      if(tool.toolsGroup) {
+        throw new moleculer.Errors.ValidationError('Tools is in use');
+      }
     }
 
-    //TODO: should not delete tool in the water
   }
 }

@@ -198,7 +198,7 @@ export default class ToolsGroupsService extends moleculer.Service {
       (tool) => tool.toolsGroup && !tool.toolsGroup.removeEvent
     );
     if (builtTools.length) {
-      throw new moleculer.Errors.ValidationError('Tools already in the water');
+      throw new moleculer.Errors.ValidationError('Tools is in use');
     }
     // validate if multiple tools connected
     if (ctx.params.tools.length > 1) {
