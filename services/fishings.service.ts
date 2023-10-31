@@ -92,6 +92,22 @@ export type Fishing<
           },
         },
       },
+      toolsGroupsHistories: {
+        type: 'array',
+        readonly: true,
+        virtual: true,
+        async populate(ctx: any, _values: any, fishings: Fishing[]) {
+          return Promise.all(
+            fishings.map((fishing: any) => {
+              return ctx.call('toolsGroupsHistories.find', {
+                query: {
+                  fishing: fishing.id,
+                },
+              });
+            })
+          );
+        },
+      },
       ...COMMON_FIELDS,
     },
     scopes: {

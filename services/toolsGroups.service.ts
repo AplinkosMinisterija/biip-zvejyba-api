@@ -291,11 +291,4 @@ export default class ToolsGroupsService extends moleculer.Service {
 
     return this.findEntity(ctx, { id: group.id });
   }
-
-  @Action({
-    rest: 'GET /current',
-  })
-  async toolsGroupsByLocation(ctx: Context<any>) {
-    return [] as any[];
-  }
 }
