@@ -5,11 +5,11 @@ import { Action, Method, Service } from 'moleculer-decorators';
 
 import DbConnection from '../mixins/database.mixin';
 import {
+  CommonFields,
+  CommonPopulates,
   COMMON_DEFAULT_SCOPES,
   COMMON_FIELDS,
   COMMON_SCOPES,
-  CommonFields,
-  CommonPopulates,
   IMAGE_TYPES,
   RestrictionType,
   Table,
@@ -42,6 +42,10 @@ export type FishType<
       name: 'string|required',
       photo: {
         type: 'object',
+        properties: {
+          url: 'string|required',
+          name: 'string',
+        },
         columnType: 'json',
       },
       ...COMMON_FIELDS,
@@ -50,7 +54,6 @@ export type FishType<
     scopes: {
       ...COMMON_SCOPES,
     },
-
     actions: {
       remove: {
         types: [RestrictionType.ADMIN],

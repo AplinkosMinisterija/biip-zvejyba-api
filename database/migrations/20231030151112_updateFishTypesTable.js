@@ -16,6 +16,6 @@ exports.up = function (knex) {
 exports.down = function (knex) {
   return knex.schema.alterTable('fishTypes', (table) => {
     table.dropColumn('photo');
-    table.dropColumn('name');
+    table.renameColumn('name', 'label');
   });
 };
