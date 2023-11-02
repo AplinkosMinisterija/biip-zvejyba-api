@@ -5,11 +5,11 @@ import { Action, Method, Service } from 'moleculer-decorators';
 
 import DbConnection from '../mixins/database.mixin';
 import {
-  CommonFields,
-  CommonPopulates,
   COMMON_DEFAULT_SCOPES,
   COMMON_FIELDS,
   COMMON_SCOPES,
+  CommonFields,
+  CommonPopulates,
   IMAGE_TYPES,
   RestrictionType,
   Table,
@@ -19,7 +19,7 @@ import { UserAuthMeta } from './api.service';
 
 interface Fields extends CommonFields {
   id: number;
-  name: string;
+  label: string;
 }
 
 interface Populates extends CommonPopulates {}
@@ -30,8 +30,15 @@ export type FishType<
 > = Table<Fields, Populates, P, F>;
 
 @Service({
-  name: 'fishTypes',
-  mixins: [DbConnection()],
+  label: 'fishTypes',
+  mixins: [
+    DbConnection({
+      collection: 'fishTypes',
+      createActions: {
+        createMany: false,
+      },
+    }),
+  ],
   settings: {
     fields: {
       id: {
@@ -39,12 +46,12 @@ export type FishType<
         primaryKey: true,
         secure: true,
       },
-      name: 'string|required',
+      label: 'string|required',
       photo: {
         type: 'object',
         properties: {
           url: 'string|required',
-          name: 'string',
+          label: 'string',
         },
         columnType: 'json',
       },
@@ -95,32 +102,32 @@ export default class FishTypesService extends moleculer.Service {
   @Method
   async seedDB() {
     await this.createEntities(null, [
-      { name: 'baltieji amūrai' },
-      { name: 'karosai, auksiniai' },
-      { name: 'lynai' },
-      { name: 'karosai, sidabriniai' },
-      { name: 'lydekos' },
-      { name: 'sykai' },
-      { name: 'karpiai' },
-      { name: 'seliavos' },
-      { name: 'plačiakačiai' },
-      { name: 'sterkai' },
-      { name: 'karšiai' },
-      { name: 'šamai' },
-      { name: 'vaivorykštiniai upėtakiai' },
-      { name: 'unguriai' },
-      { name: 'vėgėlės' },
-      { name: 'vėžiai, plačiažnypliai' },
-      { name: 'margieji plačiakačiai' },
-      { name: 'lašišos' },
-      { name: 'šlakiai' },
-      { name: 'margieji upėtakiai' },
-      { name: 'aštriašnipiai eršketai' },
-      { name: 'kiršliai' },
-      { name: 'ūsoriai' },
-      { name: 'skersnukiai' },
-      { name: 'plačiakakčiai' },
-      { name: 'margieji plačiakakčiai' },
+      { label: 'baltieji amūrai' },
+      { label: 'karosai, auksiniai' },
+      { label: 'lynai' },
+      { label: 'karosai, sidabriniai' },
+      { label: 'lydekos' },
+      { label: 'sykai' },
+      { label: 'karpiai' },
+      { label: 'seliavos' },
+      { label: 'plačiakačiai' },
+      { label: 'sterkai' },
+      { label: 'karšiai' },
+      { label: 'šamai' },
+      { label: 'vaivorykštiniai upėtakiai' },
+      { label: 'unguriai' },
+      { label: 'vėgėlės' },
+      { label: 'vėžiai, plačiažnypliai' },
+      { label: 'margieji plačiakačiai' },
+      { label: 'lašišos' },
+      { label: 'šlakiai' },
+      { label: 'margieji upėtakiai' },
+      { label: 'aštriašnipiai eršketai' },
+      { label: 'kiršliai' },
+      { label: 'ūsoriai' },
+      { label: 'skersnukiai' },
+      { label: 'plačiakakčiai' },
+      { label: 'margieji plačiakakčiai' },
     ]);
   }
 }

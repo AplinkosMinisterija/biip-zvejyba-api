@@ -5,7 +5,6 @@
 exports.up = function (knex) {
   return knex.schema.alterTable('fishTypes', (table) => {
     table.jsonb('photo');
-    table.renameColumn('label', 'name');
   });
 };
 
@@ -16,6 +15,5 @@ exports.up = function (knex) {
 exports.down = function (knex) {
   return knex.schema.alterTable('fishTypes', (table) => {
     table.dropColumn('photo');
-    table.renameColumn('name', 'label');
   });
 };
