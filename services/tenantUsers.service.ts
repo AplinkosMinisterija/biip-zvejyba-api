@@ -2,6 +2,7 @@
 
 import moleculer, { Context } from 'moleculer';
 import { Action, Event, Method, Service } from 'moleculer-decorators';
+import ProfileMixin from '../mixins/profile.mixin';
 import {
   COMMON_DEFAULT_SCOPES,
   COMMON_FIELDS,
@@ -11,10 +12,11 @@ import {
   RestrictionType,
   Table,
 } from '../types';
-import { AuthUserRole, UserAuthMeta } from './api.service';
+import { UserAuthMeta } from './api.service';
 import { User, UserType } from './users.service';
 
 import DbConnection from '../mixins/database.mixin';
+import { validateCanEditTenantUser } from '../utils';
 import { Tenant } from './tenants.service';
 
 export enum AuthGroupRole {
@@ -42,7 +44,7 @@ interface Populates extends CommonPopulates {
 
 export type TenantUser<
   P extends keyof Populates = never,
-  F extends keyof (Fields & Populates) = keyof Fields,
+  F extends keyof (Fields & Populates) = keyof Fields
 > = Table<Fields, Populates, P, F>;
 
 @Service({
@@ -56,6 +58,7 @@ export type TenantUser<
         createMany: false,
       },
     }),
+    ProfileMixin,
   ],
 
   settings: {
@@ -122,6 +125,11 @@ export type TenantUser<
   hooks: {
     before: {
       create: ['beforeCreate'],
+      list: ['beforeSelect'],
+      find: ['beforeSelect'],
+      count: ['beforeSelect'],
+      get: ['beforeSelect'],
+      all: ['beforeSelect'],
     },
   },
 
@@ -131,7 +139,7 @@ export type TenantUser<
       auth: RestrictionType.DEFAULT,
     },
     count: {},
-    get: {},
+    get: { auth: RestrictionType.DEFAULT },
     create: {
       auth: RestrictionType.ADMIN,
     },
@@ -170,7 +178,7 @@ export default class TenantUsersService extends moleculer.Service {
         type: 'enum',
         values: Object.values(TenantUserRole),
       },
-      tenant: 'number',
+      tenant: 'number|optional',
       email: {
         type: 'string',
         optional: true,
@@ -189,39 +197,29 @@ export default class TenantUsersService extends moleculer.Service {
         phone: string;
       },
       UserAuthMeta
-    >,
+    >
   ) {
-    const {
-      firstName,
-      lastName,
-      personalCode,
-      role,
-      email,
-      phone,
-      tenant: tenantId,
-    } = ctx.params;
-    // OWNER and USER_ADMIN can invite users
-    if (
-      ctx.meta.authUser?.type === AuthUserRole.USER &&
-      ![TenantUserRole.OWNER, TenantUserRole.USER_ADMIN].includes(
-        ctx.meta.user.tenants[tenantId],
-      )
-    ) {
-      throw new moleculer.Errors.MoleculerClientError(
-        'Only OWNER and USER_ADMIN can add users to tenant.',
-        401,
-        'NO_RIGHTS',
-      );
-    }
+    validateCanEditTenantUser(
+      ctx,
+      'Only OWNER and USER_ADMIN can add users to tenant.'
+    );
 
-    const tenant: Tenant = await ctx.call('tenants.resolve', { id: tenantId });
+    const { firstName, lastName, personalCode, role, email, phone, tenant } =
+      ctx.params;
+    // OWNER and USER_ADMIN can invite users
+
+    const tenantId = ctx.meta.profile || tenant;
+
+    const currentTenant: Tenant = await ctx.call('tenants.resolve', {
+      id: tenantId,
+    });
 
     const authRole =
       role === TenantUserRole.OWNER ? AuthGroupRole.ADMIN : AuthGroupRole.USER;
 
     const inviteData: any = {
       personalCode,
-      companyId: tenant.authGroup,
+      companyId: currentTenant.authGroup,
       role: authRole,
     };
 
@@ -249,7 +247,7 @@ export default class TenantUsersService extends moleculer.Service {
     }
 
     return this.createEntity(ctx, {
-      tenant: tenant.id,
+      tenant: currentTenant.id,
       user: user.id,
       role,
     });
@@ -306,7 +304,7 @@ export default class TenantUsersService extends moleculer.Service {
       throw new moleculer.Errors.MoleculerClientError(
         'Already exists',
         422,
-        'ALREADY_EXISTS',
+        'ALREADY_EXISTS'
       );
     }
 
