@@ -1,35 +1,21 @@
-"use strict";
+'use strict';
 
-import { find, isEmpty, map } from "lodash";
-import moleculer, { Context } from "moleculer";
-import { Action, Method, Service } from "moleculer-decorators";
-import transformation from "transform-coordinates";
-import { GeomFeatureCollection } from "../modules/geometry";
+import { find, isEmpty, map } from 'lodash';
+import moleculer, { Context } from 'moleculer';
+import { Action, Method, Service } from 'moleculer-decorators';
+import {
+  GeomFeatureCollection,
+  coordinatesToGeometry,
+} from '../modules/geometry';
 import {
   CommonFields,
   CommonPopulates,
   LocationType,
   RestrictionType,
   Table,
-} from "../types";
-import { UserAuthMeta } from "./api.service";
+} from '../types';
+import { UserAuthMeta } from './api.service';
 
-export function coordinatesToGeometry(coordinates: { x: number; y: number }) {
-  const transform = transformation("EPSG:4326", "3346");
-  const transformed = transform.forward(coordinates);
-  return {
-    type: "FeatureCollection",
-    features: [
-      {
-        type: "Feature",
-        geometry: {
-          type: "Point",
-          coordinates: [transformed.x, transformed.y],
-        },
-      },
-    ],
-  };
-}
 const getBox = (geom: GeomFeatureCollection, tolerance: number = 0.001) => {
   const coordinates: any = geom.features[0].geometry.coordinates;
   const topLeft = {
@@ -57,17 +43,17 @@ export type Location<
 > = Table<Fields, Populates, P, F>;
 
 @Service({
-  name: "locations",
+  name: 'locations',
 })
 export default class LocationsService extends moleculer.Service {
   @Action({
-    rest: "GET /",
+    rest: 'GET /',
     auth: RestrictionType.PUBLIC,
     cache: false,
   })
   async search(ctx: Context<any, UserAuthMeta>) {
     if (!ctx.params.query?.coordinates) {
-      throw new moleculer.Errors.ValidationError("Invalid coordinates");
+      throw new moleculer.Errors.ValidationError('Invalid coordinates');
     }
     const geom = coordinatesToGeometry(
       JSON.parse(ctx.params.query?.coordinates)
@@ -83,7 +69,7 @@ export default class LocationsService extends moleculer.Service {
   @Action()
   async getLocationsByCadastralIds(ctx: Context<{ locations: string[] }>) {
     const promises = map(ctx.params.locations, (location) =>
-      ctx.call("locations.search", { search: location })
+      ctx.call('locations.search', { search: location })
     );
 
     const result: any = await Promise.all(promises);
@@ -98,7 +84,7 @@ export default class LocationsService extends moleculer.Service {
   }
 
   @Action({
-    rest: "GET /municipalities",
+    rest: 'GET /municipalities',
     cache: {
       ttl: 24 * 60 * 60,
     },
@@ -107,9 +93,9 @@ export default class LocationsService extends moleculer.Service {
     const res = await fetch(
       `${process.env.GEO_SERVER}/qgisserver/uetk_zuvinimas?SERVICE=WFS&REQUEST=GetFeature&TYPENAME=municipalities&OUTPUTFORMAT=application/json&propertyName=pavadinimas,kodas`,
       {
-        method: "GET",
+        method: 'GET',
         headers: {
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
         },
       }
     );
@@ -135,7 +121,7 @@ export default class LocationsService extends moleculer.Service {
 
   @Action({
     params: {
-      id: "number",
+      id: 'number',
     },
   })
   async findMunicipalityById(ctx: Context<{ id: number }>) {
@@ -153,7 +139,7 @@ export default class LocationsService extends moleculer.Service {
         const rivers = `${process.env.GEO_SERVER}/qgisserver/uetk_zuvinimas?SERVICE=WFS&REQUEST=GetFeature&TYPENAME=rivers&OUTPUTFORMAT=application/json&GEOMETRYNAME=centroid&BBOX=${box}`;
         const riversData = await fetch(rivers, {
           headers: {
-            "Content-Type": "application/json",
+            'Content-Type': 'application/json',
           },
         });
         const riversResult = await riversData.json();
@@ -161,7 +147,7 @@ export default class LocationsService extends moleculer.Service {
         const lakes = `${process.env.GEO_SERVER}/qgisserver/uetk_zuvinimas?SERVICE=WFS&REQUEST=GetFeature&TYPENAME=lakes_ponds&OUTPUTFORMAT=application/json&GEOMETRYNAME=centroid&BBOX=${box}`;
         const lakesData = await fetch(lakes, {
           headers: {
-            "Content-Type": "application/json",
+            'Content-Type': 'application/json',
           },
         });
         const lakesResult = await lakesData.json();
@@ -180,7 +166,7 @@ export default class LocationsService extends moleculer.Service {
         throw new moleculer.Errors.ValidationError(err.message);
       }
     } else {
-      throw new moleculer.Errors.ValidationError("Invalid geometry");
+      throw new moleculer.Errors.ValidationError('Invalid geometry');
     }
   }
 
@@ -192,7 +178,7 @@ export default class LocationsService extends moleculer.Service {
         const bars = `${process.env.GEO_SERVER}/qgisserver/zuvinimas_barai?SERVICE=WFS&REQUEST=GetFeature&OUTPUTFORMAT=application/json&TYPENAME=fishing_sections&SRSNAME=3346&BBOX=${box},urn:ogc:def:crs:3346`;
         const barsData = await fetch(bars, {
           headers: {
-            "Content-Type": "application/json",
+            'Content-Type': 'application/json',
           },
         });
         const data = await barsData.json();
@@ -211,7 +197,7 @@ export default class LocationsService extends moleculer.Service {
         throw new moleculer.Errors.ValidationError(err.message);
       }
     } else {
-      throw new moleculer.Errors.ValidationError("Invalid geometry");
+      throw new moleculer.Errors.ValidationError('Invalid geometry');
     }
   }
 
@@ -221,7 +207,7 @@ export default class LocationsService extends moleculer.Service {
     const endPoint = `${process.env.GEO_SERVER}/qgisserver/uetk_zuvinimas?SERVICE=WFS&REQUEST=GetFeature&TYPENAME=municipalities&OUTPUTFORMAT=application/json&BBOX=${box}`;
     const data = await fetch(endPoint, {
       headers: {
-        "Content-Type": "application/json",
+        'Content-Type': 'application/json',
       },
     });
     const { features } = await data.json();

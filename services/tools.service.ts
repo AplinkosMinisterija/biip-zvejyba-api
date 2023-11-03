@@ -1,9 +1,9 @@
-"use strict";
+'use strict';
 
-import moleculer, { Context } from "moleculer";
-import { Action, Method, Service } from "moleculer-decorators";
-import DbConnection from "../mixins/database.mixin";
-import ProfileMixin from "../mixins/profile.mixin";
+import moleculer, { Context } from 'moleculer';
+import { Action, Method, Service } from 'moleculer-decorators';
+import DbConnection from '../mixins/database.mixin';
+import ProfileMixin from '../mixins/profile.mixin';
 import {
   COMMON_DEFAULT_SCOPES,
   COMMON_FIELDS,
@@ -11,12 +11,12 @@ import {
   CommonFields,
   CommonPopulates,
   Table,
-} from "../types";
-import { TenantUser } from "./tenantUsers.service";
-import { Tenant } from "./tenants.service";
-import { ToolGroup } from "./toolGroups.service";
-import { ToolType } from "./toolTypes.service";
-import { User } from "./users.service";
+} from '../types';
+import { AuthUserRole, UserAuthMeta } from './api.service';
+import { Tenant } from './tenants.service';
+import { ToolCategory, ToolType } from './toolTypes.service';
+import { ToolsGroup } from './toolsGroups.service';
+import { User } from './users.service';
 
 interface Fields extends CommonFields {
   id: number;
@@ -24,13 +24,18 @@ interface Fields extends CommonFields {
   eyeSize: number;
   eyeSize2: number;
   netLength: number;
-  toolType: ToolType["id"];
-  toolGroup: ToolGroup["id"];
-  tenant: Tenant["id"];
-  user: User["id"];
+  toolType: ToolType['id'];
+  toolsGroup: ToolsGroup['id'];
+  tenant: Tenant['id'];
+  user: User['id'];
 }
 
-interface Populates extends CommonPopulates {}
+interface Populates extends CommonPopulates {
+  toolType: ToolType;
+  toolsGroup: ToolsGroup;
+  tenant: Tenant;
+  user: User;
+}
 
 export type Tool<
   P extends keyof Populates = never,
@@ -38,63 +43,70 @@ export type Tool<
 > = Table<Fields, Populates, P, F>;
 
 @Service({
-  name: "tools",
+  name: 'tools',
   mixins: [DbConnection(), ProfileMixin],
   settings: {
     fields: {
       id: {
-        type: "number",
+        type: 'number',
         primaryKey: true,
         secure: true,
       },
-      sealNr: "string",
-      eyeSize: "number|convert",
-      eyeSize2: "number|convert",
-      netLength: "number|convert",
+      sealNr: 'string',
+      data: {
+        type: 'object',
+        properties: {
+          eyeSize: 'number|convert',
+          eyeSize2: 'number|convert|optional',
+          netLength: 'number|convert|optional',
+        },
+      },
       toolType: {
-        type: "number",
-        columnType: "integer",
-        columnName: "toolTypeId",
+        type: 'number',
+        columnType: 'integer',
+        columnName: 'toolTypeId',
         populate: {
-          action: "toolTypes.resolve",
+          action: 'toolTypes.resolve',
           params: {
             scope: false,
           },
         },
       },
-      toolGroup: {
-        type: "number",
+      toolsGroup: {
+        type: 'number',
         readonly: true,
         virtual: true,
         async populate(ctx: any, _values: any, tools: Tool[]) {
+          //TODO: reikia geresnio sprendimo, nes toolGroups'u laikui begant dauges
           return Promise.all(
-            tools.map((tool: Tool) => {
-              return ctx.call("toolGroups.find", {
+            tools.map(async (tool: Tool) => {
+              const toolGroups = await ctx.call('toolsGroups.find', {
                 query: {
                   $raw: `tools::jsonb @> '${tool.id}'`,
                 },
               });
+              return toolGroups.find((group: ToolsGroup) => !group.removeEvent);
             })
           );
         },
       },
       tenant: {
-        type: "number",
-        columnType: "integer",
-        columnName: "tenantId",
+        type: 'number',
+        columnType: 'integer',
+        columnName: 'tenantId',
         populate: {
-          action: "tenants.resolve",
+          action: 'tenants.resolve',
           params: {
             scope: false,
           },
         },
       },
       user: {
-        type: "number",
-        columnType: "integer",
-        columnName: "userId",
+        type: 'number',
+        columnType: 'integer',
+        columnName: 'userId',
         populate: {
-          action: "users.resolve",
+          action: 'users.resolve',
           params: {
             scope: false,
           },
@@ -106,45 +118,99 @@ export type Tool<
       ...COMMON_SCOPES,
     },
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
-    defaultPopulates: ["toolType", "toolGroup"],
+    defaultPopulates: ['toolType', 'toolsGroup'],
   },
   hooks: {
     before: {
-      create: ["beforeCreate", "validateTool"],
-      list: ["beforeSelect"],
-      find: ["beforeSelect"],
-      count: ["beforeSelect"],
-      get: ["beforeSelect"],
-      all: ["beforeSelect"],
+      create: ['beforeCreateOrUpdate', 'beforeCreate'],
+      update: ['beforeCreateOrUpdate'],
+      remove: ['beforeDelete'],
+      availableTools: ['beforeSelect'],
+      list: ['beforeSelect'],
+      find: ['beforeSelect'],
+      count: ['beforeSelect'],
+      get: ['beforeSelect'],
+      all: ['beforeSelect'],
     },
   },
 })
 export default class ToolTypesService extends moleculer.Service {
   @Action({
-    rest: "GET /available",
+    rest: 'GET /available',
   })
-  async availableTools(ctx: Context<any>) {
-    return this.findEntities(ctx, {
-      query: {
-        toolGroup: { $exists: false },
-      },
-      populate: ["toolGroup"],
+  async availableTools(ctx: Context<any, UserAuthMeta>) {
+    const tools: Tool[] = await this.findEntities(ctx, {
+      ...ctx.params,
+      populate: ['toolsGroup'],
     });
+    return tools?.filter((tool) => !tool.toolsGroup);
   }
 
   @Method
-  async validateTool(ctx: Context<any>) {
-    const existing: TenantUser[] = await this.findEntities(null, {
+  async beforeCreateOrUpdate(ctx: Context<any>) {
+    const existing: Tool[] = await this.findEntities(null, {
       query: {
         sealNr: ctx.params.sealNr,
       },
     });
-    if (existing?.length) {
-      throw new moleculer.Errors.MoleculerClientError(
-        "Already exists",
-        422,
-        "ALREADY_EXISTS"
+
+    //Seal number validation
+    if (
+      ctx.params.id
+        ? existing?.some((tool) => tool.id !== ctx.params.id)
+        : existing.length
+    ) {
+      throw new moleculer.Errors.ValidationError(
+        'Tool with this seal number already exists'
       );
     }
+
+    //Tool type validation
+    const toolType: ToolType = await ctx.call('toolTypes.get', {
+      id: ctx.params.toolType,
+    });
+
+    if (!toolType) {
+      throw new moleculer.Errors.ValidationError('Invalid tool type');
+    }
+
+    //Tool data validation
+    const invalidNet = !ctx.params.data?.eyeSize || !ctx.params.data?.netLength;
+    const invalidCatcher =
+      !ctx.params.data?.eyeSize || !ctx.params.data?.eyeSize2;
+
+    const invalidTool =
+      toolType.type === ToolCategory.NET ? invalidNet : invalidCatcher;
+
+    if (invalidTool) {
+      throw new moleculer.Errors.ValidationError('Invalid tool data');
+    }
+  }
+
+  @Method
+  async beforeDelete(ctx: Context<any, UserAuthMeta>) {
+    //Tool ownership validation
+    if (
+      ![AuthUserRole.SUPER_ADMIN, AuthUserRole.ADMIN].some(
+        (r) => r === ctx.meta.authUser.type
+      )
+    ) {
+      const tool = await this.findEntity(ctx, {
+        id: ctx.params.id,
+        query: {
+          tenant: ctx.meta.profile ? ctx.meta.profile : { $exists: false },
+          user: ctx.meta.profile ? { $exists: true } : ctx.meta.user.id,
+        },
+        populate: ['toolsGroup'],
+      });
+      if (!tool) {
+        throw new moleculer.Errors.ValidationError('Cannot delete tool');
+      }
+      //validate if tool is in the water
+      if(tool.toolsGroup) {
+        throw new moleculer.Errors.ValidationError('Tools is in use');
+      }
+    }
+
   }
 }
