@@ -26,7 +26,7 @@ interface Populates extends CommonPopulates {}
 
 export type FishType<
   P extends keyof Populates = never,
-  F extends keyof (Fields & Populates) = keyof Fields
+  F extends keyof (Fields & Populates) = keyof Fields,
 > = Table<Fields, Populates, P, F>;
 
 @Service({
@@ -51,7 +51,7 @@ export type FishType<
         type: 'object',
         properties: {
           url: 'string|required',
-          label: 'string',
+          name: 'string',
         },
         columnType: 'json',
       },
