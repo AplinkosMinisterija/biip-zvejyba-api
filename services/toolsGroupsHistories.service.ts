@@ -34,12 +34,7 @@ interface Fields extends CommonFields {
       name: string;
     };
   };
-  data: {
-    fish: Array<{
-      type: number;
-      weight: number;
-    }>;
-  };
+  data: any;
   fishing: Fishing['id'];
   toolsGroup: ToolsGroup['id'];
 }
@@ -48,7 +43,7 @@ interface Populates extends CommonPopulates {}
 
 export type ToolsGroupsHistory<
   P extends keyof Populates = never,
-  F extends keyof (Fields & Populates) = keyof Fields
+  F extends keyof (Fields & Populates) = keyof Fields,
 > = Table<Fields, Populates, P, F>;
 
 @Service({
@@ -95,10 +90,7 @@ export type ToolsGroupsHistory<
           },
         },
       },
-      data: {
-        columnType: 'object',
-        properties: {},
-      },
+      data: 'any', // Type is not clear yet
       toolsGroup: {
         type: 'number',
         columnType: 'integer',

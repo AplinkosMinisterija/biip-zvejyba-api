@@ -14,7 +14,6 @@ import {
   Table,
 } from '../types';
 
-import transformation from 'transform-coordinates';
 import ProfileMixin from '../mixins/profile.mixin';
 import { coordinatesToGeometry } from '../modules/geometry';
 import { UserAuthMeta } from './api.service';
@@ -37,7 +36,7 @@ interface Populates extends CommonPopulates {}
 
 export type Fishing<
   P extends keyof Populates = never,
-  F extends keyof (Fields & Populates) = keyof Fields
+  F extends keyof (Fields & Populates) = keyof Fields,
 > = Table<Fields, Populates, P, F>;
 
 @Service({
@@ -105,7 +104,7 @@ export type Fishing<
                   fishing: fishing.id,
                 },
               });
-            })
+            }),
           );
         },
       },
@@ -145,10 +144,7 @@ export default class FishTypesService extends moleculer.Service {
     },
   })
   async startFishing(
-    ctx: Context<
-      { type: FishType; coordinates: { x: number; y: number } },
-      UserAuthMeta
-    >
+    ctx: Context<{ type: FishType; coordinates: { x: number; y: number } }, UserAuthMeta>,
   ) {
     //Single active fishing validation
     const current = await this.currentFishing(ctx);
@@ -167,9 +163,7 @@ export default class FishTypesService extends moleculer.Service {
       startDate: new Date(),
     };
     if (ctx.params.coordinates) {
-      const transform = transformation('EPSG:4326', '3346');
-      const transformed = transform.forward(ctx.params.coordinates);
-      params.geom = coordinatesToGeometry(transformed);
+      params.geom = coordinatesToGeometry(ctx.params.coordinates);
     }
     return this.createEntity(ctx, params);
   }
