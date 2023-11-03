@@ -1,5 +1,5 @@
-import { Context } from "moleculer";
-import { AuthUserRole, UserAuthMeta } from "../services/api.service";
+import { Context } from 'moleculer';
+import { AuthUserRole, UserAuthMeta } from '../services/api.service';
 
 export default {
   methods: {
@@ -22,12 +22,13 @@ export default {
           if (!ctx.meta.profile && ctx.meta.user) {
             ctx.params.query = {
               user: ctx.meta.user.id,
+              tenant: { $exists: false },
               ...q,
             };
           }
         }
       }
-      ctx.params.sort = "-createdAt";
+      ctx.params.sort = '-createdAt';
       return ctx;
     },
     beforeCreate(ctx: Context<any, UserAuthMeta>) {
@@ -39,7 +40,7 @@ export default {
         const profile = ctx.meta.profile;
         const userId = ctx.meta.user.id;
         ctx.params.tenant = profile || null;
-        ctx.params.user = !profile ? userId : null;
+        ctx.params.user = userId;
       }
       return ctx;
     },
