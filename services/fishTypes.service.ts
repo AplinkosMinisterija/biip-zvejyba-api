@@ -30,7 +30,7 @@ export type FishType<
 > = Table<Fields, Populates, P, F>;
 
 @Service({
-  label: 'fishTypes',
+  name: 'fishTypes',
   mixins: [
     DbConnection({
       collection: 'fishTypes',
