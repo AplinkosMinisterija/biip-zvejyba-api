@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "My Moleculer-based microservices project",
   "private": true,
+  "prettier": "@aplinkosministerija/biip-prettier-config",
   "scripts": {
     "db:migrate": "knex migrate:latest",
     "build": "tsc --build tsconfig.json",
@@ -15,7 +16,8 @@
     "lint": "eslint --ext .js,.ts .",
     "dc:up": "docker compose -p biip-zvejyba-api up --build -d",
     "dc:down": "docker compose -p biip-zvejyba-api down",
-    "dc:logs": "docker compose -p biip-zvejyba-api logs -f"
+    "dc:logs": "docker compose -p biip-zvejyba-api logs -f",
+    "prepare": "husky install"
   },
   "keywords": [
     "microservices",
@@ -23,6 +25,8 @@
   ],
   "author": "",
   "devDependencies": {
+    "@aplinkosministerija/biip-prettier-config": "^1.1.0",
+    "@aplinkosministerija/eslint-config-biip-api": "^1.0.0",
     "@faker-js/faker": "^7.6.0",
     "@jest/globals": "^29.5.0",
     "@types/jest": "^29.5.0",
@@ -41,8 +45,10 @@
     "eslint-plugin-import": "^2.27.5",
     "eslint-plugin-prefer-arrow": "^1.2.3",
     "eslint-plugin-prettier": "^4.2.1",
+    "husky": "^8.0.3",
     "jest": "^29.5.0",
     "jest-cli": "^29.5.0",
+    "lint-staged": "14.0.1",
     "mockdate": "^3.0.5",
     "moleculer-repl": "^0.7.3",
     "prettier": "2.8.4",
@@ -79,6 +85,13 @@
   "engines": {
     "node": ">=18.0.0 <19.0.0"
   },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx}": [
+      "prettier --write",
+      "eslint"
+    ],
+    "*.{md,html,css}": "prettier --write"
+  },
   "jest": {
     "coverageDirectory": "<rootDir>/coverage",
     "testEnvironment": "node",
@@ -98,5 +111,8 @@
         "tsconfig": "tsconfig.json"
       }
     }
+  },
+  "eslintConfig": {
+    "extends": "@aplinkosministerija/eslint-config-biip-api"
   }
 }
