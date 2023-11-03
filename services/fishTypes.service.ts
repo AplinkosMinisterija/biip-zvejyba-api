@@ -1,7 +1,7 @@
 'use strict';
 
-import moleculer from 'moleculer';
-import { Method, Service } from 'moleculer-decorators';
+import moleculer, { Context, RestSchema } from 'moleculer';
+import { Action, Method, Service } from 'moleculer-decorators';
 
 import DbConnection from '../mixins/database.mixin';
 import {
@@ -10,8 +10,12 @@ import {
   COMMON_SCOPES,
   CommonFields,
   CommonPopulates,
+  IMAGE_TYPES,
+  RestrictionType,
   Table,
 } from '../types';
+import { getFolderName } from '../utils';
+import { UserAuthMeta } from './api.service';
 
 interface Fields extends CommonFields {
   id: number;
@@ -27,7 +31,14 @@ export type FishType<
 
 @Service({
   name: 'fishTypes',
-  mixins: [DbConnection()],
+  mixins: [
+    DbConnection({
+      collection: 'fishTypes',
+      createActions: {
+        createMany: false,
+      },
+    }),
+  ],
   settings: {
     fields: {
       id: {
@@ -36,15 +47,58 @@ export type FishType<
         secure: true,
       },
       label: 'string|required',
+      photo: {
+        type: 'object',
+        properties: {
+          url: 'string|required',
+          name: 'string',
+        },
+        columnType: 'json',
+      },
       ...COMMON_FIELDS,
     },
+
     scopes: {
       ...COMMON_SCOPES,
+    },
+    actions: {
+      remove: {
+        types: [RestrictionType.ADMIN],
+      },
+      create: {
+        types: [RestrictionType.ADMIN],
+      },
+      update: {
+        types: [RestrictionType.ADMIN],
+      },
     },
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
   },
 })
 export default class FishTypesService extends moleculer.Service {
+  @Action({
+    rest: <RestSchema>{
+      method: 'POST',
+      path: '/upload',
+      type: 'multipart',
+      busboyConfig: {
+        limits: {
+          files: 1,
+        },
+      },
+    },
+  })
+  async upload(ctx: Context<{}, UserAuthMeta>) {
+    const folder = getFolderName(ctx.meta?.user, ctx.meta?.profile);
+
+    return ctx.call('minio.uploadFile', {
+      payload: ctx.params,
+      isPrivate: false,
+      types: IMAGE_TYPES,
+      folder,
+    });
+  }
+
   @Method
   async seedDB() {
     await this.createEntities(null, [
