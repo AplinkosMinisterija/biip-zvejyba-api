@@ -99,7 +99,7 @@ export interface User {
               } catch (e) {
                 return value;
               }
-            })
+            }),
           );
         },
       },
@@ -126,8 +126,8 @@ export interface User {
                   user: user.id,
                 },
                 populate: ['tenant'],
-              })
-            )
+              }),
+            ),
           );
         },
       },
@@ -200,10 +200,7 @@ export default class UsersService extends moleculer.Service {
           if (ctx.params.filter.role) {
             $raw = {
               condition: `?? @> ?::jsonb`,
-              bindings: [
-                'tenants',
-                { [ctx.params.filter.tenantId]: ctx.params.filter.role },
-              ],
+              bindings: ['tenants', { [ctx.params.filter.tenantId]: ctx.params.filter.role }],
             };
           } else {
             $raw = {
@@ -230,9 +227,7 @@ export default class UsersService extends moleculer.Service {
       phone: 'string|optional',
     },
   })
-  async updateMyProfile(
-    ctx: Context<{ email?: string; phone?: string }, UserAuthMeta>
-  ) {
+  async updateMyProfile(ctx: Context<{ email?: string; phone?: string }, UserAuthMeta>) {
     if (!ctx.meta.user) {
       throw new ApiGateway.Errors.UnAuthorizedError('NO_RIGHTS', {
         error: 'Not logged in',
@@ -278,7 +273,7 @@ export default class UsersService extends moleculer.Service {
         tenant: number;
         role?: TenantUserRole;
       }
-    >
+    >,
   ) {
     const { tenant, role, ...listParams } = ctx.params;
     const params = this.sanitizeParams(listParams, {
@@ -365,7 +360,7 @@ export default class UsersService extends moleculer.Service {
       phone: string;
       firstName: string;
       lastName: string;
-    }>
+    }>,
   ) {
     const { personalCode, email, phone, firstName, lastName } = ctx.params;
     // it will throw error if user already exists
@@ -429,12 +424,9 @@ export default class UsersService extends moleculer.Service {
         tenantUserId: number;
       },
       UserAuthMeta
-    >
+    >,
   ) {
-    validateCanEditTenantUser(
-      ctx,
-      'Only OWNER and USER_ADMIN can update users to tenant.'
-    );
+    validateCanEditTenantUser(ctx, 'Only OWNER and USER_ADMIN can update users to tenant.');
 
     const { profile } = ctx.meta;
     const { id, email, phone, role, tenantId, tenantUserId } = ctx.params;
@@ -480,7 +472,7 @@ export default class UsersService extends moleculer.Service {
       case 'update':
       case 'replace':
         $set.tenants = table.client.raw(
-          `tenants || '{"${tenantUser.tenant}":"${tenantUser.role}"}'::jsonb`
+          `tenants || '{"${tenantUser.tenant}":"${tenantUser.role}"}'::jsonb`,
         );
         break;
 
@@ -501,7 +493,7 @@ export default class UsersService extends moleculer.Service {
         {
           raw: true,
           permissive: true,
-        }
+        },
       );
     }
   }
@@ -533,7 +525,7 @@ export default class UsersService extends moleculer.Service {
         phone: authUser.phone,
         authUser: authUser.id,
         isFreelancer: authUser.groups?.some(
-          (group: any) => group.id === Number(process.env.FREELANCER_GROUP_ID)
+          (group: any) => group.id === Number(process.env.FREELANCER_GROUP_ID),
         ),
       });
     }

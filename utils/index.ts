@@ -1,2 +1,2 @@
-export * from './uploads';
 export * from './functions';
+export * from './uploads';

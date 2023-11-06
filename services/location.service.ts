@@ -3,17 +3,8 @@
 import { find, isEmpty, map } from 'lodash';
 import moleculer, { Context } from 'moleculer';
 import { Action, Method, Service } from 'moleculer-decorators';
-import {
-  GeomFeatureCollection,
-  coordinatesToGeometry,
-} from '../modules/geometry';
-import {
-  CommonFields,
-  CommonPopulates,
-  LocationType,
-  RestrictionType,
-  Table,
-} from '../types';
+import { GeomFeatureCollection, coordinatesToGeometry } from '../modules/geometry';
+import { CommonFields, CommonPopulates, LocationType, RestrictionType, Table } from '../types';
 import { UserAuthMeta } from './api.service';
 
 const getBox = (geom: GeomFeatureCollection, tolerance: number = 0.001) => {
@@ -39,7 +30,7 @@ interface Populates extends CommonPopulates {}
 
 export type Location<
   P extends keyof Populates = never,
-  F extends keyof (Fields & Populates) = keyof Fields
+  F extends keyof (Fields & Populates) = keyof Fields,
 > = Table<Fields, Populates, P, F>;
 
 @Service({
@@ -55,9 +46,7 @@ export default class LocationsService extends moleculer.Service {
     if (!ctx.params.query?.coordinates) {
       throw new moleculer.Errors.ValidationError('Invalid coordinates');
     }
-    const geom = coordinatesToGeometry(
-      JSON.parse(ctx.params.query?.coordinates)
-    );
+    const geom = coordinatesToGeometry(JSON.parse(ctx.params.query?.coordinates));
     if (ctx.params.query?.type === LocationType.ESTUARY) {
       return this.getBarFromPoint(geom);
     } else if (ctx.params?.query?.type === LocationType.INLAND_WATERS) {
@@ -69,7 +58,7 @@ export default class LocationsService extends moleculer.Service {
   @Action()
   async getLocationsByCadastralIds(ctx: Context<{ locations: string[] }>) {
     const promises = map(ctx.params.locations, (location) =>
-      ctx.call('locations.search', { search: location })
+      ctx.call('locations.search', { search: location }),
     );
 
     const result: any = await Promise.all(promises);
@@ -97,7 +86,7 @@ export default class LocationsService extends moleculer.Service {
         headers: {
           'Content-Type': 'application/json',
         },
-      }
+      },
     );
 
     const data = await res.json();
