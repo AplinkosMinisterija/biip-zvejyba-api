@@ -61,6 +61,7 @@ export type Tool<
         properties: {
           eyeSize: 'number|convert',
           eyeSize2: 'number|convert|optional',
+          eyeSize3: 'number|convert|optional',
           netLength: 'number|convert|optional',
         },
       },
@@ -98,7 +99,6 @@ export type Tool<
         readonly: true,
         virtual: true,
         async populate(ctx: any, _values: any, tools: Tool[]) {
-          //TODO: reikia geresnio sprendimo, nes toolGroups'u laikui begant dauges
           return Promise.all(
             tools.map(async (tool: Tool) => {
               return await ctx.call('builtToolsGroups.findOne', {
@@ -192,7 +192,8 @@ export default class ToolTypesService extends moleculer.Service {
 
     //Tool data validation
     const invalidNet = !ctx.params.data?.eyeSize || !ctx.params.data?.netLength;
-    const invalidCatcher = !ctx.params.data?.eyeSize || !ctx.params.data?.eyeSize2;
+    const invalidCatcher =
+      !ctx.params.data?.eyeSize || !ctx.params.data?.eyeSize2 || !ctx.params.data?.eyeSize3;
 
     const invalidTool = toolType.type === ToolCategory.NET ? invalidNet : invalidCatcher;
 

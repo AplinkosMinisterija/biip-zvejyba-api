@@ -131,7 +131,6 @@ export type Fishing<
           );
         },
       },
-
       ...COMMON_FIELDS,
     },
     scopes: {
