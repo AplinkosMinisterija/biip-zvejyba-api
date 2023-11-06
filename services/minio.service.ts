@@ -50,7 +50,7 @@ export default class MinioService extends Moleculer.Service {
       bucketName: string;
       objectName: string;
       isPrivate?: boolean;
-    }>
+    }>,
   ) {
     const { bucketName, objectName, isPrivate } = ctx.params;
 
@@ -92,17 +92,10 @@ export default class MinioService extends Moleculer.Service {
         isPrivate?: boolean;
       },
       UserAuthMeta & MultipartMeta & { protected?: boolean }
-    >
+    >,
   ) {
     const { mimetype, filename } = ctx.meta;
-    const {
-      folder,
-      payload,
-      types,
-      isPrivate,
-      name: defaultName,
-      presign,
-    } = ctx.params;
+    const { folder, payload, types, isPrivate, name: defaultName, presign } = ctx.params;
     const name = defaultName || getPublicFileName(50);
 
     if (!types.includes(mimetype)) {
@@ -148,11 +141,7 @@ export default class MinioService extends Moleculer.Service {
     };
 
     if (presign) {
-      const presignedUrl: string = await this.getPresignedUrl(
-        ctx,
-        objectFileName,
-        bucketName
-      );
+      const presignedUrl: string = await this.getPresignedUrl(ctx, objectFileName, bucketName);
       response.presignedUrl = presignedUrl;
     }
 
@@ -181,7 +170,7 @@ export default class MinioService extends Moleculer.Service {
         $statusMessage: string;
         $responseType: string;
       }
-    >
+    >,
   ) {
     const { bucket, name } = ctx.params;
 
@@ -227,11 +216,7 @@ export default class MinioService extends Moleculer.Service {
       response.exists = data?.size > 0;
 
       if (response.exists) {
-        const presignedUrl: string = await this.getPresignedUrl(
-          ctx,
-          objectName,
-          bucketName
-        );
+        const presignedUrl: string = await this.getPresignedUrl(ctx, objectName, bucketName);
 
         response.publicUrl = this.getObjectUrl(objectName, false, bucketName);
         response.privateUrl = this.getObjectUrl(objectName, true, bucketName);
@@ -291,7 +276,7 @@ export default class MinioService extends Moleculer.Service {
                 Resource: [`arn:aws:s3:::${BUCKET_NAME()}/uploads/fishTypes/*`],
               },
             ],
-          })
+          }),
         );
 
         await this.client.setBucketLifecycle(BUCKET_NAME(), {
@@ -315,11 +300,7 @@ export default class MinioService extends Moleculer.Service {
   }
 
   @Method
-  getObjectUrl(
-    objectName: string,
-    isPrivate: boolean = false,
-    bucketName: string = BUCKET_NAME()
-  ) {
+  getObjectUrl(objectName: string, isPrivate: boolean = false, bucketName: string = BUCKET_NAME()) {
     let hostUrl = process.env.MINIO_PUBLIC_URL;
 
     if (isPrivate) {
@@ -333,7 +314,7 @@ export default class MinioService extends Moleculer.Service {
   getPresignedUrl(
     ctx: Context,
     objectName: string,
-    bucketName: string = BUCKET_NAME()
+    bucketName: string = BUCKET_NAME(),
   ): Promise<string> {
     return ctx.call('minio.presignedUrl', {
       bucketName,

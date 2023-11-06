@@ -39,7 +39,7 @@ interface Populates extends CommonPopulates {
 
 export type Tool<
   P extends keyof Populates = never,
-  F extends keyof (Fields & Populates) = keyof Fields
+  F extends keyof (Fields & Populates) = keyof Fields,
 > = Table<Fields, Populates, P, F>;
 
 @Service({
@@ -86,7 +86,7 @@ export type Tool<
                 },
               });
               return toolGroups.find((group: ToolsGroup) => !group.removeEvent);
-            })
+            }),
           );
         },
       },
@@ -155,14 +155,8 @@ export default class ToolTypesService extends moleculer.Service {
     });
 
     //Seal number validation
-    if (
-      ctx.params.id
-        ? existing?.some((tool) => tool.id !== ctx.params.id)
-        : existing.length
-    ) {
-      throw new moleculer.Errors.ValidationError(
-        'Tool with this seal number already exists'
-      );
+    if (ctx.params.id ? existing?.some((tool) => tool.id !== ctx.params.id) : existing.length) {
+      throw new moleculer.Errors.ValidationError('Tool with this seal number already exists');
     }
 
     //Tool type validation
@@ -176,11 +170,9 @@ export default class ToolTypesService extends moleculer.Service {
 
     //Tool data validation
     const invalidNet = !ctx.params.data?.eyeSize || !ctx.params.data?.netLength;
-    const invalidCatcher =
-      !ctx.params.data?.eyeSize || !ctx.params.data?.eyeSize2;
+    const invalidCatcher = !ctx.params.data?.eyeSize || !ctx.params.data?.eyeSize2;
 
-    const invalidTool =
-      toolType.type === ToolCategory.NET ? invalidNet : invalidCatcher;
+    const invalidTool = toolType.type === ToolCategory.NET ? invalidNet : invalidCatcher;
 
     if (invalidTool) {
       throw new moleculer.Errors.ValidationError('Invalid tool data');
@@ -190,11 +182,7 @@ export default class ToolTypesService extends moleculer.Service {
   @Method
   async beforeDelete(ctx: Context<any, UserAuthMeta>) {
     //Tool ownership validation
-    if (
-      ![AuthUserRole.SUPER_ADMIN, AuthUserRole.ADMIN].some(
-        (r) => r === ctx.meta.authUser.type
-      )
-    ) {
+    if (![AuthUserRole.SUPER_ADMIN, AuthUserRole.ADMIN].some((r) => r === ctx.meta.authUser.type)) {
       const tool = await this.findEntity(ctx, {
         id: ctx.params.id,
         query: {
@@ -207,10 +195,9 @@ export default class ToolTypesService extends moleculer.Service {
         throw new moleculer.Errors.ValidationError('Cannot delete tool');
       }
       //validate if tool is in the water
-      if(tool.toolsGroup) {
+      if (tool.toolsGroup) {
         throw new moleculer.Errors.ValidationError('Tools is in use');
       }
     }
-
   }
 }

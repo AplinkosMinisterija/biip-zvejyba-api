@@ -44,7 +44,7 @@ interface Populates extends CommonPopulates {
 
 export type TenantUser<
   P extends keyof Populates = never,
-  F extends keyof (Fields & Populates) = keyof Fields
+  F extends keyof (Fields & Populates) = keyof Fields,
 > = Table<Fields, Populates, P, F>;
 
 @Service({
@@ -197,15 +197,11 @@ export default class TenantUsersService extends moleculer.Service {
         phone: string;
       },
       UserAuthMeta
-    >
+    >,
   ) {
-    validateCanEditTenantUser(
-      ctx,
-      'Only OWNER and USER_ADMIN can add users to tenant.'
-    );
+    validateCanEditTenantUser(ctx, 'Only OWNER and USER_ADMIN can add users to tenant.');
 
-    const { firstName, lastName, personalCode, role, email, phone, tenant } =
-      ctx.params;
+    const { firstName, lastName, personalCode, role, email, phone, tenant } = ctx.params;
     // OWNER and USER_ADMIN can invite users
 
     const tenantId = ctx.meta.profile || tenant;
@@ -214,8 +210,7 @@ export default class TenantUsersService extends moleculer.Service {
       id: tenantId,
     });
 
-    const authRole =
-      role === TenantUserRole.OWNER ? AuthGroupRole.ADMIN : AuthGroupRole.USER;
+    const authRole = role === TenantUserRole.OWNER ? AuthGroupRole.ADMIN : AuthGroupRole.USER;
 
     const inviteData: any = {
       personalCode,
@@ -301,11 +296,7 @@ export default class TenantUsersService extends moleculer.Service {
     });
 
     if (tenantUsersCount) {
-      throw new moleculer.Errors.MoleculerClientError(
-        'Already exists',
-        422,
-        'ALREADY_EXISTS'
-      );
+      throw new moleculer.Errors.MoleculerClientError('Already exists', 422, 'ALREADY_EXISTS');
     }
 
     const userEntity: User = await ctx.call('users.get', { id: user });
@@ -334,10 +325,7 @@ export default class TenantUsersService extends moleculer.Service {
 
       if (authUser.groups?.length) {
         for (const group of authUser.groups) {
-          if (
-            group.id &&
-            group.id !== Number(process.env.FREELANCER_GROUP_ID)
-          ) {
+          if (group.id && group.id !== Number(process.env.FREELANCER_GROUP_ID)) {
             const tenant: Tenant = await this.broker.call('tenants.findOne', {
               query: {
                 authGroup: group.id,

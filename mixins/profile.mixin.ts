@@ -6,9 +6,7 @@ export default {
     beforeSelect(ctx: Context<any, UserAuthMeta>) {
       if (ctx.meta) {
         if (
-          ![AuthUserRole.SUPER_ADMIN, AuthUserRole.ADMIN].some(
-            (r) => r === ctx.meta.authUser.type
-          )
+          ![AuthUserRole.SUPER_ADMIN, AuthUserRole.ADMIN].some((r) => r === ctx.meta.authUser.type)
         ) {
           const q = ctx.params.query;
           // tenant profile
@@ -34,7 +32,7 @@ export default {
     beforeCreate(ctx: Context<any, UserAuthMeta>) {
       if (
         ![AuthUserRole.ADMIN, AuthUserRole.SUPER_ADMIN].some(
-          (role) => role === ctx.meta.authUser.type
+          (role) => role === ctx.meta.authUser.type,
         )
       ) {
         const profile = ctx.meta.profile;
