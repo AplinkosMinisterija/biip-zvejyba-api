@@ -14,7 +14,6 @@ import {
   Table,
 } from '../types';
 
-import transformation from 'transform-coordinates';
 import ProfileMixin from '../mixins/profile.mixin';
 import { coordinatesToGeometry } from '../modules/geometry';
 import { UserAuthMeta } from './api.service';
@@ -173,9 +172,7 @@ export default class FishTypesService extends moleculer.Service {
       startDate: new Date(),
     };
     if (ctx.params.coordinates) {
-      const transform = transformation('EPSG:4326', '3346');
-      const transformed = transform.forward(ctx.params.coordinates);
-      params.geom = coordinatesToGeometry(transformed);
+      params.geom = coordinatesToGeometry(ctx.params.coordinates);
     }
     return this.createEntity(ctx, params);
   }
