@@ -28,7 +28,6 @@ interface Fields extends CommonFields {
   toolType: ToolType['id'];
   tenant: Tenant['id'];
   user: User['id'];
-  // toolsGroup?: ToolsGroup['id'];
   builtToolsGroup?: BuiltToolsGroup['id'];
 }
 
