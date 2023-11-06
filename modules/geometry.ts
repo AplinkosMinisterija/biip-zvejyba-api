@@ -6,11 +6,7 @@ export type CoordinatesPolygon = CoordinatesLine[];
 export type CoordinatesMultiPolygon = CoordinatesPolygon[];
 export type GeometryObject = {
   type: string;
-  coordinates:
-    | CoordinatesPoint
-    | CoordinatesLine
-    | CoordinatesPolygon
-    | CoordinatesMultiPolygon;
+  coordinates: CoordinatesPoint | CoordinatesLine | CoordinatesPolygon | CoordinatesMultiPolygon;
 };
 
 export type GeomFeatureCollection = {
@@ -39,15 +35,14 @@ export function geometryToGeom(geometry: GeometryObject) {
 
 export function geometriesToGeomCollection(geometries: GeometryObject[]) {
   return `ST_AsText(ST_Collect(ARRAY(
-    SELECT ST_GeomFromGeoJSON(JSON_ARRAY_ELEMENTS('${JSON.stringify(
-      geometries,
-    )}'))
+    SELECT ST_GeomFromGeoJSON(JSON_ARRAY_ELEMENTS('${JSON.stringify(geometries)}'))
   )))`;
 }
 
 export function coordinatesToGeometry(coordinates: { x: number; y: number }) {
+  const { x, y } = coordinates;
   const transform = transformation('EPSG:4326', '3346');
-  const transformed = transform.forward(coordinates);
+  const transformed = transform.forward({ x: Number(x), y: Number(y) });
   return {
     type: 'FeatureCollection',
     features: [

@@ -110,18 +110,14 @@ export enum AuthUserRole {
 export default class ApiService extends moleculer.Service {
   @Method
   getRestrictionType(req: RequestMessage) {
-    return (
-      req.$action.auth ||
-      req.$action.service?.settings?.auth ||
-      RestrictionType.DEFAULT
-    );
+    return req.$action.auth || req.$action.service?.settings?.auth || RestrictionType.DEFAULT;
   }
 
   @Method
   async authenticate(
     ctx: Context<Record<string, unknown>, UserAuthMeta>,
     _route: any,
-    req: RequestMessage
+    req: RequestMessage,
   ): Promise<unknown> {
     const restrictionType = this.getRestrictionType(req);
 
@@ -132,10 +128,7 @@ export default class ApiService extends moleculer.Service {
     // Read the token from header
     const auth = req.headers.authorization;
     if (!auth?.startsWith?.('Bearer')) {
-      throw new ApiGateway.Errors.UnAuthorizedError(
-        ApiGateway.Errors.ERR_INVALID_TOKEN,
-        null
-      );
+      throw new ApiGateway.Errors.UnAuthorizedError(ApiGateway.Errors.ERR_INVALID_TOKEN, null);
     }
 
     const token = auth.slice(7);
@@ -164,7 +157,7 @@ export default class ApiService extends moleculer.Service {
   async authorize(
     ctx: Context<Record<string, unknown>, UserAuthMeta>,
     _route: any,
-    req: RequestMessage
+    req: RequestMessage,
   ): Promise<unknown> {
     const restrictionType = this.getRestrictionType(req);
 
@@ -184,10 +177,7 @@ export default class ApiService extends moleculer.Service {
       });
     }
 
-    if (
-      restrictionType === RestrictionType.USER &&
-      authUser.type !== AuthUserRole.USER
-    ) {
+    if (restrictionType === RestrictionType.USER && authUser.type !== AuthUserRole.USER) {
       throw new ApiGateway.Errors.UnAuthorizedError('NO_RIGHTS', {
         error: 'Unauthorized',
       });
@@ -195,7 +185,7 @@ export default class ApiService extends moleculer.Service {
   }
 
   @Action({
-    auth: RestrictionType.PUBLIC
+    auth: RestrictionType.PUBLIC,
   })
   ping() {
     return {
