@@ -230,7 +230,9 @@ export default class ToolsGroupsService extends moleculer.Service {
       throw e;
     }
 
-    return this.findEntity(ctx, { id: group.id });
+    return ctx.call('builtToolsGroups.get', {
+      id: group.id,
+    });
   }
 
   @Action({
@@ -269,7 +271,9 @@ export default class ToolsGroupsService extends moleculer.Service {
         fishing: currentFishing.id,
       });
     }
-    return this.findEntity(ctx, { id: group.id });
+    return ctx.call('builtToolsGroups.get', {
+      id: group.id,
+    });
   }
 
   @Action({

@@ -1,7 +1,7 @@
 'use strict';
 
-import moleculer from 'moleculer';
-import { Service } from 'moleculer-decorators';
+import moleculer, { Context } from 'moleculer';
+import { Action, Service } from 'moleculer-decorators';
 import DbConnection from '../mixins/database.mixin';
 import ProfileMixin from '../mixins/profile.mixin';
 import {
@@ -12,11 +12,14 @@ import {
   CommonPopulates,
   Table,
 } from '../types';
+import { UserAuthMeta } from './api.service';
 import { BuiltToolsGroup } from './builtToolsGroups.service';
+import { FishType } from './fishTypes.service';
 import { Fishing } from './fishings.service';
 import { Tenant } from './tenants.service';
 import { ToolType } from './toolTypes.service';
 import { ToolsGroup } from './toolsGroups.service';
+import { ToolsGroupHistoryTypes, ToolsGroupsHistory } from './toolsGroupsHistories.service';
 import { User } from './users.service';
 
 interface Fields extends CommonFields {
@@ -101,7 +104,7 @@ export type FishWeight<
   },
   hooks: {
     before: {
-      create: ['beforeCreate'],
+      weighFish: ['beforeCreate'],
       list: ['beforeSelect'],
       find: ['beforeSelect'],
       count: ['beforeSelect'],
@@ -109,5 +112,92 @@ export type FishWeight<
       all: ['beforeSelect'],
     },
   },
+  actions: {
+    create: {
+      rest: null,
+    },
+    update: {
+      rest: null,
+    },
+    remove: {
+      rest: null,
+    },
+  },
 })
-export default class ToolTypesService extends moleculer.Service {}
+export default class ToolTypesService extends moleculer.Service {
+  @Action({
+    rest: 'GET /preliminary',
+  })
+  async getPreliminaryFishWeight(ctx: Context) {
+    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
+    if (!currentFishing) {
+      throw new moleculer.Errors.ValidationError('Fishing not started');
+    }
+    const caughtFishEvents: ToolsGroupsHistory[] = await ctx.call('toolsGroupsHistories.find', {
+      query: {
+        fishing: currentFishing.id,
+        type: ToolsGroupHistoryTypes.WEIGH_FISH,
+      },
+    });
+    if (caughtFishEvents.length) {
+      return caughtFishEvents.reduce((aggregate: any, currentValue) => {
+        const data = currentValue.data;
+        for (const key in data) {
+          if (aggregate[key]) {
+            aggregate[key] = aggregate[key] + data[key];
+          } else {
+            aggregate[key] = data[key];
+          }
+        }
+        return aggregate;
+      }, {});
+    }
+    return {};
+  }
+
+  @Action({
+    rest: 'POST /',
+    params: {
+      data: 'object',
+    },
+  })
+  async weighFish(
+    ctx: Context<
+      {
+        data: { [key: FishType['id']]: number };
+      },
+      UserAuthMeta
+    >,
+  ) {
+    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
+    if (!currentFishing) {
+      throw new moleculer.Errors.ValidationError('Fishing not started');
+    }
+
+    //fishTypes validation
+    const fishTypesIds = Object.keys(ctx.params.data);
+    const fishTypes: FishType[] = await ctx.call('fishTypes.find', {
+      query: {
+        id: { $in: fishTypesIds },
+      },
+    });
+    if (fishTypesIds.length !== fishTypes.length) {
+      throw new moleculer.Errors.ValidationError('Invalid fishTypes');
+    }
+
+    //validate if fish is already weighted
+    const fishWeight = await this.findEntity(ctx, {
+      query: {
+        fishing: currentFishing.id,
+      },
+    });
+    if (fishWeight) {
+      throw new moleculer.Errors.ValidationError('Fish already weighted');
+    }
+
+    return this.createEntity(ctx, {
+      ...ctx.params,
+      fishing: currentFishing.id,
+    });
+  }
+}

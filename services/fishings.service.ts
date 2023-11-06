@@ -115,6 +115,22 @@ export type Fishing<
           );
         },
       },
+      fishWeight: {
+        type: 'array',
+        readonly: true,
+        virtual: true,
+        async populate(ctx: any, _values: any, fishings: Fishing[]) {
+          return Promise.all(
+            fishings.map((fishing: any) => {
+              return ctx.call('fishWeights.findOne', {
+                query: {
+                  fishing: fishing.id,
+                },
+              });
+            }),
+          );
+        },
+      },
 
       ...COMMON_FIELDS,
     },
@@ -201,20 +217,20 @@ export default class FishTypesService extends moleculer.Service {
       throw new moleculer.Errors.ValidationError('Fishing not started');
     }
     //validate if fishing has loose toolsGroups weighing events
-    const toolsGroupsFish: ToolsGroupsHistory[] = await ctx.call('toolsGroupsHistories.find', {
+    const fishWeightEvents: ToolsGroupsHistory[] = await ctx.call('toolsGroupsHistories.find', {
       query: {
         fishing: current.id,
         type: ToolsGroupHistoryTypes.WEIGH_FISH,
       },
     });
-    if (toolsGroupsFish.length) {
+    if (fishWeightEvents.length) {
       const totalFishWeight: FishWeight[] = await ctx.call('fishWeights.find', {
         query: {
           fishing: current.id,
         },
       });
       if (!totalFishWeight.length) {
-        throw new moleculer.Errors.ValidationError('Fish must be weighed on shore');
+        throw new moleculer.Errors.ValidationError('Fish must be weighted');
       }
     }
     return this.updateEntity(ctx, {
