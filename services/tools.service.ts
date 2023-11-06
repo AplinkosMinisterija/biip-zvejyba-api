@@ -76,24 +76,6 @@ export type Tool<
           },
         },
       },
-      // toolsGroup: {
-      //   type: 'number',
-      //   readonly: true,
-      //   virtual: true,
-      //   async populate(ctx: any, _values: any, tools: Tool[]) {
-      //     //TODO: reikia geresnio sprendimo, nes toolGroups'u laikui begant dauges
-      //     return Promise.all(
-      //       tools.map(async (tool: Tool) => {
-      //         const toolGroups: BuiltToolsGroup[] = await ctx.call('builtToolsGroup.find', {
-      //           query: {
-      //             $raw: `tools::int[] @> ${tool.id}`,
-      //           },
-      //         });
-      //         return toolGroups.find((group: BuiltToolsGroup) => !group.removeEvent);
-      //       }),
-      //     );
-      //   },
-      // },
       builtToolsGroup: {
         type: 'number',
         readonly: true,
