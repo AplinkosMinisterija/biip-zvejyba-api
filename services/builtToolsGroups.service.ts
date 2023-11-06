@@ -1,6 +1,6 @@
 'use strict';
 
-import moleculer from 'moleculer';
+import moleculer, { Context } from 'moleculer';
 import { Service } from 'moleculer-decorators';
 
 import PostgisMixin from 'moleculer-postgis';
@@ -15,7 +15,11 @@ import {
   Table,
 } from '../types';
 import { Fishing } from './fishings.service';
+import { Tenant } from './tenants.service';
+import { Tool } from './tools.service';
 import { ToolsGroup } from './toolsGroups.service';
+import { ToolsGroupsHistory } from './toolsGroupsHistories.service';
+import { User } from './users.service';
 
 export enum ToolsGroupHistoryTypes {
   BUILD_TOOLS = 'BUILD_TOOLS',
@@ -25,33 +29,27 @@ export enum ToolsGroupHistoryTypes {
 
 interface Fields extends CommonFields {
   id: number;
-  type: ToolsGroupHistoryTypes;
-  geom: any;
-  location: {
-    id: string;
-    name: string;
-    municipality: {
-      id: number;
-      name: string;
-    };
-  };
-  data: any;
+  tools: any[];
+  tenant: Tenant['id'];
+  user: User['id'];
+  buildEvent: ToolsGroupsHistory;
+  removeEvent: ToolsGroupsHistory;
+  weighingEvent: ToolsGroupsHistory;
   fishing: Fishing['id'];
-  toolsGroup: ToolsGroup['id'];
+  location: string;
 }
 
 interface Populates extends CommonPopulates {}
 
-export type ToolsGroupsHistory<
+export type BuiltToolsGroup<
   P extends keyof Populates = never,
   F extends keyof (Fields & Populates) = keyof Fields,
 > = Table<Fields, Populates, P, F>;
 
 @Service({
-  name: 'toolsGroupsHistories',
+  name: 'builtToolsGroups',
   mixins: [
     DbConnection({
-      collection: 'toolsGroupsHistories',
       rest: false,
     }),
     PostgisMixin({
@@ -62,56 +60,31 @@ export type ToolsGroupsHistory<
   settings: {
     fields: {
       id: {
-        type: 'string',
-        columnType: 'integer',
+        type: 'number',
         primaryKey: true,
         secure: true,
       },
-      type: {
-        type: 'string',
-        enum: Object.values(ToolsGroupHistoryTypes),
-      },
-      geom: {
-        type: 'any',
-        geom: {
-          types: ['Point'],
-        },
-      },
-      location: {
-        type: 'object',
-        properties: {
-          id: 'string',
-          name: 'string',
-          municipality: {
-            type: 'object',
-            properties: {
-              id: 'number',
-              name: 'string',
-            },
-          },
-        },
-      },
-      data: 'any', // Type is not clear yet
-      toolsGroup: {
-        type: 'number',
-        columnType: 'integer',
-        columnName: 'toolsGroupId',
-        populate: {
-          action: 'toolsGroups.resolve',
-          params: {
-            scope: false,
-          },
-        },
-      },
-      fishing: {
-        type: 'number',
-        columnType: 'integer',
-        columnName: 'fishingId',
-        populate: {
-          action: 'fishings.resolve',
-          params: {
-            scope: false,
-          },
+      tools: {
+        type: 'array',
+        columnName: 'tools',
+        default: () => [],
+        async populate(ctx: Context, values: number[], entities: ToolsGroup[]) {
+          try {
+            const tools: Tool[] = await ctx.call('tools.find', {
+              query: {
+                id: { $in: values },
+              },
+              populate: ['toolType'],
+            });
+            return entities?.map((entity) => {
+              return entity.tools?.map((toolId) => {
+                const tool = tools.find((t) => t.id === toolId);
+                return tool;
+              });
+            });
+          } catch (e) {
+            return entities;
+          }
         },
       },
       tenant: {
@@ -136,6 +109,25 @@ export type ToolsGroupsHistory<
           },
         },
       },
+      buildEvent: 'object', // ToolsGroupsHistory structure
+      removeEvent: 'object', // ToolsGroupsHistory structure
+      weighingEvent: 'object', // ToolsGroupsHistory structure
+      fishing: {
+        type: 'number',
+        columnType: 'integer',
+        columnName: 'fishingId',
+        populate: {
+          action: 'fishings.resolve',
+          params: {
+            scope: false,
+          },
+        },
+      },
+      location: {
+        type: 'string',
+        columnName: 'locationId',
+      },
+      locationType: 'string',
       ...COMMON_FIELDS,
     },
     scopes: {
@@ -145,7 +137,6 @@ export type ToolsGroupsHistory<
   },
   hooks: {
     before: {
-      create: ['beforeCreate'],
       list: ['beforeSelect'],
       find: ['beforeSelect'],
       count: ['beforeSelect'],

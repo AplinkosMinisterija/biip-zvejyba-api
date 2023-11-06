@@ -2,8 +2,6 @@
 
 import moleculer from 'moleculer';
 import { Service } from 'moleculer-decorators';
-
-import PostgisMixin from 'moleculer-postgis';
 import DbConnection from '../mixins/database.mixin';
 import ProfileMixin from '../mixins/profile.mixin';
 import {
@@ -14,94 +12,51 @@ import {
   CommonPopulates,
   Table,
 } from '../types';
+import { BuiltToolsGroup } from './builtToolsGroups.service';
 import { Fishing } from './fishings.service';
+import { Tenant } from './tenants.service';
+import { ToolType } from './toolTypes.service';
 import { ToolsGroup } from './toolsGroups.service';
-
-export enum ToolsGroupHistoryTypes {
-  BUILD_TOOLS = 'BUILD_TOOLS',
-  REMOVE_TOOLS = 'REMOVE_TOOLS',
-  WEIGH_FISH = 'WEIGH_FISH',
-}
+import { User } from './users.service';
 
 interface Fields extends CommonFields {
   id: number;
-  type: ToolsGroupHistoryTypes;
-  geom: any;
-  location: {
-    id: string;
-    name: string;
-    municipality: {
-      id: number;
-      name: string;
-    };
-  };
   data: any;
+  date: string;
   fishing: Fishing['id'];
-  toolsGroup: ToolsGroup['id'];
+  tenant: Tenant['id'];
+  user: User['id'];
 }
 
-interface Populates extends CommonPopulates {}
+interface Populates extends CommonPopulates {
+  toolType: ToolType;
+  toolsGroup: ToolsGroup;
+  builtToolsGroup: BuiltToolsGroup;
+  tenant: Tenant;
+  user: User;
+}
 
-export type ToolsGroupsHistory<
+export type FishWeight<
   P extends keyof Populates = never,
   F extends keyof (Fields & Populates) = keyof Fields,
 > = Table<Fields, Populates, P, F>;
 
 @Service({
-  name: 'toolsGroupsHistories',
-  mixins: [
-    DbConnection({
-      collection: 'toolsGroupsHistories',
-      rest: false,
-    }),
-    PostgisMixin({
-      srid: 3346,
-    }),
-    ProfileMixin,
-  ],
+  name: 'fishWeights',
+  mixins: [DbConnection(), ProfileMixin],
   settings: {
     fields: {
       id: {
-        type: 'string',
-        columnType: 'integer',
+        type: 'number',
         primaryKey: true,
         secure: true,
       },
-      type: {
-        type: 'string',
-        enum: Object.values(ToolsGroupHistoryTypes),
-      },
-      geom: {
-        type: 'any',
-        geom: {
-          types: ['Point'],
-        },
-      },
-      location: {
-        type: 'object',
-        properties: {
-          id: 'string',
-          name: 'string',
-          municipality: {
-            type: 'object',
-            properties: {
-              id: 'number',
-              name: 'string',
-            },
-          },
-        },
-      },
-      data: 'any', // Type is not clear yet
-      toolsGroup: {
-        type: 'number',
-        columnType: 'integer',
-        columnName: 'toolsGroupId',
-        populate: {
-          action: 'toolsGroups.resolve',
-          params: {
-            scope: false,
-          },
-        },
+      data: 'any',
+      date: {
+        type: 'date',
+        columnType: 'datetime',
+        readonly: true,
+        onCreate: () => new Date(),
       },
       fishing: {
         type: 'number',
@@ -142,6 +97,7 @@ export type ToolsGroupsHistory<
       ...COMMON_SCOPES,
     },
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
+    defaultPopulates: ['toolType'],
   },
   hooks: {
     before: {
@@ -154,4 +110,4 @@ export type ToolsGroupsHistory<
     },
   },
 })
-export default class ToolsGroupsHistoriesService extends moleculer.Service {}
+export default class ToolTypesService extends moleculer.Service {}

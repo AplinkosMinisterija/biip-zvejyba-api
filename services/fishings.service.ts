@@ -18,9 +18,16 @@ import transformation from 'transform-coordinates';
 import ProfileMixin from '../mixins/profile.mixin';
 import { coordinatesToGeometry } from '../modules/geometry';
 import { UserAuthMeta } from './api.service';
-import { FishType } from './fishTypes.service';
+import { FishWeight } from './fishWeights.service';
 import { Tenant } from './tenants.service';
+import { ToolsGroupHistoryTypes, ToolsGroupsHistory } from './toolsGroupsHistories.service';
 import { User } from './users.service';
+
+enum FishingType {
+  ESTUARY = 'ESTUARY',
+  POLDERS = 'POLDERS',
+  INLAND_WATERS = 'INLAND_WATERS',
+}
 
 interface Fields extends CommonFields {
   id: number;
@@ -28,7 +35,7 @@ interface Fields extends CommonFields {
   endDate: Date;
   skipDate: Date;
   geom: any;
-  type: FishType;
+  type: FishingType;
   tenant: Tenant['id'];
   user: User['id'];
 }
@@ -37,7 +44,7 @@ interface Populates extends CommonPopulates {}
 
 export type Fishing<
   P extends keyof Populates = never,
-  F extends keyof (Fields & Populates) = keyof Fields
+  F extends keyof (Fields & Populates) = keyof Fields,
 > = Table<Fields, Populates, P, F>;
 
 @Service({
@@ -105,16 +112,18 @@ export type Fishing<
                   fishing: fishing.id,
                 },
               });
-            })
+            }),
           );
         },
       },
+
       ...COMMON_FIELDS,
     },
     scopes: {
       ...COMMON_SCOPES,
     },
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
+    defaultPopulates: [],
   },
   actions: {
     create: {
@@ -145,10 +154,7 @@ export default class FishTypesService extends moleculer.Service {
     },
   })
   async startFishing(
-    ctx: Context<
-      { type: FishType; coordinates: { x: number; y: number } },
-      UserAuthMeta
-    >
+    ctx: Context<{ type: FishingType; coordinates: { x: number; y: number } }, UserAuthMeta>,
   ) {
     //Single active fishing validation
     const current = await this.currentFishing(ctx);
@@ -197,7 +203,23 @@ export default class FishTypesService extends moleculer.Service {
     if (!current) {
       throw new moleculer.Errors.ValidationError('Fishing not started');
     }
-    //TODO: validate if caught fish was weighed on shore
+    //validate if fishing has loose toolsGroups weighing events
+    const toolsGroupsFish: ToolsGroupsHistory[] = await ctx.call('toolsGroupsHistories.find', {
+      query: {
+        fishing: current.id,
+        type: ToolsGroupHistoryTypes.WEIGH_FISH,
+      },
+    });
+    if (toolsGroupsFish.length) {
+      const totalFishWeight: FishWeight[] = await ctx.call('fishWeights.find', {
+        query: {
+          fishing: current.id,
+        },
+      });
+      if (!totalFishWeight.length) {
+        throw new moleculer.Errors.ValidationError('Fish must be weighed on shore');
+      }
+    }
     return this.updateEntity(ctx, {
       id: current.id,
       endDate: new Date(),
