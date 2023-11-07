@@ -364,6 +364,7 @@ export default class ToolsGroupsService extends moleculer.Service {
         locationType: currentFishing.type,
         removeEvent: { $exists: false },
       },
+      populate: ['tools'],
     });
   }
 }
