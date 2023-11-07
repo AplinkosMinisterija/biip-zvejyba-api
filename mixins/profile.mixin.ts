@@ -6,7 +6,7 @@ export default {
     beforeSelect(ctx: Context<any, UserAuthMeta>) {
       if (ctx.meta) {
         if (
-          ![AuthUserRole.SUPER_ADMIN, AuthUserRole.ADMIN].some((r) => r === ctx.meta.authUser.type)
+          ![AuthUserRole.SUPER_ADMIN, AuthUserRole.ADMIN].some((r) => r === ctx.meta?.authUser?.type)
         ) {
           const q = ctx.params.query;
           // tenant profile
