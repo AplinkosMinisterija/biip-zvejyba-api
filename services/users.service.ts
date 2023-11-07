@@ -14,7 +14,7 @@ import {
 import { TenantUser, TenantUserRole } from './tenantUsers.service';
 
 import ApiGateway from 'moleculer-web';
-import DbConnection from '../mixins/database.mixin';
+import DbConnection, { PopulateHandlerFn } from '../mixins/database.mixin';
 import { validateCanEditTenantUser } from '../utils';
 import { AuthUserRole, UserAuthMeta } from './api.service';
 
@@ -118,17 +118,14 @@ export interface User {
         readonly: true,
         virtual: true,
         default: (): any[] => [],
-        async populate(ctx: Context, _values: any, users: User[]) {
-          return await Promise.all(
-            users.map(async (user) =>
-              ctx.call('tenantUsers.find', {
-                query: {
-                  user: user.id,
-                },
-                populate: ['tenant'],
-              }),
-            ),
-          );
+        populate: {
+          keyField: 'id',
+          handler: PopulateHandlerFn('tenantUsers.populateByProp'),
+          params: {
+            queryKey: 'user',
+            mappingMulti: true,
+            populate: ['tenant']
+          },
         },
       },
       ...COMMON_FIELDS,
