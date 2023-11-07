@@ -156,7 +156,10 @@ export default class ToolsGroupsService extends moleculer.Service {
   @Action({
     rest: 'POST /build',
     params: {
-      tools: 'any',
+      tools: {
+        type: 'array',
+        items: 'number',
+      },
       coordinates: CoordinatesProp,
       location: LocationProp,
     },
