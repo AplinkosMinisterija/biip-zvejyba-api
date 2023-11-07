@@ -2,16 +2,8 @@
 
 import moleculer, { Context } from 'moleculer';
 import { Action, Event, Method, Service } from 'moleculer-decorators';
-import {
-  EntityChangedParams,
-  RestrictionType,
-  throwUnauthorizedError,
-} from '../types';
-import {
-  AuthGroupRole,
-  TenantUser,
-  TenantUserRole,
-} from './tenantUsers.service';
+import { EntityChangedParams, RestrictionType, throwUnauthorizedError } from '../types';
+import { AuthGroupRole, TenantUser, TenantUserRole } from './tenantUsers.service';
 import { User, UserType } from './users.service';
 
 import authMixin from 'biip-auth-nodejs/mixin';
@@ -121,13 +113,12 @@ export default class AuthService extends moleculer.Service {
         id: authUser?.id,
         populate: 'groups',
       },
-      { meta }
+      { meta },
     );
     const authGroups: any[] = authUserGroups?.groups || [];
 
     const isFreelancer = authGroups.some(
-      (authGroup: any) =>
-        authGroup.id === Number(process.env.FREELANCER_GROUP_ID)
+      (authGroup: any) => authGroup.id === Number(process.env.FREELANCER_GROUP_ID),
     );
 
     // update user info from e-vartai
@@ -177,16 +168,10 @@ export default class AuthService extends moleculer.Service {
         tenantUser = await ctx.call('tenantUsers.create', {
           tenant: tenant.id,
           user: user.id,
-          role:
-            authGroup.role === AuthGroupRole.ADMIN
-              ? TenantUserRole.OWNER
-              : TenantUserRole.USER,
+          role: authGroup.role === AuthGroupRole.ADMIN ? TenantUserRole.OWNER : TenantUserRole.USER,
         });
       } else {
-        if (
-          authGroup.role === AuthGroupRole.ADMIN &&
-          tenantUser.role !== TenantUserRole.OWNER
-        ) {
+        if (authGroup.role === AuthGroupRole.ADMIN && tenantUser.role !== TenantUserRole.OWNER) {
           // After login with "juridinis asmuo" auth changes relation to ADMIN
           // So we have to change it to OWNER
           await ctx.call('tenantUsers.update', {
@@ -195,10 +180,7 @@ export default class AuthService extends moleculer.Service {
           });
         }
 
-        if (
-          authGroup.role === AuthGroupRole.USER &&
-          tenantUser.role === TenantUserRole.OWNER
-        ) {
+        if (authGroup.role === AuthGroupRole.USER && tenantUser.role === TenantUserRole.OWNER) {
           // Changing from OWNER to other roles SHOULD NOT happen without our app
           // But again, just in case
           await ctx.call('tenantUsers.update', {
@@ -245,25 +227,18 @@ export default class AuthService extends moleculer.Service {
   async 'users.removed'(ctx: Context<EntityChangedParams<User>>) {
     const user = ctx.params.data as User;
 
-    await ctx.call(
-      'auth.users.remove',
-      { id: user.authUser },
-      { meta: ctx.meta }
-    );
+    await ctx.call('auth.users.remove', { id: user.authUser }, { meta: ctx.meta });
   }
 
   @Event()
   async 'tenantUsers.removed'(ctx: Context<EntityChangedParams<TenantUser>>) {
     const tenantUser = ctx.params.data as TenantUser;
 
-    const entity: TenantUser<'tenant' | 'user'> = await ctx.call(
-      'tenantUsers.resolve',
-      {
-        id: tenantUser.id,
-        populate: 'user,tenant',
-        scope: false,
-      }
-    );
+    const entity: TenantUser<'tenant' | 'user'> = await ctx.call('tenantUsers.resolve', {
+      id: tenantUser.id,
+      populate: 'user,tenant',
+      scope: false,
+    });
 
     await ctx.call('auth.users.unassignFromGroup', {
       id: entity.user.authUser,
@@ -286,14 +261,11 @@ export default class AuthService extends moleculer.Service {
       return;
     }
 
-    const entity: TenantUser<'tenant' | 'user'> = await ctx.call(
-      'tenantUsers.resolve',
-      {
-        id: tenantUser.id,
-        populate: 'user,tenant',
-        scope: false,
-      }
-    );
+    const entity: TenantUser<'tenant' | 'user'> = await ctx.call('tenantUsers.resolve', {
+      id: tenantUser.id,
+      populate: 'user,tenant',
+      scope: false,
+    });
 
     await ctx.call('auth.users.assignToGroup', {
       id: entity.user.authUser,

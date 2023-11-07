@@ -3,7 +3,7 @@
 import moleculer, { Context } from 'moleculer';
 import { Action, Method, Service } from 'moleculer-decorators';
 import ApiGateway from 'moleculer-web';
-import { RequestMessage, RestrictionType } from '../types';
+import { RequestMessage, RestrictionType, throwNoRightsError } from '../types';
 import { User } from './users.service';
 
 export interface UserAuthMeta {
@@ -110,18 +110,14 @@ export enum AuthUserRole {
 export default class ApiService extends moleculer.Service {
   @Method
   getRestrictionType(req: RequestMessage) {
-    return (
-      req.$action.auth ||
-      req.$action.service?.settings?.auth ||
-      RestrictionType.DEFAULT
-    );
+    return req.$action.auth || req.$action.service?.settings?.auth || RestrictionType.DEFAULT;
   }
 
   @Method
   async authenticate(
     ctx: Context<Record<string, unknown>, UserAuthMeta>,
     _route: any,
-    req: RequestMessage
+    req: RequestMessage,
   ): Promise<unknown> {
     const restrictionType = this.getRestrictionType(req);
 
@@ -132,10 +128,7 @@ export default class ApiService extends moleculer.Service {
     // Read the token from header
     const auth = req.headers.authorization;
     if (!auth?.startsWith?.('Bearer')) {
-      throw new ApiGateway.Errors.UnAuthorizedError(
-        ApiGateway.Errors.ERR_INVALID_TOKEN,
-        null
-      );
+      throw new ApiGateway.Errors.UnAuthorizedError(ApiGateway.Errors.ERR_INVALID_TOKEN, null);
     }
 
     const token = auth.slice(7);
@@ -148,14 +141,28 @@ export default class ApiService extends moleculer.Service {
     let user: User;
     if (authUser.type === AuthUserRole.USER) {
       user = await ctx.call('users.findOne', {
-        query: { authUser: authUser.id },
+        query: {
+          authUser: authUser.id,
+        },
       });
+      const profile = req.headers['x-profile'] as any;
+      if (!!profile) {
+        const currentTenantUser = await ctx.call('tenantUsers.findOne', {
+          query: {
+            tenant: profile,
+            user: user.id,
+          },
+        });
+        if (!currentTenantUser) {
+          throwNoRightsError('Unauthorized');
+        }
+      }
+      ctx.meta.profile = profile;
     }
 
     ctx.meta.authUser = authUser;
     ctx.meta.authToken = token;
     ctx.meta.user = user;
-    ctx.meta.profile = req.headers['x-profile'];
 
     return user;
   }
@@ -164,7 +171,7 @@ export default class ApiService extends moleculer.Service {
   async authorize(
     ctx: Context<Record<string, unknown>, UserAuthMeta>,
     _route: any,
-    req: RequestMessage
+    req: RequestMessage,
   ): Promise<unknown> {
     const restrictionType = this.getRestrictionType(req);
 
@@ -184,10 +191,7 @@ export default class ApiService extends moleculer.Service {
       });
     }
 
-    if (
-      restrictionType === RestrictionType.USER &&
-      authUser.type !== AuthUserRole.USER
-    ) {
+    if (restrictionType === RestrictionType.USER && authUser.type !== AuthUserRole.USER) {
       throw new ApiGateway.Errors.UnAuthorizedError('NO_RIGHTS', {
         error: 'Unauthorized',
       });
@@ -195,7 +199,7 @@ export default class ApiService extends moleculer.Service {
   }
 
   @Action({
-    auth: RestrictionType.PUBLIC
+    auth: RestrictionType.PUBLIC,
   })
   ping() {
     return {

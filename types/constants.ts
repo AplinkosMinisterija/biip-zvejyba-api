@@ -14,11 +14,8 @@ export type Table<
   Fields = {},
   Populates = {},
   P extends keyof Populates = never,
-  F extends keyof (Fields & Populates) = keyof Fields
-> = Pick<
-  Omit<Fields, P> & Pick<Populates, P>,
-  Extract<P | Exclude<keyof Fields, P>, F>
->;
+  F extends keyof (Fields & Populates) = keyof Fields,
+> = Pick<Omit<Fields, P> & Pick<Populates, P>, Extract<P | Exclude<keyof Fields, P>, F>>;
 
 export interface CommonFields {
   createdBy: User['id'];
@@ -103,30 +100,16 @@ export enum LocationType {
   INLAND_WATERS = 'INLAND_WATERS',
 }
 
-export function throwUnauthorizedError(
-  message?: string
-): Errors.MoleculerError {
-  throw new Moleculer.Errors.MoleculerClientError(
-    message || `Unauthorized.`,
-    401,
-    'UNAUTHORIZED'
-  );
+export function throwUnauthorizedError(message?: string): Errors.MoleculerError {
+  throw new Moleculer.Errors.MoleculerClientError(message || `Unauthorized.`, 401, 'UNAUTHORIZED');
 }
 
 export function throwNotFoundError(message?: string): Errors.MoleculerError {
-  throw new Moleculer.Errors.MoleculerClientError(
-    message || `Not found.`,
-    404,
-    'NOT_FOUND'
-  );
+  throw new Moleculer.Errors.MoleculerClientError(message || `Not found.`, 404, 'NOT_FOUND');
 }
 
 export function throwNoRightsError(message?: string): Errors.MoleculerError {
-  throw new Moleculer.Errors.MoleculerClientError(
-    message || `No rights.`,
-    401,
-    'NO_RIGHTS'
-  );
+  throw new Moleculer.Errors.MoleculerClientError(message || `No rights.`, 401, 'NO_RIGHTS');
 }
 
 export const COMMON_DEFAULT_SCOPES = ['notDeleted'];
