@@ -14,9 +14,9 @@
     "test:watch": "yarn run test --watch",
     "test:coverage": "yarn run test --coverage",
     "lint": "eslint --ext .js,.ts .",
-    "dc:up": "docker-compose -p biip-zvejyba-api up --build -d",
-    "dc:down": "docker-compose -p biip-zvejyba-api down",
-    "dc:logs": "docker-compose -p biip-zvejyba-api logs -f",
+    "dc:up": "docker compose -p biip-zvejyba-api up --build -d",
+    "dc:down": "docker compose -p biip-zvejyba-api down",
+    "dc:logs": "docker compose -p biip-zvejyba-api logs -f",
     "prepare": "husky install"
   },
   "keywords": [

@@ -49,9 +49,7 @@ export type BuiltToolsGroup<
 @Service({
   name: 'builtToolsGroups',
   mixins: [
-    DbConnection({
-      rest: false,
-    }),
+    DbConnection(),
     PostgisMixin({
       srid: 3346,
     }),
@@ -142,6 +140,17 @@ export type BuiltToolsGroup<
       count: ['beforeSelect'],
       get: ['beforeSelect'],
       all: ['beforeSelect'],
+    },
+  },
+  action: {
+    create: {
+      rest: null,
+    },
+    update: {
+      rest: null,
+    },
+    remove: {
+      rest: null,
     },
   },
 })
