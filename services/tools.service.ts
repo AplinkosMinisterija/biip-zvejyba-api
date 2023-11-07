@@ -50,14 +50,20 @@ async function validateSealNr({ ctx, params, entity, value }: FieldHookCallback)
   }
 
   if (!!value && entity?.sealNr !== value) {
-    const existing: Tool[] = await this.findEntities(null, {
-      query: {
-        sealNr: ctx.params.sealNr,
-      },
+    const query: any = {
+      sealNr: ctx.params.sealNr,
+    };
+
+    if (entity?.id) {
+      query.id = { $ne: entity?.id };
+    }
+
+    const count = await this.countEntities(null, {
+      query,
       fields: ['id'],
     });
 
-    if (entity?.id ? existing?.some((tool) => tool.id !== entity.id) : existing.length) {
+    if (count > 0) {
       throwValidationError('Tool with this seal number already exists', params);
     }
   }
