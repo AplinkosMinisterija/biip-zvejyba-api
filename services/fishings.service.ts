@@ -47,7 +47,7 @@ export type Fishing<
 > = Table<Fields, Populates, P, F>;
 
 @Service({
-  name: 'fishings',
+  name: 'fishingEvents',
   mixins: [
     DbConnection(),
     PostgisMixin({
@@ -100,6 +100,7 @@ export type Fishing<
         },
       },
       toolsGroupsHistories: {
+        //galimai nebereikes sito
         type: 'array',
         readonly: true,
         virtual: true,
@@ -116,6 +117,7 @@ export type Fishing<
         },
       },
       fishWeight: {
+        //galimai nebereikes sito
         type: 'array',
         readonly: true,
         virtual: true,
