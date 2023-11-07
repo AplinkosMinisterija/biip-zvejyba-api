@@ -10,7 +10,9 @@ import {
   COMMON_SCOPES,
   CommonFields,
   CommonPopulates,
+  FieldHookCallback,
   Table,
+  throwValidationError,
 } from '../types';
 import { AuthUserRole, UserAuthMeta } from './api.service';
 import { Tenant } from './tenants.service';
@@ -42,6 +44,65 @@ export type Tool<
   F extends keyof (Fields & Populates) = keyof Fields,
 > = Table<Fields, Populates, P, F>;
 
+async function validateSealNr({ ctx, params, entity, value }: FieldHookCallback) {
+  if (!entity?.id && !value) {
+    throwValidationError('No seal number', params);
+  }
+
+  if (!!value && entity?.sealNr !== value) {
+    const existing: Tool[] = await this.findEntities(null, {
+      query: {
+        sealNr: ctx.params.sealNr,
+      },
+      fields: ['id'],
+    });
+
+    if (entity?.id ? existing?.some((tool) => tool.id !== entity.id) : existing.length) {
+      throwValidationError('Tool with this seal number already exists', params);
+    }
+  }
+
+  return value;
+}
+
+async function validateToolType({ ctx, params, entity, value }: FieldHookCallback) {
+  if (!entity?.id && !value) {
+    throwValidationError('No tool type', params);
+  }
+
+  if (!!value && entity?.toolTypeId !== value) {
+    const toolType: ToolType = await ctx.call('toolTypes.resolve', { id: value });
+    if (!toolType?.id) {
+      throwValidationError('Invalid tool type', params);
+    }
+  }
+
+  return value;
+}
+
+async function validateData({ ctx, params, entity, value }: FieldHookCallback) {
+  if (!entity?.id && !value) {
+    throwValidationError('No tool data', params);
+  }
+
+  if (!value && !!entity.data) return value;
+
+  const toolType: ToolType = await ctx.call('toolTypes.resolve', {
+    id: params.toolType || entity?.toolTypeId,
+    throwIfNotExist: true,
+  });
+
+  if (!value?.eyeSize) throwValidationError('Invalid tool data - no eyeSize', params);
+
+  if (toolType.type === ToolCategory.NET && !value?.netLength) {
+    throwValidationError('Invalid tool data - no netLength', params);
+  } else if (toolType.type !== ToolCategory.NET && !value?.eyeSize2) {
+    throwValidationError('Invalid tool data - no eyeSize2', params);
+  }
+
+  return value;
+}
+
 @Service({
   name: 'tools',
   mixins: [DbConnection(), ProfileMixin],
@@ -52,9 +113,15 @@ export type Tool<
         primaryKey: true,
         secure: true,
       },
-      sealNr: 'string',
+      sealNr: {
+        type: 'string',
+        onCreate: validateSealNr,
+        onUpdate: validateSealNr,
+      },
       data: {
         type: 'object',
+        onCreate: validateData,
+        onUpdate: validateData,
         properties: {
           eyeSize: 'number|convert',
           eyeSize2: 'number|convert|optional',
@@ -65,6 +132,8 @@ export type Tool<
         type: 'number',
         columnType: 'integer',
         columnName: 'toolTypeId',
+        onCreate: validateToolType,
+        onUpdate: validateToolType,
         populate: {
           action: 'toolTypes.resolve',
           params: {
@@ -122,8 +191,7 @@ export type Tool<
   },
   hooks: {
     before: {
-      create: ['beforeCreateOrUpdate', 'beforeCreate'],
-      update: ['beforeCreateOrUpdate'],
+      create: ['beforeCreate'],
       remove: ['beforeDelete'],
       availableTools: ['beforeSelect'],
       list: ['beforeSelect'],
@@ -144,39 +212,6 @@ export default class ToolTypesService extends moleculer.Service {
       populate: ['toolsGroup'],
     });
     return tools?.filter((tool) => !tool.toolsGroup);
-  }
-
-  @Method
-  async beforeCreateOrUpdate(ctx: Context<any>) {
-    const existing: Tool[] = await this.findEntities(null, {
-      query: {
-        sealNr: ctx.params.sealNr,
-      },
-    });
-
-    //Seal number validation
-    if (ctx.params.id ? existing?.some((tool) => tool.id !== ctx.params.id) : existing.length) {
-      throw new moleculer.Errors.ValidationError('Tool with this seal number already exists');
-    }
-
-    //Tool type validation
-    const toolType: ToolType = await ctx.call('toolTypes.get', {
-      id: ctx.params.toolType,
-    });
-
-    if (!toolType) {
-      throw new moleculer.Errors.ValidationError('Invalid tool type');
-    }
-
-    //Tool data validation
-    const invalidNet = !ctx.params.data?.eyeSize || !ctx.params.data?.netLength;
-    const invalidCatcher = !ctx.params.data?.eyeSize || !ctx.params.data?.eyeSize2;
-
-    const invalidTool = toolType.type === ToolCategory.NET ? invalidNet : invalidCatcher;
-
-    if (invalidTool) {
-      throw new moleculer.Errors.ValidationError('Invalid tool data');
-    }
   }
 
   @Method
