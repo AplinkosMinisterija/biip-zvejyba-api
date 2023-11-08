@@ -2,7 +2,7 @@
 
 import moleculer, { Context } from 'moleculer';
 import { Action, Method, Service } from 'moleculer-decorators';
-import { COMMON_DEFAULT_SCOPES, COMMON_FIELDS, COMMON_SCOPES, RestrictionType } from '../types';
+import { COMMON_DEFAULT_SCOPES, COMMON_FIELDS, COMMON_SCOPES, INNER_AUTH_GROUP_IDS, RestrictionType } from '../types';
 import { TenantUser, TenantUserRole } from './tenantUsers.service';
 
 import DbConnection, { PopulateHandlerFn } from '../mixins/database.mixin';
@@ -239,7 +239,8 @@ export default class TenantsService extends moleculer.Service {
 
     for (const authGroupKey in authGroupsMap) {
       const authGroup = authGroupsMap[authGroupKey];
-      if (authGroup.id !== Number(process.env.FREELANCER_GROUP_ID) && authGroup.companyCode) {
+
+      if (!INNER_AUTH_GROUP_IDS.includes(authGroup.id) && authGroup.companyCode) {
         await this.createEntity(null, {
           name: authGroup.name,
           email: authGroup.companyEmail,
