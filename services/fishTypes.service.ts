@@ -93,7 +93,7 @@ export default class FishTypesService extends moleculer.Service {
 
     return ctx.call('minio.uploadFile', {
       payload: ctx.params,
-      isPrivate: false,
+      isPrivate: true,
       types: IMAGE_TYPES,
       folder,
     });
