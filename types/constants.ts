@@ -112,4 +112,8 @@ export function throwNoRightsError(message?: string): Errors.MoleculerError {
   throw new Moleculer.Errors.MoleculerClientError(message || `No rights.`, 401, 'NO_RIGHTS');
 }
 
+export function throwValidationError(message?: string, data?: any): Errors.MoleculerError {
+  throw new Moleculer.Errors.ValidationError(message || `Not valid.`, 'VALIDATION_ERROR', data);
+}
+
 export const COMMON_DEFAULT_SCOPES = ['notDeleted'];
