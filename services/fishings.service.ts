@@ -3,7 +3,7 @@
 import moleculer, { Context } from 'moleculer';
 import { Action, Service } from 'moleculer-decorators';
 import PostgisMixin from 'moleculer-postgis';
-import DbConnection from '../mixins/database.mixin';
+import DbConnection, { PopulateHandlerFn } from '../mixins/database.mixin';
 import {
   COMMON_DEFAULT_SCOPES,
   COMMON_FIELDS,
@@ -104,16 +104,14 @@ export type Fishing<
         type: 'array',
         readonly: true,
         virtual: true,
-        async populate(ctx: any, _values: any, fishings: Fishing[]) {
-          return Promise.all(
-            fishings.map((fishing: any) => {
-              return ctx.call('toolsGroupsHistories.find', {
-                query: {
-                  fishing: fishing.id,
-                },
-              });
-            }),
-          );
+        populate: {
+          keyField: 'id',
+          handler: PopulateHandlerFn('toolsGroupsHistories.populateByProp'),
+          params: {
+            queryKey: 'fishing',
+            mappingMulti: true,
+            sort: 'createdAt'
+          },
         },
       },
       fishWeight: {
