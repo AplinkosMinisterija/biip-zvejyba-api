@@ -99,36 +99,18 @@ export type Fishing<
           },
         },
       },
-      toolsGroupsHistories: {
-        //galimai nebereikes sito
+      fishingEvents: {
         type: 'array',
         readonly: true,
         virtual: true,
         populate: {
           keyField: 'id',
-          handler: PopulateHandlerFn('toolsGroupsHistories.populateByProp'),
+          handler: PopulateHandlerFn('fishingEvents.populateByProp'),
           params: {
             queryKey: 'fishing',
             mappingMulti: true,
-            sort: 'createdAt'
+            sort: 'date',
           },
-        },
-      },
-      fishWeight: {
-        //galimai nebereikes sito
-        type: 'array',
-        readonly: true,
-        virtual: true,
-        async populate(ctx: any, _values: any, fishings: Fishing[]) {
-          return Promise.all(
-            fishings.map((fishing: any) => {
-              return ctx.call('fishWeights.findOne', {
-                query: {
-                  fishing: fishing.id,
-                },
-              });
-            }),
-          );
         },
       },
       ...COMMON_FIELDS,
@@ -137,7 +119,6 @@ export type Fishing<
       ...COMMON_SCOPES,
     },
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
-    defaultPopulates: [],
   },
   actions: {
     create: {
