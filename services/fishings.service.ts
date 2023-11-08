@@ -113,6 +113,22 @@ export type Fishing<
           },
         },
       },
+      fishWeight: {
+        type: 'array',
+        readonly: true,
+        virtual: true,
+        async populate(ctx: any, _values: any, fishings: Fishing[]) {
+          return Promise.all(
+            fishings.map((fishing: any) => {
+              return ctx.call('fishWeights.findOne', {
+                query: {
+                  fishing: fishing.id,
+                },
+              });
+            }),
+          );
+        },
+      },
       ...COMMON_FIELDS,
     },
     scopes: {
