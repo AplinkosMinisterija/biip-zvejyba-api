@@ -63,7 +63,7 @@ async function validateSealNr({ ctx, params, entity, value }: FieldHookCallback)
       fields: ['id'],
     });
 
-    if (count > 0) {
+    if (!!count) {
       throwValidationError('Tool with this seal number already exists', params);
     }
   }
