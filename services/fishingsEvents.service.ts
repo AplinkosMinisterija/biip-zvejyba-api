@@ -3,7 +3,7 @@
 import moleculer from 'moleculer';
 import { Service } from 'moleculer-decorators';
 import DbConnection from '../mixins/database.mixin';
-import { CommonFields, CommonPopulates, RestrictionType, Table } from '../types';
+import { CommonFields, CommonPopulates, FieldHookCallback, Table } from '../types';
 
 import ProfileMixin from '../mixins/profile.mixin';
 import { Tenant } from './tenants.service';
@@ -14,9 +14,9 @@ enum FishingEventType {
   START_FISHING = 'START_FISHING',
   END_FISHING = 'END_FISHING',
   BUILD_TOOLS = 'BUILD_TOOLS',
-  REMOVE_TOOLS = 'REMOVE_TOOLS',
-  WEIGH_FISH = 'WEIGH_FISH',
-  WEIGHT_TOTAL = 'WEIGHT_TOTAL',
+  REMOVE_TOOLS = 'TOOLS_GROUP_REMOVE',
+  WEIGH_TOOLS = 'TOOLS_GROUP_WEIGHT',
+  WEIGH_TOTAL = 'TOTAL_WEIGHT',
 }
 
 interface Fields extends CommonFields {
@@ -39,23 +39,39 @@ export type Fishing<
   name: 'fishingEvents',
   mixins: [DbConnection(), ProfileMixin],
   settings: {
-    type: 'string',
-    date: {
-      type: 'date',
-      columnType: 'datetime',
-      readonly: true,
-      onCreate: () => new Date(),
-    },
     fields: {
+      type: 'string',
+      date: {
+        type: 'date',
+        columnType: 'datetime',
+        readonly: true,
+        onCreate: () => new Date(),
+      },
+      fishWeight: {
+        type: 'number',
+        columnType: 'integer',
+        columnName: 'fishWeightId',
+        async get({ entity, ctx }: FieldHookCallback<Fields>) {
+          if (entity.fishWeightId)
+            return await ctx.call('fishWeights.get', { id: entity.fishWeightId });
+        },
+      },
+      toolsGroupsHistory: {
+        type: 'number',
+        columnType: 'integer',
+        columnName: 'toolsGroupsHistoryId',
+        async get({ entity, ctx }: FieldHookCallback<Fields>) {
+          if (entity.toolsGroupsHistoryId)
+            return await ctx.call('toolsGroupsHistories.get', { id: entity.toolsGroupsHistoryId });
+        },
+      },
       toolsGroup: {
         type: 'number',
         columnType: 'integer',
         columnName: 'toolsGroupId',
-        populate: {
-          action: 'toolsGroups.resolve',
-          params: {
-            scope: false,
-          },
+        async get({ entity, ctx }: FieldHookCallback<Fields>) {
+          if (entity.toolsGroupId)
+            return await ctx.call('toolsGroups.get', { id: entity.toolsGroupId });
         },
       },
       fishing: {
@@ -64,17 +80,6 @@ export type Fishing<
         columnName: 'fishingId',
         populate: {
           action: 'fishings.resolve',
-          params: {
-            scope: false,
-          },
-        },
-      },
-      tenant: {
-        type: 'number',
-        columnType: 'integer',
-        columnName: 'tenantId',
-        populate: {
-          action: 'tenants.resolve',
           params: {
             scope: false,
           },
@@ -91,47 +96,19 @@ export type Fishing<
           },
         },
       },
-      toolsGroupsHistories: {
-        type: 'array',
-        readonly: true,
-        virtual: true,
-        async populate(ctx: any, _values: any, fishings: Fishing[]) {
-          return Promise.all(
-            fishings.map((fishing: any) => {
-              return ctx.call('toolsGroupsHistories.find', {
-                query: {
-                  fishing: fishing.id,
-                },
-              });
-            }),
-          );
-        },
-      },
-      fishWeight: {
-        type: 'array',
-        readonly: true,
-        virtual: true,
-        async populate(ctx: any, _values: any, fishings: Fishing[]) {
-          return Promise.all(
-            fishings.map((fishing: any) => {
-              return ctx.call('fishWeights.findOne', {
-                query: {
-                  fishing: fishing.id,
-                },
-              });
-            }),
-          );
+      tenant: {
+        type: 'number',
+        columnType: 'integer',
+        columnName: 'tenantId',
+        populate: {
+          action: 'tenants.resolve',
+          params: {
+            scope: false,
+          },
         },
       },
     },
-  },
-  actions: {
-    create: {
-      rest: null,
-    },
-    update: {
-      auth: RestrictionType.ADMIN,
-    },
+    // defaultPopulates: ['fishWeight', 'toolsGroupsHistory', 'toolsGroup'],
   },
   hooks: {
     before: {

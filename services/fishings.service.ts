@@ -47,7 +47,7 @@ export type Fishing<
 > = Table<Fields, Populates, P, F>;
 
 @Service({
-  name: 'fishingEvents',
+  name: 'fishings',
   mixins: [
     DbConnection(),
     PostgisMixin({
