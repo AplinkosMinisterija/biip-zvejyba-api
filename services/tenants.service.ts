@@ -5,7 +5,7 @@ import { Action, Method, Service } from 'moleculer-decorators';
 import { COMMON_DEFAULT_SCOPES, COMMON_FIELDS, COMMON_SCOPES, RestrictionType } from '../types';
 import { TenantUser, TenantUserRole } from './tenantUsers.service';
 
-import DbConnection from '../mixins/database.mixin';
+import DbConnection, { PopulateHandlerFn } from '../mixins/database.mixin';
 import { UserAuthMeta } from './api.service';
 import { UserType } from './users.service';
 
@@ -59,16 +59,13 @@ export interface Tenant {
         readonly: true,
         virtual: true,
         default: () => [],
-        async populate(ctx: any, _values: any, tenants: any[]) {
-          return Promise.all(
-            tenants.map((tenant: any) => {
-              return ctx.call('tenantUsers.find', {
-                query: {
-                  tenant: tenant.id,
-                },
-              });
-            }),
-          );
+        populate: {
+          keyField: 'id',
+          handler: PopulateHandlerFn('tenantUsers.populateByProp'),
+          params: {
+            queryKey: 'tenant',
+            mappingMulti: true,
+          },
         },
       },
       ...COMMON_FIELDS,
