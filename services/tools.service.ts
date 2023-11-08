@@ -15,6 +15,7 @@ import {
   throwValidationError,
 } from '../types';
 import { AuthUserRole, UserAuthMeta } from './api.service';
+import { BuiltToolsGroup } from './builtToolsGroups.service';
 import { Tenant } from './tenants.service';
 import { ToolCategory, ToolType } from './toolTypes.service';
 import { ToolsGroup } from './toolsGroups.service';
@@ -27,14 +28,15 @@ interface Fields extends CommonFields {
   eyeSize2: number;
   netLength: number;
   toolType: ToolType['id'];
-  toolsGroup: ToolsGroup['id'];
   tenant: Tenant['id'];
   user: User['id'];
+  builtToolsGroup?: BuiltToolsGroup['id'];
 }
 
 interface Populates extends CommonPopulates {
   toolType: ToolType;
   toolsGroup: ToolsGroup;
+  builtToolsGroup: BuiltToolsGroup;
   tenant: Tenant;
   user: User;
 }
@@ -131,6 +133,7 @@ async function validateData({ ctx, params, entity, value }: FieldHookCallback) {
         properties: {
           eyeSize: 'number|convert',
           eyeSize2: 'number|convert|optional',
+          eyeSize3: 'number|convert|optional',
           netLength: 'number|convert|optional',
         },
       },
@@ -147,20 +150,20 @@ async function validateData({ ctx, params, entity, value }: FieldHookCallback) {
           },
         },
       },
-      toolsGroup: {
+      builtToolsGroup: {
         type: 'number',
         readonly: true,
         virtual: true,
         async populate(ctx: any, _values: any, tools: Tool[]) {
-          //TODO: reikia geresnio sprendimo, nes toolGroups'u laikui begant dauges
           return Promise.all(
             tools.map(async (tool: Tool) => {
-              const toolGroups = await ctx.call('toolsGroups.find', {
+              return await ctx.call('builtToolsGroups.findOne', {
                 query: {
-                  $raw: `tools::jsonb @> '${tool.id}'`,
+                  ...ctx.params.query,
+                  $raw: `${tool.id} = ANY(tools)`,
+                  removeEvent: { $exists: false },
                 },
               });
-              return toolGroups.find((group: ToolsGroup) => !group.removeEvent);
             }),
           );
         },
@@ -193,7 +196,7 @@ async function validateData({ ctx, params, entity, value }: FieldHookCallback) {
       ...COMMON_SCOPES,
     },
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
-    defaultPopulates: ['toolType', 'toolsGroup'],
+    defaultPopulates: ['toolType'],
   },
   hooks: {
     before: {
@@ -215,9 +218,9 @@ export default class ToolTypesService extends moleculer.Service {
   async availableTools(ctx: Context<any, UserAuthMeta>) {
     const tools: Tool[] = await this.findEntities(ctx, {
       ...ctx.params,
-      populate: ['toolsGroup'],
+      populate: ['builtToolsGroup'],
     });
-    return tools?.filter((tool) => !tool.toolsGroup);
+    return tools?.filter((tool) => !tool.builtToolsGroup);
   }
 
   @Method
@@ -230,13 +233,13 @@ export default class ToolTypesService extends moleculer.Service {
           tenant: ctx.meta.profile ? ctx.meta.profile : { $exists: false },
           user: ctx.meta.profile ? { $exists: true } : ctx.meta.user.id,
         },
-        populate: ['toolsGroup'],
+        populate: ['builtToolsGroup'],
       });
       if (!tool) {
         throw new moleculer.Errors.ValidationError('Cannot delete tool');
       }
       //validate if tool is in the water
-      if (tool.toolsGroup) {
+      if (tool.builtToolsGroup) {
         throw new moleculer.Errors.ValidationError('Tools is in use');
       }
     }

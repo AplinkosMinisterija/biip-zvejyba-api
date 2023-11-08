@@ -43,13 +43,19 @@ export default class LocationsService extends moleculer.Service {
     cache: false,
   })
   async search(ctx: Context<any, UserAuthMeta>) {
-    if (!ctx.params.query?.coordinates) {
+    let query = ctx.params.query;
+
+    if (typeof query === 'string') {
+      query = JSON.parse(query);
+    }
+
+    if (!query?.coordinates) {
       throw new moleculer.Errors.ValidationError('Invalid coordinates');
     }
-    const geom = coordinatesToGeometry(JSON.parse(ctx.params.query?.coordinates));
-    if (ctx.params.query?.type === LocationType.ESTUARY) {
+    const geom = coordinatesToGeometry(query?.coordinates);
+    if (query?.type === LocationType.ESTUARY) {
       return this.getBarFromPoint(geom);
-    } else if (ctx.params?.query?.type === LocationType.INLAND_WATERS) {
+    } else if (query?.type === LocationType.INLAND_WATERS) {
       return this.getRiverOrLakeFromPoint(geom);
     } else {
     }
@@ -125,28 +131,23 @@ export default class LocationsService extends moleculer.Service {
     if (geom?.features?.length) {
       try {
         const box = getBox(geom, 200);
-        const rivers = `${process.env.GEO_SERVER}/qgisserver/uetk_zuvinimas?SERVICE=WFS&REQUEST=GetFeature&TYPENAME=rivers&OUTPUTFORMAT=application/json&GEOMETRYNAME=centroid&BBOX=${box}`;
-        const riversData = await fetch(rivers, {
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        });
-        const riversResult = await riversData.json();
-        const municipality = await this.getMunicipalityFromPoint(geom);
-        const lakes = `${process.env.GEO_SERVER}/qgisserver/uetk_zuvinimas?SERVICE=WFS&REQUEST=GetFeature&TYPENAME=lakes_ponds&OUTPUTFORMAT=application/json&GEOMETRYNAME=centroid&BBOX=${box}`;
-        const lakesData = await fetch(lakes, {
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        });
-        const lakesResult = await lakesData.json();
-        const list = [...riversResult.features, ...lakesResult.features];
 
-        const mappedList = map(list, (item) => {
+        const bodyOfWatersUrl = `${process.env.GEO_SERVER}/qgisserver/uetk_public?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetFeatureInfo&QUERY_LAYERS=upes%2Cezerai_tvenkiniai&INFO_FORMAT=application%2Fjson&FEATURE_COUNT=1000&X=50&Y=50&SRS=EPSG%3A3346&STYLES=&WIDTH=101&HEIGHT=101&BBOX=${box}`;
+        const bodyOfWatersData = await fetch(bodyOfWatersUrl, {
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+        const { features } = await bodyOfWatersData.json();
+
+        const municipality = await this.getMunicipalityFromPoint(geom);
+
+        const mappedList = map(features, (item) => {
+          const { properties } = item;
           return {
-            id: item.properties.kadastro_id,
-            name: item.properties.pavadinimas,
-            municipality: municipality,
+            id: properties['2. Kadastro identifikavimo kodas'],
+            name: properties['1. Pavadinimas'],
+            municipality,
           };
         });
 
@@ -164,12 +165,14 @@ export default class LocationsService extends moleculer.Service {
     if (geom?.features?.length) {
       try {
         const box = getBox(geom);
-        const bars = `${process.env.GEO_SERVER}/qgisserver/zuvinimas_barai?SERVICE=WFS&REQUEST=GetFeature&OUTPUTFORMAT=application/json&TYPENAME=fishing_sections&SRSNAME=3346&BBOX=${box},urn:ogc:def:crs:3346`;
+
+        const bars = `${process.env.GEO_SERVER}/qgisserver/zuvinimas_barai?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetFeatureInfo&QUERY_LAYERS=fishing_sections&INFO_FORMAT=application%2Fjson&FEATURE_COUNT=1000&X=50&Y=50&SRS=EPSG%3A3346&STYLES=&WIDTH=101&HEIGHT=101&BBOX=${box}`;
         const barsData = await fetch(bars, {
           headers: {
             'Content-Type': 'application/json',
           },
         });
+
         const data = await barsData.json();
         const municipality = await this.getMunicipalityFromPoint(geom);
 
@@ -193,16 +196,19 @@ export default class LocationsService extends moleculer.Service {
   @Method
   async getMunicipalityFromPoint(geom: GeomFeatureCollection) {
     const box = getBox(geom);
-    const endPoint = `${process.env.GEO_SERVER}/qgisserver/uetk_zuvinimas?SERVICE=WFS&REQUEST=GetFeature&TYPENAME=municipalities&OUTPUTFORMAT=application/json&BBOX=${box}`;
+
+    const endPoint = `${process.env.GEO_SERVER}/qgisserver/administrative_boundaries?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetFeatureInfo&QUERY_LAYERS=municipalities&INFO_FORMAT=application%2Fjson&FEATURE_COUNT=1000&X=50&Y=50&SRS=EPSG%3A3346&STYLES=&WIDTH=101&HEIGHT=101&BBOX=${box}`;
     const data = await fetch(endPoint, {
       headers: {
         'Content-Type': 'application/json',
       },
     });
     const { features } = await data.json();
+    const { properties } = features[0];
+
     return {
-      id: Number(features[0].properties.kodas),
-      name: features[0].properties.pavadinimas,
+      id: Number(properties.code),
+      name: properties.name,
     };
   }
 }
