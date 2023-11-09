@@ -344,7 +344,7 @@ export default class TenantUsersService extends moleculer.Service {
         id: 'freelancer',
         name: `${user.firstName} ${user.lastName}`,
         freelancer: true,
-        isInvestigator: true,
+        isInvestigator: user.isInvestigator,
         email: user.email,
         phone: user.phone,
       });
