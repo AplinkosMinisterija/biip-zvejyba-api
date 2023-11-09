@@ -2,7 +2,7 @@
 
 import moleculer, { Context, RestSchema } from 'moleculer';
 import { Action, Service } from 'moleculer-decorators';
-import PostgisMixin from 'moleculer-postgis';
+import PostgisMixin, { GeometryType } from 'moleculer-postgis';
 import DbConnection, { PopulateHandlerFn } from '../mixins/database.mixin';
 import {
   COMMON_DEFAULT_SCOPES,
@@ -11,6 +11,7 @@ import {
   CommonFields,
   CommonPopulates,
   FILE_TYPES,
+  RestrictionType,
   Table,
 } from '../types';
 
@@ -73,6 +74,12 @@ export type Research<
       },
       cadastralId: 'string',
       waterBodyData: 'object|required',
+      geom: {
+        type: 'any',
+        geom: {
+          types: [GeometryType.POINT],
+        },
+      },
       startAt: {
         type: 'date',
         columnType: 'datetime',
@@ -202,6 +209,7 @@ export default class ResearchesService extends moleculer.Service {
 
   @Action({
     rest: 'POST /',
+    auth: RestrictionType.INVESTIGATOR
   })
   async createEntity(ctx: Context<{ fishes: ResearchFish[] }, UserAuthMeta>) {
     const { fishes } = ctx.params;
@@ -209,7 +217,7 @@ export default class ResearchesService extends moleculer.Service {
     const research: Research = await ctx.call('researches.create', ctx.params);
 
     await Promise.all(
-      fishes.map(
+      fishes?.map(
         (f) =>
           ctx.call('researches.fishes.createOrUpdate', {
             ...f,
@@ -223,13 +231,14 @@ export default class ResearchesService extends moleculer.Service {
 
   @Action({
     rest: 'PATCH /:id',
+    auth: RestrictionType.INVESTIGATOR
   })
   async updateEntity(ctx: Context<{ fishes: ResearchFish[] }, UserAuthMeta>) {
     const { fishes } = ctx.params;
     const research: Research = await ctx.call('researches.update', ctx.params);
 
     await Promise.all(
-      fishes.map(
+      fishes?.map(
         (f) =>
           ctx.call('researches.fishes.createOrUpdate', {
             ...f,

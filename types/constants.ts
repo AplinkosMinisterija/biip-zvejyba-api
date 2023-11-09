@@ -8,6 +8,7 @@ export enum RestrictionType {
   USER = 'USER',
   ADMIN = 'ADMIN',
   PUBLIC = 'PUBLIC',
+  INVESTIGATOR = 'INVESTIGATOR',
 }
 
 export type Table<
