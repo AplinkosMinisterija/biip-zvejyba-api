@@ -15,6 +15,7 @@ import {
   Table,
 } from '../types';
 
+import _ from 'lodash';
 import ProfileMixin from '../mixins/profile.mixin';
 import { getFolderName } from '../utils';
 import { UserAuthMeta } from './api.service';
@@ -209,7 +210,7 @@ export default class ResearchesService extends moleculer.Service {
 
   @Action({
     rest: 'POST /',
-    auth: RestrictionType.INVESTIGATOR
+    auth: RestrictionType.INVESTIGATOR,
   })
   async createEntity(ctx: Context<{ fishes: ResearchFish[] }, UserAuthMeta>) {
     const { fishes } = ctx.params;
@@ -231,7 +232,7 @@ export default class ResearchesService extends moleculer.Service {
 
   @Action({
     rest: 'PATCH /:id',
-    auth: RestrictionType.INVESTIGATOR
+    auth: RestrictionType.INVESTIGATOR,
   })
   async updateEntity(ctx: Context<{ fishes: ResearchFish[] }, UserAuthMeta>) {
     const { fishes } = ctx.params;
@@ -248,5 +249,44 @@ export default class ResearchesService extends moleculer.Service {
     );
 
     return ctx.call('researches.resolve', { id: research.id });
+  }
+
+  @Action({
+    rest: 'GET /:id/related',
+    auth: RestrictionType.PUBLIC,
+    params: {
+      id: {
+        type: 'number',
+        convert: true,
+      },
+    },
+  })
+  async listRelated(
+    ctx: Context<{ id: number; query: any; pageSize: number; page?: number }, UserAuthMeta>,
+  ) {
+    const { id } = ctx.params;
+
+    const research: Research = await ctx.call('researches.resolve', { id });
+    if (!research.cadastralId) {
+      return {
+        rows: [],
+        total: 0,
+        page: ctx.params?.page || 1,
+        pageSize: ctx.params?.pageSize || 10,
+        totalPages: 1,
+      };
+    }
+
+    return ctx.call(
+      'researches.list',
+      _.merge({}, ctx.params || {}, {
+        query: {
+          cadastralId: research.cadastralId,
+          id: {
+            $ne: research.id,
+          },
+        },
+      }),
+    );
   }
 }
