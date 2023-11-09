@@ -62,6 +62,12 @@ export default class AuthService extends moleculer.Service {
       type: user.type,
     };
 
+    if (ctx.meta?.authUser?.permissions?.FISHING) {
+      data.permissions = {
+        FISHING: ctx.meta.authUser.permissions.FISHING,
+      };
+    }
+    
     if (user.type === UserType.USER) {
       data.profiles = await ctx.call('tenantUsers.getProfiles');
     }

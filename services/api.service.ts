@@ -182,6 +182,17 @@ export default class ApiService extends moleculer.Service {
         error: 'Unauthorized',
       });
     }
+    const accesses = authUser?.permissions?.FISHING?.access || [];
+
+    function hasAccess(access: string, accesses: string[]) {
+      return accesses.includes(access) || accesses.includes('*');
+    }
+
+    if (restrictionType === RestrictionType.INVESTIGATOR && !hasAccess('INVESTIGATOR', accesses)) {
+      throw new ApiGateway.Errors.UnAuthorizedError('NO_RIGHTS', {
+        error: 'Unauthorized',
+      });
+    }
   }
 
   @Action({

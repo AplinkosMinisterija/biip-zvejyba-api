@@ -26,7 +26,7 @@ export default {
           }
         }
       }
-      ctx.params.sort = '-createdAt';
+      ctx.params.sort = ctx.params.sort || '-createdAt';
       return ctx;
     },
     beforeCreate(ctx: Context<any, UserAuthMeta>) {
