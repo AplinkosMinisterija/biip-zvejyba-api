@@ -2,7 +2,6 @@
 
 import moleculer, { Context } from 'moleculer';
 import { Action, Service } from 'moleculer-decorators';
-import PostgisMixin from 'moleculer-postgis';
 import DbConnection from '../mixins/database.mixin';
 import {
   COMMON_DEFAULT_SCOPES,
@@ -36,9 +35,6 @@ export type ResearchFish<
     DbConnection({
       collection: 'researchFishes',
       rest: false,
-    }),
-    PostgisMixin({
-      srid: 3346,
     }),
     ProfileMixin,
   ],
