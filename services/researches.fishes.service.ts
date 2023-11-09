@@ -12,7 +12,6 @@ import {
   Table,
 } from '../types';
 
-import ProfileMixin from '../mixins/profile.mixin';
 import { Tenant } from './tenants.service';
 import { User } from './users.service';
 
@@ -36,7 +35,6 @@ export type ResearchFish<
       collection: 'researchFishes',
       rest: false,
     }),
-    ProfileMixin,
   ],
   settings: {
     fields: {
@@ -75,17 +73,6 @@ export type ResearchFish<
     },
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
     defaultPopulates: [],
-  },
-  hooks: {
-    before: {
-      startFishing: ['beforeCreate'],
-      skipFishing: ['beforeCreate'],
-      list: ['beforeSelect'],
-      find: ['beforeSelect'],
-      count: ['beforeSelect'],
-      get: ['beforeSelect'],
-      all: ['beforeSelect'],
-    },
   },
 })
 export default class ResearchesFishesService extends moleculer.Service {
