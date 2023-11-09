@@ -165,6 +165,58 @@ export default class TenantUsersService extends moleculer.Service {
   }
 
   @Action({
+    rest: 'PATCH /update/:id',
+    auth: RestrictionType.USER,
+    params: {
+      id: 'any',
+      role: {
+        type: 'string',
+        optional: true,
+      },
+      email: {
+        type: 'string',
+        optional: true,
+      },
+      phone: {
+        type: 'string',
+        optional: true,
+      },
+    },
+  })
+  async updateTenantUser(
+    ctx: Context<
+      {
+        id: number;
+        role: string;
+        email: string;
+        phone: string;
+      },
+      UserAuthMeta
+    >,
+  ) {
+    validateCanEditTenantUser(ctx, 'Only OWNER and USER_ADMIN can update users to tenant.');
+    const { profile } = ctx.meta;
+    const { id, email, phone, role } = ctx.params;
+    const tenantUser: TenantUser = await ctx.call('tenantUsers.resolve', {
+      id,
+    });
+
+    if (role) {
+      await ctx.call('tenantUsers.update', {
+        id,
+        tenant: profile,
+        role,
+      });
+    }
+
+    return ctx.call('users.update', {
+      id: tenantUser?.user,
+      email,
+      phone,
+    });
+  }
+
+  @Action({
     rest: 'POST /invite',
     auth: RestrictionType.DEFAULT,
     params: {
@@ -280,6 +332,16 @@ export default class TenantUsersService extends moleculer.Service {
         email: user.email,
         phone: user.phone,
       });
+
+      if (user.isInvestigator) {
+        profiles.push({
+          id: 'investigator',
+          name: `${user.firstName} ${user.lastName}`,
+          isInvestigator: true,
+          email: user.email,
+          phone: user.phone,
+        });
+      }
     }
 
     return profiles;

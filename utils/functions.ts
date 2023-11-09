@@ -13,3 +13,6 @@ export const validateCanEditTenantUser = (ctx: Context<any, UserAuthMeta>, err: 
     throwNoRightsError(err);
   }
 };
+
+export const isInGroup = (groups: any, groupId: string) =>
+  groups?.some((group: any) => group.id === Number(groupId));
