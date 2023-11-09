@@ -154,14 +154,10 @@ export interface User {
     find: {
       auth: RestrictionType.DEFAULT,
     },
-    list: {},
-    count: {},
-    get: {},
     create: {
       rest: null,
     },
-    update: {},
-    remove: {},
+
     all: {
       auth: RestrictionType.DEFAULT,
     },

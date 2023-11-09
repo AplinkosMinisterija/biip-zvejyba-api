@@ -197,8 +197,14 @@ export default class TenantUsersService extends moleculer.Service {
     validateCanEditTenantUser(ctx, 'Only OWNER and USER_ADMIN can update users to tenant.');
     const { profile } = ctx.meta;
     const { id, email, phone, role } = ctx.params;
-    const tenantUser: TenantUser = await ctx.call('tenantUsers.resolve', {
+    const tenantUser: TenantUser<'user'> = await ctx.call('tenantUsers.resolve', {
       id,
+      populate: ['user'],
+    });
+
+    const currentUser = tenantUser.user;
+    const currentTenant: Tenant = await ctx.call('tenants.resolve', {
+      id: profile,
     });
 
     if (role) {
@@ -207,10 +213,19 @@ export default class TenantUsersService extends moleculer.Service {
         tenant: profile,
         role,
       });
+
+      const authRole =
+        role === TenantUserRole.USER_ADMIN ? AuthGroupRole.ADMIN : AuthGroupRole.USER;
+
+      await ctx.call('auth.users.assignToGroup', {
+        id: currentUser.authUser,
+        groupId: currentTenant.authGroup,
+        role: authRole,
+      });
     }
 
     return ctx.call('users.update', {
-      id: tenantUser?.user,
+      id: currentUser?.id,
       email,
       phone,
     });
@@ -329,19 +344,10 @@ export default class TenantUsersService extends moleculer.Service {
         id: 'freelancer',
         name: `${user.firstName} ${user.lastName}`,
         freelancer: true,
+        isInvestigator: true,
         email: user.email,
         phone: user.phone,
       });
-
-      if (user.isInvestigator) {
-        profiles.push({
-          id: 'investigator',
-          name: `${user.firstName} ${user.lastName}`,
-          isInvestigator: true,
-          email: user.email,
-          phone: user.phone,
-        });
-      }
     }
 
     return profiles;
