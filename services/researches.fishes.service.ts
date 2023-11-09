@@ -47,6 +47,7 @@ export type ResearchFish<
       },
       fishType: {
         type: 'number',
+        immutable: true,
         columnType: 'integer',
         columnName: 'fishTypeId',
         populate: 'fishTypes.resolve',
@@ -56,6 +57,7 @@ export type ResearchFish<
       abundancePercentage: 'number',
       biomassPercentage: 'number',
       research: {
+        immutable: true,
         type: 'number',
         columnType: 'integer',
         columnName: 'researchId',
