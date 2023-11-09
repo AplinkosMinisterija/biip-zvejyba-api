@@ -95,6 +95,11 @@ export const COMMON_SCOPES = {
   },
 };
 
+export const INNER_AUTH_GROUP_IDS = [
+  Number(process.env.FREELANCER_GROUP_ID),
+  Number(process.env.AUTH_INVESTIGATOR_GROUP_ID),
+];
+
 export enum LocationType {
   ESTUARY = 'ESTUARY',
   POLDERS = 'POLDERS',
