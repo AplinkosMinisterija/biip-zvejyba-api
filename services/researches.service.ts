@@ -16,6 +16,7 @@ import {
 } from '../types';
 
 import _ from 'lodash';
+import moment from 'moment';
 import ProfileMixin from '../mixins/profile.mixin';
 import { getFolderName } from '../utils';
 import { UserAuthMeta } from './api.service';
@@ -26,7 +27,7 @@ import { User } from './users.service';
 interface Fields extends CommonFields {
   id: number;
   cadastralId: string;
-  waterBodyData: { [key: string]: any };
+  waterBodyData: { name: string; municipality?: string; area: number };
   startAt: Date;
   endAt: Date;
   predatoryFishesRelativeAbundance: number;
@@ -74,7 +75,15 @@ export type Research<
         secure: true,
       },
       cadastralId: 'string',
-      waterBodyData: 'object|required',
+      waterBodyData: {
+        type: 'object',
+        required: true,
+        properties: {
+          name: 'string|required',
+          municipality: 'string',
+          area: 'number|required',
+        },
+      },
       geom: {
         type: 'any',
         geom: {
@@ -126,6 +135,16 @@ export type Research<
             queryKey: 'research',
             mappingMulti: true,
             sort: 'createdAt',
+            populate: 'fishType',
+            fields: [
+              'id',
+              'abundance',
+              'biomass',
+              'abundancePercentage',
+              'biomassPercentage',
+              'fishType',
+              'research',
+            ],
           },
         },
       },
@@ -157,7 +176,7 @@ export type Research<
       ...COMMON_SCOPES,
     },
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
-    defaultPopulates: ['fishes'],
+    defaultPopulates: [],
   },
   actions: {
     create: {
@@ -261,9 +280,7 @@ export default class ResearchesService extends moleculer.Service {
       },
     },
   })
-  async listRelated(
-    ctx: Context<{ id: number; query: any; pageSize: number; page?: number }, UserAuthMeta>,
-  ) {
+  async listRelated(ctx: Context<{ id: number; query: any; pageSize: number; page?: number }>) {
     const { id } = ctx.params;
 
     const research: Research = await ctx.call('researches.resolve', { id });
@@ -288,5 +305,51 @@ export default class ResearchesService extends moleculer.Service {
         },
       }),
     );
+  }
+  @Action({
+    rest: <RestSchema>{
+      method: 'GET',
+      basePath: '/public/researches',
+      path: '/',
+    },
+    auth: RestrictionType.PUBLIC,
+  })
+  async listPublic(ctx: Context) {
+    const researchesById: { [key: string]: Research[] } = await ctx.call('researches.find', {
+      mapping: 'cadastralId',
+      mappingMulti: true,
+      populate: 'fishes',
+      fields: [
+        'id',
+        'cadastralId',
+        'waterBodyData',
+        'geom',
+        'startAt',
+        'endAt',
+        'predatoryFishesRelativeAbundance',
+        'predatoryFishesRelativeBiomass',
+        'averageWeight',
+        'valuableFishesRelativeBiomass',
+        'conditionIndex',
+        'files',
+        'previousResearchData',
+        'fishes',
+      ],
+    });
+
+    const researches: Research[] = [];
+    function sortByDate(a: Research, b: Research) {
+      return moment(b.startAt).diff(a.startAt);
+    }
+    Object.entries(researchesById).forEach(([cadastralId, items]) => {
+      items = items.sort(sortByDate);
+      if (cadastralId) {
+        researches.push(items[0]);
+      } else {
+        researches.push(...items);
+      }
+    });
+
+    return researches.sort((a, b) => a.waterBodyData.name.localeCompare(b.waterBodyData.name));
   }
 }
