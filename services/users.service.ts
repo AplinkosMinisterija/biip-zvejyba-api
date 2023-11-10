@@ -9,13 +9,12 @@ import {
   EntityChangedParams,
   FieldHookCallback,
   RestrictionType,
-  throwNotFoundError,
 } from '../types';
 import { TenantUser, TenantUserRole } from './tenantUsers.service';
 
 import ApiGateway from 'moleculer-web';
 import DbConnection, { PopulateHandlerFn } from '../mixins/database.mixin';
-import { validateCanEditTenantUser } from '../utils';
+import { isInGroup } from '../utils';
 import { AuthUserRole, UserAuthMeta } from './api.service';
 
 export enum UserRole {
@@ -41,6 +40,7 @@ export interface User {
   roles: UserRole[];
   type: UserType;
   isFreelancer: boolean;
+  isInvestigator: boolean;
   tenantUsers: Array<TenantUser['id']>;
   tenants: Record<string | number, TenantUserRole>;
 }
@@ -108,6 +108,10 @@ export interface User {
         type: 'boolean',
         default: false,
       },
+      isInvestigator: {
+        type: 'boolean',
+        default: false,
+      },
       tenants: {
         type: 'object',
         readonly: true,
@@ -124,7 +128,7 @@ export interface User {
           params: {
             queryKey: 'user',
             mappingMulti: true,
-            populate: ['tenant']
+            populate: ['tenant'],
           },
         },
       },
@@ -150,16 +154,10 @@ export interface User {
     find: {
       auth: RestrictionType.DEFAULT,
     },
-    list: {},
-    count: {},
-    get: {},
     create: {
       rest: null,
     },
-    update: {
-      rest: null,
-    },
-    remove: {},
+
     all: {
       auth: RestrictionType.DEFAULT,
     },
@@ -348,6 +346,7 @@ export default class UsersService extends moleculer.Service {
       lastName: 'string',
       email: 'string',
       phone: 'string',
+      isInvestigator: 'boolean',
     },
   })
   async invite(
@@ -357,9 +356,10 @@ export default class UsersService extends moleculer.Service {
       phone: string;
       firstName: string;
       lastName: string;
+      isInvestigator: boolean;
     }>,
   ) {
-    const { personalCode, email, phone, firstName, lastName } = ctx.params;
+    const { personalCode, email, phone, firstName, lastName, isInvestigator } = ctx.params;
     // it will throw error if user already exists
     const authUser: any = await ctx.call('auth.users.invite', {
       personalCode,
@@ -379,73 +379,7 @@ export default class UsersService extends moleculer.Service {
       email,
       phone,
       isFreelancer: true,
-    });
-  }
-
-  @Action({
-    rest: 'PATCH /:id',
-    auth: RestrictionType.DEFAULT,
-    params: {
-      id: 'any',
-      role: {
-        type: 'string',
-        optional: true,
-      },
-      email: {
-        type: 'string',
-        optional: true,
-      },
-      phone: {
-        type: 'string',
-        optional: true,
-      },
-      tenantId: {
-        type: 'number',
-        optional: true,
-      },
-      tenantUserId: {
-        type: 'number',
-        optional: true,
-        convert: true,
-      },
-    },
-  })
-  async updateUser(
-    ctx: Context<
-      {
-        id: number;
-        role: string;
-        email: string;
-        phone: string;
-        tenantId: number;
-        tenantUserId: number;
-      },
-      UserAuthMeta
-    >,
-  ) {
-    validateCanEditTenantUser(ctx, 'Only OWNER and USER_ADMIN can update users to tenant.');
-
-    const { profile } = ctx.meta;
-    const { id, email, phone, role, tenantId, tenantUserId } = ctx.params;
-
-    const userToUpdate: User = await ctx.call('users.get', { id });
-
-    if (!userToUpdate) {
-      return throwNotFoundError('User not found.');
-    }
-
-    if (role) {
-      await ctx.call('tenantUsers.update', {
-        id: tenantUserId,
-        tenant: profile || tenantId,
-        role,
-      });
-    }
-
-    return ctx.call('users.update', {
-      id,
-      email,
-      phone,
+      isInvestigator,
     });
   }
 
@@ -512,6 +446,7 @@ export default class UsersService extends moleculer.Service {
     const data: Array<any> = await this.broker.call('auth.getSeedData', {
       timeout: 120 * 1000,
     });
+
     for (const authUser of data) {
       await this.createEntity(null, {
         firstName: authUser.firstName,
@@ -521,9 +456,8 @@ export default class UsersService extends moleculer.Service {
         email: authUser.email?.trim?.(),
         phone: authUser.phone,
         authUser: authUser.id,
-        isFreelancer: authUser.groups?.some(
-          (group: any) => group.id === Number(process.env.FREELANCER_GROUP_ID),
-        ),
+        isFreelancer: isInGroup(authUser.groups, process.env.FREELANCER_GROUP_ID),
+        isInvestigator: isInGroup(authUser.groups, process.env.AUTH_INVESTIGATOR_GROUP_ID),
       });
     }
   }
