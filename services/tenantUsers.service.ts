@@ -168,7 +168,7 @@ export default class TenantUsersService extends moleculer.Service {
     rest: 'PATCH /update/:id',
     auth: RestrictionType.USER,
     params: {
-      id: 'any',
+      id: { type: 'number', convert: true },
       role: {
         type: 'string',
         optional: true,
@@ -199,11 +199,13 @@ export default class TenantUsersService extends moleculer.Service {
     const { id, email, phone, role } = ctx.params;
     const tenantUser: TenantUser<'user'> = await ctx.call('tenantUsers.resolve', {
       id,
+      throwIfNotExist: true,
       populate: ['user'],
     });
 
     const currentUser = tenantUser.user;
     const currentTenant: Tenant = await ctx.call('tenants.resolve', {
+      throwIfNotExist: true,
       id: profile,
     });
 
