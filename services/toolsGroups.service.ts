@@ -88,22 +88,23 @@ export type ToolsGroup<
         columnName: 'tools',
         default: () => [],
         async populate(ctx: Context, values: number[], entities: ToolsGroup[]) {
-          try {
-            const tools: Tool[] = await ctx.call('tools.find', {
-              query: {
-                id: { $in: values },
-              },
-              populate: ['toolType'],
+          const tools: Tool[] = await ctx.call('tools.find', {
+            query: {
+              id: { $in: values },
+            },
+            populate: ['toolType'],
+          });
+
+          return entities?.map((entity) => {
+            const t = entity.tools?.map((toolId) => {
+              const tool = tools.find((t) => t.id === toolId);
+              return tool;
             });
-            return entities?.map((entity) => {
-              return entity.tools?.map((toolId) => {
-                const tool = tools.find((t) => t.id === toolId);
-                return tool;
-              });
-            });
-          } catch (e) {
-            return entities;
-          }
+            if (t.length) {
+              return t;
+            }
+            return entity.tools;
+          });
         },
       },
       tenant: {
@@ -171,6 +172,9 @@ export default class ToolsGroupsService extends moleculer.Service {
       location: Location;
     }>,
   ) {
+    if (!ctx.params.tools.length) {
+      throw new moleculer.Errors.ValidationError('No tools');
+    }
     // fishing validation
     const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
     if (!currentFishing) {
@@ -253,7 +257,9 @@ export default class ToolsGroupsService extends moleculer.Service {
       location: Location;
     }>,
   ) {
-    const group = await this.findEntity(ctx, { id: ctx.params.id });
+    const group: BuiltToolsGroup = await ctx.call('builtToolsGroups.resolve', {
+      id: ctx.params.id,
+    });
     if (!group) {
       throw new moleculer.Errors.ValidationError('Invalid group');
     }
@@ -263,19 +269,17 @@ export default class ToolsGroupsService extends moleculer.Service {
       if (!currentFishing) {
         throw new moleculer.Errors.ValidationError('Fishing not started');
       }
-
       const geom = coordinatesToGeometry(ctx.params.coordinates);
-
-      await ctx.call('toolsGroupsHistories.create', {
+      return await ctx.call('toolsGroupsHistories.create', {
         type: ToolsGroupHistoryTypes.REMOVE_TOOLS,
         geom,
         location: ctx.params.location,
-        toolsGroup: group.id,
+        toolsGroup: ctx.params.id,
         fishing: currentFishing.id,
       });
     }
     return ctx.call('builtToolsGroups.get', {
-      id: group.id,
+      id: ctx.params.id,
     });
   }
 
@@ -328,13 +332,13 @@ export default class ToolsGroupsService extends moleculer.Service {
         type: ToolsGroupHistoryTypes.WEIGH_FISH,
         geom,
         location: ctx.params.location,
-        toolsGroup: ctx.params.id,
+        toolsGroup: Number(ctx.params.id),
         fishing: currentFishing.id,
         data: ctx.params.data,
       });
     } else {
       await ctx.call('toolsGroupsHistories.update', {
-        id: group.id,
+        id: Number(group.weighingEvent.id),
         data: ctx.params.data,
       });
     }
@@ -363,9 +367,10 @@ export default class ToolsGroupsService extends moleculer.Service {
     }
     return ctx.call('builtToolsGroups.find', {
       query: {
-        location: ctx.params.id,
-        locationType: currentFishing.type,
         removeEvent: { $exists: false },
+        $raw: {
+          condition: `build_event -> 'location' @> '{"id": "${ctx.params.id}"}'`,
+        },
       },
       populate: ['tools'],
     });

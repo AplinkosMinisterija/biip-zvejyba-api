@@ -22,7 +22,7 @@ import { Tenant } from './tenants.service';
 import { ToolsGroupHistoryTypes } from './toolsGroupsHistories.service';
 import { User } from './users.service';
 
-enum FishingType {
+export enum FishingType {
   ESTUARY = 'ESTUARY',
   POLDERS = 'POLDERS',
   INLAND_WATERS = 'INLAND_WATERS',
@@ -109,7 +109,7 @@ export type Fishing<
           params: {
             queryKey: 'fishing',
             mappingMulti: true,
-            sort: 'createdAt'
+            sort: 'createdAt',
           },
         },
       },

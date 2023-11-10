@@ -36,7 +36,6 @@ interface Fields extends CommonFields {
   removeEvent: ToolsGroupsHistory;
   weighingEvent: ToolsGroupsHistory;
   fishing: Fishing['id'];
-  location: string;
 }
 
 interface Populates extends CommonPopulates {}
@@ -121,11 +120,6 @@ export type BuiltToolsGroup<
           },
         },
       },
-      location: {
-        type: 'string',
-        columnName: 'locationId',
-      },
-      locationType: 'string',
       ...COMMON_FIELDS,
     },
     scopes: {
