@@ -7,6 +7,7 @@ import { AuthGroupRole, TenantUser, TenantUserRole } from './tenantUsers.service
 import { User, UserType } from './users.service';
 
 import authMixin from 'biip-auth-nodejs/mixin';
+import { isInGroup } from '../utils';
 import { UserAuthMeta } from './api.service';
 import { Tenant } from './tenants.service';
 
@@ -67,7 +68,7 @@ export default class AuthService extends moleculer.Service {
         FISHING: ctx.meta.authUser.permissions.FISHING,
       };
     }
-    
+
     if (user.type === UserType.USER) {
       data.profiles = await ctx.call('tenantUsers.getProfiles');
     }
@@ -123,17 +124,14 @@ export default class AuthService extends moleculer.Service {
     );
     const authGroups: any[] = authUserGroups?.groups || [];
 
-    const isFreelancer = authGroups.some(
-      (authGroup: any) => authGroup.id === Number(process.env.FREELANCER_GROUP_ID),
-    );
-
     // update user info from e-vartai
     await ctx.call('users.update', {
       id: user.id,
       firstName: authUser.firstName,
       lastName: authUser.lastName,
       lastLogin: Date.now(),
-      isFreelancer,
+      isFreelancer: isInGroup(authGroups, process.env.FREELANCER_GROUP_ID),
+      isInvestigator: isInGroup(authGroups, process.env.AUTH_INVESTIGATOR_GROUP_ID),
     });
 
     for (const authGroup of authGroups) {
@@ -211,22 +209,41 @@ export default class AuthService extends moleculer.Service {
   async 'users.updated'(ctx: Context<EntityChangedParams<User>>) {
     const user = ctx.params.data as User;
     const oldUser = ctx.params.oldData as User;
+    const isFreelancerChanged = oldUser.isFreelancer !== user.isFreelancer;
+    const isInvestigatorChanged = oldUser.isInvestigator !== user.isInvestigator;
 
-    if (oldUser.isFreelancer === user.isFreelancer) {
+    if (!isFreelancerChanged && !isInvestigatorChanged) {
       return;
     }
 
-    if (user.isFreelancer) {
-      return await ctx.call('auth.users.assignToGroup', {
-        id: user.authUser,
-        groupId: Number(process.env.FREELANCER_GROUP_ID),
-      });
-    }
+    const handleSetGroup = async (
+      isPermissionChanged: boolean,
+      hasPermission: boolean,
+      groupId: string,
+    ) => {
+      if (isPermissionChanged) {
+        if (hasPermission) {
+          return await ctx.call('auth.users.assignToGroup', {
+            id: user.authUser,
+            groupId: Number(groupId),
+          });
+        }
 
-    return await ctx.call('auth.users.unassignFromGroup', {
-      id: user.authUser,
-      groupId: process.env.FREELANCER_GROUP_ID,
-    });
+        return await ctx.call('auth.users.unassignFromGroup', {
+          id: user.authUser,
+          groupId: Number(groupId),
+        });
+      }
+    };
+
+    handleSetGroup(isFreelancerChanged, user.isFreelancer, process.env.FREELANCER_GROUP_ID);
+    handleSetGroup(
+      isInvestigatorChanged,
+      user.isInvestigator,
+      process.env.AUTH_INVESTIGATOR_GROUP_ID,
+    );
+
+    return;
   }
 
   @Event()

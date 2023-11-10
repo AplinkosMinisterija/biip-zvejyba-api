@@ -165,6 +165,75 @@ export default class TenantUsersService extends moleculer.Service {
   }
 
   @Action({
+    rest: 'PATCH /update/:id',
+    auth: RestrictionType.USER,
+    params: {
+      id: { type: 'number', convert: true },
+      role: {
+        type: 'string',
+        optional: true,
+      },
+      email: {
+        type: 'string',
+        optional: true,
+      },
+      phone: {
+        type: 'string',
+        optional: true,
+      },
+    },
+  })
+  async updateTenantUser(
+    ctx: Context<
+      {
+        id: number;
+        role: string;
+        email: string;
+        phone: string;
+      },
+      UserAuthMeta
+    >,
+  ) {
+    validateCanEditTenantUser(ctx, 'Only OWNER and USER_ADMIN can update users to tenant.');
+    const { profile } = ctx.meta;
+    const { id, email, phone, role } = ctx.params;
+    const tenantUser: TenantUser<'user'> = await ctx.call('tenantUsers.resolve', {
+      id,
+      throwIfNotExist: true,
+      populate: ['user'],
+    });
+
+    const currentUser = tenantUser.user;
+    const currentTenant: Tenant = await ctx.call('tenants.resolve', {
+      throwIfNotExist: true,
+      id: profile,
+    });
+
+    if (role) {
+      await ctx.call('tenantUsers.update', {
+        id,
+        tenant: profile,
+        role,
+      });
+
+      const authRole =
+        role === TenantUserRole.USER_ADMIN ? AuthGroupRole.ADMIN : AuthGroupRole.USER;
+
+      await ctx.call('auth.users.assignToGroup', {
+        id: currentUser.authUser,
+        groupId: currentTenant.authGroup,
+        role: authRole,
+      });
+    }
+
+    return ctx.call('users.update', {
+      id: currentUser?.id,
+      email,
+      phone,
+    });
+  }
+
+  @Action({
     rest: 'POST /invite',
     auth: RestrictionType.DEFAULT,
     params: {
@@ -277,6 +346,7 @@ export default class TenantUsersService extends moleculer.Service {
         id: 'freelancer',
         name: `${user.firstName} ${user.lastName}`,
         freelancer: true,
+        isInvestigator: user.isInvestigator,
         email: user.email,
         phone: user.phone,
       });
