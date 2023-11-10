@@ -13,7 +13,6 @@ import {
   Table,
 } from '../types';
 import { UserAuthMeta } from './api.service';
-import { BuiltToolsGroup } from './builtToolsGroups.service';
 import { FishType } from './fishTypes.service';
 import { Fishing } from './fishings.service';
 import { Tenant } from './tenants.service';
@@ -34,7 +33,6 @@ interface Fields extends CommonFields {
 interface Populates extends CommonPopulates {
   toolType: ToolType;
   toolsGroup: ToolsGroup;
-  builtToolsGroup: BuiltToolsGroup;
   tenant: Tenant;
   user: User;
 }
@@ -133,6 +131,7 @@ export default class ToolTypesService extends moleculer.Service {
     if (!currentFishing) {
       throw new moleculer.Errors.ValidationError('Fishing not started');
     }
+
     const caughtFishEvents: ToolsGroupsHistory[] = await ctx.call('toolsGroupsHistories.find', {
       query: {
         fishing: currentFishing.id,

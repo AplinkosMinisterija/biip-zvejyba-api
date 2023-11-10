@@ -4,7 +4,7 @@ import moleculer from 'moleculer';
 import { Service } from 'moleculer-decorators';
 
 import PostgisMixin from 'moleculer-postgis';
-import DbConnection from '../mixins/database.mixin';
+import DbConnection, { PopulateHandlerFn } from '../mixins/database.mixin';
 import ProfileMixin from '../mixins/profile.mixin';
 import {
   COMMON_DEFAULT_SCOPES,
@@ -15,7 +15,6 @@ import {
   Table,
 } from '../types';
 import { Fishing } from './fishings.service';
-import { ToolsGroup } from './toolsGroups.service';
 
 export enum ToolsGroupHistoryTypes {
   BUILD_TOOLS = 'BUILD_TOOLS',
@@ -37,7 +36,6 @@ interface Fields extends CommonFields {
   };
   data: any;
   fishing: Fishing['id'];
-  toolsGroup: ToolsGroup['id'];
 }
 
 interface Populates extends CommonPopulates {}
@@ -52,7 +50,6 @@ export type ToolsGroupsHistory<
   mixins: [
     DbConnection({
       collection: 'toolsGroupsHistories',
-      rest: false,
     }),
     PostgisMixin({
       srid: 3346,
@@ -92,17 +89,6 @@ export type ToolsGroupsHistory<
         },
       },
       data: 'any', // Type is not clear yet
-      toolsGroup: {
-        type: 'number',
-        columnType: 'integer',
-        columnName: 'toolsGroupId',
-        populate: {
-          action: 'toolsGroups.resolve',
-          params: {
-            scope: false,
-          },
-        },
-      },
       fishing: {
         type: 'number',
         columnType: 'integer',
@@ -136,22 +122,40 @@ export type ToolsGroupsHistory<
           },
         },
       },
+      updatedEvent: {
+        type: 'number',
+        columnType: 'integer',
+        columnName: 'updatedEventId',
+      },
       ...COMMON_FIELDS,
+    },
+    toolsGroup: {
+      type: 'any',
+      readonly: true,
+      virtual: true,
+      populate: {
+        keyField: 'weightEvent',
+        handler: PopulateHandlerFn('toolsGroups.populateByProp'),
+        params: {
+          queryKey: 'id',
+        },
+      },
     },
     scopes: {
       ...COMMON_SCOPES,
     },
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
+    defaultPopulates: ['toolsGroup'],
   },
-  hooks: {
-    before: {
-      create: ['beforeCreate'],
-      list: ['beforeSelect'],
-      find: ['beforeSelect'],
-      count: ['beforeSelect'],
-      get: ['beforeSelect'],
-      all: ['beforeSelect'],
-    },
-  },
+  // hooks: {
+  //   before: {
+  //     create: ['beforeCreate'],
+  //     list: ['beforeSelect'],
+  //     find: ['beforeSelect'],
+  //     count: ['beforeSelect'],
+  //     get: ['beforeSelect'],
+  //     all: ['beforeSelect'],
+  //   },
+  // },
 })
 export default class ToolsGroupsHistoriesService extends moleculer.Service {}
