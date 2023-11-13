@@ -19,7 +19,7 @@ import { coordinatesToGeometry } from '../modules/geometry';
 import { UserAuthMeta } from './api.service';
 import { FishWeight } from './fishWeights.service';
 import { Tenant } from './tenants.service';
-import { ToolsGroupHistoryTypes } from './toolsGroupsHistories.service';
+import { ToolsGroupHistoryTypes } from './toolsGroupsEvents.service';
 import { User } from './users.service';
 
 export enum FishingType {
@@ -105,7 +105,7 @@ export type Fishing<
         virtual: true,
         populate: {
           keyField: 'id',
-          handler: PopulateHandlerFn('toolsGroupsHistories.populateByProp'),
+          handler: PopulateHandlerFn('toolsGroupsEvents.populateByProp'),
           params: {
             queryKey: 'fishing',
             mappingMulti: true,
@@ -214,7 +214,7 @@ export default class FishTypesService extends moleculer.Service {
       throw new moleculer.Errors.ValidationError('Fishing not started');
     }
     //validate if fishing has loose toolsGroups weighing events
-    const fishWeightEvents: number = await ctx.call('toolsGroupsHistories.count', {
+    const fishWeightEvents: number = await ctx.call('toolsGroupsEvents.count', {
       query: {
         fishing: current.id,
         type: ToolsGroupHistoryTypes.WEIGH_FISH,

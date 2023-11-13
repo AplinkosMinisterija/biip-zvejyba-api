@@ -2,6 +2,7 @@
 
 import moleculer, { Context } from 'moleculer';
 import { Action, Service } from 'moleculer-decorators';
+import PostgisMixin from 'moleculer-postgis';
 import DbConnection from '../mixins/database.mixin';
 import ProfileMixin from '../mixins/profile.mixin';
 import {
@@ -18,7 +19,6 @@ import { Fishing } from './fishings.service';
 import { Tenant } from './tenants.service';
 import { ToolType } from './toolTypes.service';
 import { ToolsGroup } from './toolsGroups.service';
-import { ToolsGroupHistoryTypes, ToolsGroupsHistory } from './toolsGroupsHistories.service';
 import { User } from './users.service';
 
 interface Fields extends CommonFields {
@@ -26,6 +26,7 @@ interface Fields extends CommonFields {
   data: any;
   date: string;
   fishing: Fishing['id'];
+  toolsGroup: ToolsGroup['id'];
   tenant: Tenant['id'];
   user: User['id'];
 }
@@ -44,7 +45,13 @@ export type FishWeight<
 
 @Service({
   name: 'fishWeights',
-  mixins: [DbConnection(), ProfileMixin],
+  mixins: [
+    DbConnection(),
+    PostgisMixin({
+      srid: 3346,
+    }),
+    ProfileMixin,
+  ],
   settings: {
     fields: {
       id: {
@@ -67,6 +74,37 @@ export type FishWeight<
           action: 'fishings.resolve',
           params: {
             scope: false,
+          },
+        },
+      },
+      toolsGroup: {
+        type: 'number',
+        columnType: 'integer',
+        columnName: 'toolsGroupId',
+        populate: {
+          action: 'toolsGroups.resolve',
+          params: {
+            scope: false,
+          },
+        },
+      },
+      geom: {
+        type: 'any',
+        geom: {
+          types: ['Point'],
+        },
+      },
+      location: {
+        type: 'object',
+        properties: {
+          id: 'string',
+          name: 'string',
+          municipality: {
+            type: 'object',
+            properties: {
+              id: 'number',
+              name: 'string',
+            },
           },
         },
       },
@@ -131,25 +169,33 @@ export default class ToolTypesService extends moleculer.Service {
     if (!currentFishing) {
       throw new moleculer.Errors.ValidationError('Fishing not started');
     }
-
-    const caughtFishEvents: ToolsGroupsHistory[] = await ctx.call('toolsGroupsHistories.find', {
+    const fishWeights: FishWeight[] = await this.findEntities(ctx, {
       query: {
         fishing: currentFishing.id,
-        type: ToolsGroupHistoryTypes.WEIGH_FISH,
       },
+      sort: '-createdAt',
     });
-    if (caughtFishEvents.length) {
-      return caughtFishEvents.reduce((aggregate: any, currentValue) => {
-        const data = currentValue.data;
-        for (const key in data) {
-          if (aggregate[key]) {
-            aggregate[key] = aggregate[key] + data[key];
-          } else {
-            aggregate[key] = data[key];
+
+    if (fishWeights.length) {
+      const data = fishWeights.reduce(
+        (aggregate: any, currentValue) => {
+          if (aggregate.toolsGroups.includes(currentValue.toolsGroup)) {
+            return aggregate;
           }
-        }
-        return aggregate;
-      }, {});
+          const data = currentValue.data;
+          for (const key in data) {
+            if (aggregate.fishWeights[key]) {
+              aggregate.fishWeights[key] = aggregate.fishWeights[key] + data[key];
+            } else {
+              aggregate.fishWeights[key] = data[key];
+            }
+          }
+          aggregate.toolsGroups.push(currentValue.toolsGroup);
+          return aggregate;
+        },
+        { toolsGroups: [], fishWeights: {} },
+      );
+      return data.fishWeights;
     }
     return {};
   }
@@ -188,6 +234,7 @@ export default class ToolTypesService extends moleculer.Service {
     const fishWeight = await this.findEntity(ctx, {
       query: {
         fishing: currentFishing.id,
+        toolsGroup: { $exists: false },
       },
     });
     if (fishWeight) {
@@ -198,5 +245,25 @@ export default class ToolTypesService extends moleculer.Service {
       ...ctx.params,
       fishing: currentFishing.id,
     });
+  }
+  @Action({
+    params: {
+      toolsGroup: 'number',
+    },
+  })
+  async getFishByToolsGroup(ctx: Context<{ toolsGroup: number }>) {
+    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
+    if (!currentFishing) {
+      throw new moleculer.Errors.ValidationError('Fishing not started');
+    }
+    const weights = await this.findEntities(ctx, {
+      query: {
+        fishing: currentFishing.id,
+        toolsGroup: ctx.params.toolsGroup,
+      },
+      sort: '-createdAt',
+      limit: 1,
+    });
+    return weights[0];
   }
 }

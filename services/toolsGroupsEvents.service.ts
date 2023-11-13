@@ -1,10 +1,8 @@
 'use strict';
-
 import moleculer from 'moleculer';
 import { Service } from 'moleculer-decorators';
-
 import PostgisMixin from 'moleculer-postgis';
-import DbConnection, { PopulateHandlerFn } from '../mixins/database.mixin';
+import DbConnection from '../mixins/database.mixin';
 import ProfileMixin from '../mixins/profile.mixin';
 import {
   COMMON_DEFAULT_SCOPES,
@@ -40,17 +38,15 @@ interface Fields extends CommonFields {
 
 interface Populates extends CommonPopulates {}
 
-export type ToolsGroupsHistory<
+export type ToolsGroupsEvent<
   P extends keyof Populates = never,
   F extends keyof (Fields & Populates) = keyof Fields,
 > = Table<Fields, Populates, P, F>;
 
 @Service({
-  name: 'toolsGroupsHistories',
+  name: 'toolsGroupsEvents',
   mixins: [
-    DbConnection({
-      collection: 'toolsGroupsHistories',
-    }),
+    DbConnection(),
     PostgisMixin({
       srid: 3346,
     }),
@@ -122,24 +118,7 @@ export type ToolsGroupsHistory<
           },
         },
       },
-      updatedEvent: {
-        type: 'number',
-        columnType: 'integer',
-        columnName: 'updatedEventId',
-      },
       ...COMMON_FIELDS,
-    },
-    toolsGroup: {
-      type: 'any',
-      readonly: true,
-      virtual: true,
-      populate: {
-        keyField: 'weightEvent',
-        handler: PopulateHandlerFn('toolsGroups.populateByProp'),
-        params: {
-          queryKey: 'id',
-        },
-      },
     },
     scopes: {
       ...COMMON_SCOPES,
@@ -147,15 +126,15 @@ export type ToolsGroupsHistory<
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
     defaultPopulates: ['toolsGroup'],
   },
-  // hooks: {
-  //   before: {
-  //     create: ['beforeCreate'],
-  //     list: ['beforeSelect'],
-  //     find: ['beforeSelect'],
-  //     count: ['beforeSelect'],
-  //     get: ['beforeSelect'],
-  //     all: ['beforeSelect'],
-  //   },
-  // },
+  hooks: {
+    before: {
+      create: ['beforeCreate'],
+      list: ['beforeSelect'],
+      find: ['beforeSelect'],
+      count: ['beforeSelect'],
+      get: ['beforeSelect'],
+      all: ['beforeSelect'],
+    },
+  },
 })
-export default class ToolsGroupsHistoriesService extends moleculer.Service {}
+export default class ToolsGroupsEventsService extends moleculer.Service {}
