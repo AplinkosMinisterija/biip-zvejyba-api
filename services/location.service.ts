@@ -4,9 +4,51 @@ import { find, isEmpty, map } from 'lodash';
 import moleculer, { Context } from 'moleculer';
 import { Action, Method, Service } from 'moleculer-decorators';
 import { GeomFeatureCollection, coordinatesToGeometry } from '../modules/geometry';
-import { CommonFields, CommonPopulates, Table } from '../types';
 import { UserAuthMeta } from './api.service';
 import { Fishing, FishingType } from './fishings.service';
+
+export const CoordinatesProp = {
+  type: 'object',
+  properties: {
+    x: 'number',
+    y: 'number',
+  },
+};
+
+export type Coordinates = {
+  x: number;
+  y: number;
+};
+
+export const LocationProp = {
+  type: 'object',
+  properties: {
+    id: 'string',
+    name: 'string',
+    municipality: {
+      type: 'object',
+      properties: {
+        id: 'number',
+        name: 'string',
+      },
+    },
+  },
+};
+
+export type Location = {
+  id: string;
+  name: string;
+  municipality: {
+    id: number;
+    name: string;
+  };
+};
+
+interface LocationResult {
+  cadastral_id: string;
+  name: string;
+  municipality: string;
+}
 
 const getBox = (geom: GeomFeatureCollection, tolerance: number = 0.001) => {
   const coordinates: any = geom.features[0].geometry.coordinates;
@@ -20,19 +62,6 @@ const getBox = (geom: GeomFeatureCollection, tolerance: number = 0.001) => {
   };
   return `${topLeft.lng},${bottomRight.lat},${bottomRight.lng},${topLeft.lat}`;
 };
-
-interface Fields extends CommonFields {
-  cadastral_id: string;
-  name: string;
-  municipality: string;
-}
-
-interface Populates extends CommonPopulates {}
-
-export type Location<
-  P extends keyof Populates = never,
-  F extends keyof (Fields & Populates) = keyof Fields,
-> = Table<Fields, Populates, P, F>;
 
 @Service({
   name: 'locations',
@@ -79,7 +108,7 @@ export default class LocationsService extends moleculer.Service {
 
     const result: any = await Promise.all(promises);
 
-    const data: Location[] = [];
+    const data: LocationResult[] = [];
     for (const item of result) {
       if (!isEmpty(item)) {
         data.push(item[0]);

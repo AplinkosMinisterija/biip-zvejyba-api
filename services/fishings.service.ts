@@ -19,7 +19,6 @@ import { coordinatesToGeometry } from '../modules/geometry';
 import { UserAuthMeta } from './api.service';
 import { FishWeight } from './fishWeights.service';
 import { Tenant } from './tenants.service';
-import { ToolsGroupHistoryTypes } from './toolsGroupsEvents.service';
 import { User } from './users.service';
 
 export enum FishingType {
@@ -214,21 +213,15 @@ export default class FishTypesService extends moleculer.Service {
       throw new moleculer.Errors.ValidationError('Fishing not started');
     }
     //validate if fishing has loose toolsGroups weighing events
-    const fishWeightEvents: number = await ctx.call('toolsGroupsEvents.count', {
+    const fishWeightEvents: FishWeight[] = await ctx.call('fishWeights.find', {
       query: {
         fishing: current.id,
-        type: ToolsGroupHistoryTypes.WEIGH_FISH,
       },
     });
-    if (fishWeightEvents) {
-      const totalFishWeight: FishWeight[] = await ctx.call('fishWeights.count', {
-        query: {
-          fishing: current.id,
-        },
-      });
-      if (!totalFishWeight) {
-        throw new moleculer.Errors.ValidationError('Fish must be weighted');
-      }
+    const finalFishEvent = fishWeightEvents.find((fishEvenet) => !fishEvenet.toolsGroup);
+
+    if (fishWeightEvents.length > 0 && !finalFishEvent) {
+      throw new moleculer.Errors.ValidationError('Fish must be weighted');
     }
     return this.updateEntity(ctx, {
       id: current.id,

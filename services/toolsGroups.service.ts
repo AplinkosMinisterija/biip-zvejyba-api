@@ -16,46 +16,12 @@ import {
 import { UserAuthMeta } from './api.service';
 import { FishType } from './fishTypes.service';
 import { Fishing } from './fishings.service';
+import { Coordinates, CoordinatesProp, Location, LocationProp } from './location.service';
 import { Tenant } from './tenants.service';
 import { ToolCategory } from './toolTypes.service';
 import { Tool } from './tools.service';
 import { ToolsGroupHistoryTypes, ToolsGroupsEvent } from './toolsGroupsEvents.service';
 import { User } from './users.service';
-
-const CoordinatesProp = {
-  type: 'object',
-  properties: {
-    x: 'number',
-    y: 'number',
-  },
-};
-type Coordinates = {
-  x: number;
-  y: number;
-};
-
-const LocationProp = {
-  type: 'object',
-  properties: {
-    id: 'string',
-    name: 'string',
-    municipality: {
-      type: 'object',
-      properties: {
-        id: 'number',
-        name: 'string',
-      },
-    },
-  },
-};
-type Location = {
-  id: string;
-  name: string;
-  municipality: {
-    id: number;
-    name: string;
-  };
-};
 
 interface Fields extends CommonFields {
   id: number;
@@ -353,39 +319,13 @@ export default class ToolsGroupsService extends moleculer.Service {
       UserAuthMeta
     >,
   ) {
-    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
-    if (!currentFishing) {
-      throw new moleculer.Errors.ValidationError('Fishing not started');
-    }
-    const geom = coordinatesToGeometry(ctx.params.coordinates);
-
-    //toolsGroup validation
-    const group: ToolsGroup = await ctx.call('toolsGroups.get', {
-      id: ctx.params.id,
-    });
-    if (!group) {
-      throw new moleculer.Errors.ValidationError('Invalid group');
-    }
-
-    //fishTypes validation
-    const fishTypesIds = Object.keys(ctx.params.data);
-    const fishTypes: FishType[] = await ctx.call('fishTypes.find', {
-      query: {
-        id: { $in: fishTypesIds },
-      },
-    });
-    if (fishTypesIds.length !== fishTypes.length) {
-      throw new moleculer.Errors.ValidationError('Invalid fishTypes');
-    }
-    await ctx.call('fishWeights.create', {
-      type: ToolsGroupHistoryTypes.WEIGH_FISH,
-      geom,
+    await ctx.call('fishWeights.createWeightEvent', {
+      toolsGroup: ctx.params.id,
+      coordinates: ctx.params.coordinates,
       location: ctx.params.location,
-      fishing: currentFishing.id,
       data: ctx.params.data,
-      toolsGroup: group.id,
     });
-    return this.findEntity(ctx, { id: group.id });
+    return this.findEntity(ctx, { id: ctx.params.id });
   }
 
   @Action({

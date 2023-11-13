@@ -17,7 +17,6 @@ import { Fishing } from './fishings.service';
 export enum ToolsGroupHistoryTypes {
   BUILD_TOOLS = 'BUILD_TOOLS',
   REMOVE_TOOLS = 'REMOVE_TOOLS',
-  WEIGH_FISH = 'WEIGH_FISH',
 }
 
 interface Fields extends CommonFields {

@@ -1,10 +1,11 @@
 'use strict';
 
 import moleculer, { Context } from 'moleculer';
-import { Action, Service } from 'moleculer-decorators';
+import { Action, Method, Service } from 'moleculer-decorators';
 import PostgisMixin from 'moleculer-postgis';
 import DbConnection from '../mixins/database.mixin';
 import ProfileMixin from '../mixins/profile.mixin';
+import { coordinatesToGeometry } from '../modules/geometry';
 import {
   COMMON_DEFAULT_SCOPES,
   COMMON_FIELDS,
@@ -13,9 +14,9 @@ import {
   CommonPopulates,
   Table,
 } from '../types';
-import { UserAuthMeta } from './api.service';
 import { FishType } from './fishTypes.service';
 import { Fishing } from './fishings.service';
+import { Coordinates, CoordinatesProp, Location, LocationProp } from './location.service';
 import { Tenant } from './tenants.service';
 import { ToolType } from './toolTypes.service';
 import { ToolsGroup } from './toolsGroups.service';
@@ -95,18 +96,8 @@ export type FishWeight<
         },
       },
       location: {
-        type: 'object',
-        properties: {
-          id: 'string',
-          name: 'string',
-          municipality: {
-            type: 'object',
-            properties: {
-              id: 'number',
-              name: 'string',
-            },
-          },
-        },
+        ...LocationProp,
+        required: false,
       },
       tenant: {
         type: 'number',
@@ -140,7 +131,7 @@ export type FishWeight<
   },
   hooks: {
     before: {
-      weighFish: ['beforeCreate'],
+      createWeightEvent: ['beforeCreate', 'beforeFishWeigh'],
       list: ['beforeSelect'],
       find: ['beforeSelect'],
       count: ['beforeSelect'],
@@ -201,19 +192,52 @@ export default class ToolTypesService extends moleculer.Service {
   }
 
   @Action({
+    params: {
+      toolsGroup: 'number',
+    },
+  })
+  async getFishByToolsGroup(ctx: Context<{ toolsGroup: number }>) {
+    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
+    if (!currentFishing) {
+      throw new moleculer.Errors.ValidationError('Fishing not started');
+    }
+
+    const weights = await this.findEntities(ctx, {
+      query: {
+        fishing: currentFishing.id,
+        toolsGroup: ctx.params.toolsGroup,
+      },
+      sort: '-createdAt',
+      limit: 1,
+    });
+    return weights[0];
+  }
+
+  @Action({
     rest: 'POST /',
     params: {
+      toolsGroup: 'number|convert|optional',
+      coordinates: CoordinatesProp,
+      location: {
+        ...LocationProp,
+        optional: true,
+      },
       data: 'object',
     },
   })
-  async weighFish(
-    ctx: Context<
-      {
-        data: { [key: FishType['id']]: number };
-      },
-      UserAuthMeta
-    >,
+  async createWeightEvent(
+    ctx: Context<{
+      toolsGroup: number;
+      coordinates: Coordinates;
+      data: { [key: FishType['id']]: number };
+      location?: Location;
+    }>,
   ) {
+    return this.createEntity(ctx, { ...ctx.params });
+  }
+
+  @Method
+  async beforeFishWeigh(ctx: Context<any>) {
     const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
     if (!currentFishing) {
       throw new moleculer.Errors.ValidationError('Fishing not started');
@@ -230,40 +254,28 @@ export default class ToolTypesService extends moleculer.Service {
       throw new moleculer.Errors.ValidationError('Invalid fishTypes');
     }
 
-    //validate if fish is already weighted
-    const fishWeight = await this.findEntity(ctx, {
-      query: {
-        fishing: currentFishing.id,
-        toolsGroup: { $exists: false },
-      },
-    });
-    if (fishWeight) {
-      throw new moleculer.Errors.ValidationError('Fish already weighted');
+    if (!ctx.params.id) {
+      //validate if fish is already weighted
+      const fishWeight = await this.findEntity(ctx, {
+        query: {
+          fishing: currentFishing.id,
+          toolsGroup: { $exists: false },
+        },
+      });
+      if (fishWeight) {
+        throw new moleculer.Errors.ValidationError('Fish already weighted');
+      }
+    } else {
+      //toolsGroup validation
+      const group: ToolsGroup = await ctx.call('toolsGroups.get', {
+        id: ctx.params.id,
+      });
+      if (!group) {
+        throw new moleculer.Errors.ValidationError('Invalid group');
+      }
     }
-
-    return this.createEntity(ctx, {
-      ...ctx.params,
-      fishing: currentFishing.id,
-    });
-  }
-  @Action({
-    params: {
-      toolsGroup: 'number',
-    },
-  })
-  async getFishByToolsGroup(ctx: Context<{ toolsGroup: number }>) {
-    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
-    if (!currentFishing) {
-      throw new moleculer.Errors.ValidationError('Fishing not started');
-    }
-    const weights = await this.findEntities(ctx, {
-      query: {
-        fishing: currentFishing.id,
-        toolsGroup: ctx.params.toolsGroup,
-      },
-      sort: '-createdAt',
-      limit: 1,
-    });
-    return weights[0];
+    ctx.params.fishing = currentFishing.id;
+    const geom = coordinatesToGeometry(ctx.params.coordinates);
+    ctx.params.geom = geom;
   }
 }
