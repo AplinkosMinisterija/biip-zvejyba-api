@@ -39,13 +39,13 @@ interface Populates extends CommonPopulates {
   user: User;
 }
 
-export type FishWeight<
+export type WeightEvent<
   P extends keyof Populates = never,
   F extends keyof (Fields & Populates) = keyof Fields,
 > = Table<Fields, Populates, P, F>;
 
 @Service({
-  name: 'fishWeights',
+  name: 'weightEvents',
   mixins: [
     DbConnection(),
     PostgisMixin({
@@ -152,45 +152,6 @@ export type FishWeight<
   },
 })
 export default class ToolTypesService extends moleculer.Service {
-  @Action({
-    rest: 'GET /preliminary',
-  })
-  async getPreliminaryFishWeight(ctx: Context) {
-    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
-    if (!currentFishing) {
-      throw new moleculer.Errors.ValidationError('Fishing not started');
-    }
-    const fishWeights: FishWeight[] = await this.findEntities(ctx, {
-      query: {
-        fishing: currentFishing.id,
-      },
-      sort: '-createdAt',
-    });
-
-    if (fishWeights.length) {
-      const data = fishWeights.reduce(
-        (aggregate: any, currentValue) => {
-          if (aggregate.toolsGroups.includes(currentValue.toolsGroup)) {
-            return aggregate;
-          }
-          const data = currentValue.data;
-          for (const key in data) {
-            if (aggregate.fishWeights[key]) {
-              aggregate.fishWeights[key] = aggregate.fishWeights[key] + data[key];
-            } else {
-              aggregate.fishWeights[key] = data[key];
-            }
-          }
-          aggregate.toolsGroups.push(currentValue.toolsGroup);
-          return aggregate;
-        },
-        { toolsGroups: [], fishWeights: {} },
-      );
-      return data.fishWeights;
-    }
-    return {};
-  }
-
   @Action({
     params: {
       toolsGroup: 'number',

@@ -112,7 +112,7 @@ export type ToolsGroup<
         async populate(ctx: Context, values: number[], entities: ToolsGroup[]) {
           return Promise.all(
             entities?.map(async (entity) => {
-              const f = await ctx.call('fishWeights.getFishByToolsGroup', {
+              const f = await ctx.call('weightEvents.getFishByToolsGroup', {
                 toolsGroup: entity.id,
               });
               return f;
@@ -319,13 +319,13 @@ export default class ToolsGroupsService extends moleculer.Service {
       UserAuthMeta
     >,
   ) {
-    await ctx.call('fishWeights.createWeightEvent', {
+    await ctx.call('weightEvents.createWeightEvent', {
       toolsGroup: ctx.params.id,
       coordinates: ctx.params.coordinates,
       location: ctx.params.location,
       data: ctx.params.data,
     });
-    return this.findEntity(ctx, { id: ctx.params.id });
+    return { success: true };
   }
 
   @Action({

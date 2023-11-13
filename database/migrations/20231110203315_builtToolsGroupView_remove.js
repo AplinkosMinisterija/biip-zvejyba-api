@@ -20,7 +20,7 @@ exports.up = function (knex) {
         ADD CONSTRAINT "tools_groups_histories_type_check" 
         CHECK ("type" IN ('BUILD_TOOLS', 'REMOVE_TOOLS'))`,
     )
-    .renameTable('fishWeights', 'fishWeightEvents');
+    .renameTable('toolsGroupsHistories', 'toolsGroupsEvents');
 };
 
 exports.down = function (knex) {

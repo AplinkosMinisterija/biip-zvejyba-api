@@ -3,7 +3,7 @@
 import moleculer, { Context } from 'moleculer';
 import { Action, Service } from 'moleculer-decorators';
 import PostgisMixin from 'moleculer-postgis';
-import DbConnection, { PopulateHandlerFn } from '../mixins/database.mixin';
+import DbConnection from '../mixins/database.mixin';
 import {
   COMMON_DEFAULT_SCOPES,
   COMMON_FIELDS,
@@ -17,9 +17,12 @@ import {
 import ProfileMixin from '../mixins/profile.mixin';
 import { coordinatesToGeometry } from '../modules/geometry';
 import { UserAuthMeta } from './api.service';
-import { FishWeight } from './fishWeights.service';
+import { FishType } from './fishTypes.service';
+import { FishingEvent, FishingEventType } from './fishingEvents.service';
+import { Coordinates, CoordinatesProp, Location } from './location.service';
 import { Tenant } from './tenants.service';
 import { User } from './users.service';
+import { WeightEvent } from './weightEvents.service';
 
 export enum FishingType {
   ESTUARY = 'ESTUARY',
@@ -29,9 +32,9 @@ export enum FishingType {
 
 interface Fields extends CommonFields {
   id: number;
-  startDate: Date;
-  endDate: Date;
-  skipDate: Date;
+  startEvent: FishingEvent['id'];
+  endEvent: FishingEvent['id'];
+  skipDate: FishingEvent['id'];
   geom: any;
   type: FishingType;
   tenant: Tenant['id'];
@@ -61,14 +64,39 @@ export type Fishing<
         primaryKey: true,
         secure: true,
       },
-      startDate: {
-        type: 'date',
-        columnType: 'datetime',
-        readonly: true,
-        onCreate: () => new Date(),
+      startEvent: {
+        type: 'number',
+        columnType: 'integer',
+        columnName: 'startEventId',
+        populate: {
+          action: 'fishingEvents.resolve',
+          params: {
+            scope: false,
+          },
+        },
       },
-      endDate: 'date',
-      skipDate: 'date',
+      endEvent: {
+        type: 'number',
+        columnType: 'integer',
+        columnName: 'endEventId',
+        populate: {
+          action: 'fishingEvents.resolve',
+          params: {
+            scope: false,
+          },
+        },
+      },
+      skipEvent: {
+        type: 'number',
+        columnType: 'integer',
+        columnName: 'skipEventId',
+        populate: {
+          action: 'fishingEvents.resolve',
+          params: {
+            scope: false,
+          },
+        },
+      },
       geom: {
         type: 'any',
         geom: {
@@ -98,30 +126,17 @@ export type Fishing<
           },
         },
       },
-      toolsGroupsHistories: {
-        type: 'array',
-        readonly: true,
-        virtual: true,
-        populate: {
-          keyField: 'id',
-          handler: PopulateHandlerFn('toolsGroupsEvents.populateByProp'),
-          params: {
-            queryKey: 'fishing',
-            mappingMulti: true,
-            sort: 'createdAt',
-          },
-        },
-      },
-      fishWeight: {
+      weightEvent: {
         type: 'array',
         readonly: true,
         virtual: true,
         async populate(ctx: any, _values: any, fishings: Fishing[]) {
           return Promise.all(
             fishings.map((fishing: any) => {
-              return ctx.call('fishWeights.findOne', {
+              return ctx.call('weightsEvents.findOne', {
                 query: {
                   fishing: fishing.id,
+                  toolsGroup: { $exists: false },
                 },
               });
             }),
@@ -161,14 +176,14 @@ export default class FishTypesService extends moleculer.Service {
     rest: 'POST /start',
     params: {
       type: 'string',
-      coordinates: 'object',
+      coordinates: CoordinatesProp,
     },
   })
   async startFishing(
     ctx: Context<{ type: FishingType; coordinates: { x: number; y: number } }, UserAuthMeta>,
   ) {
     //Single active fishing validation
-    const current = await this.currentFishing(ctx);
+    const current: Fishing = await ctx.call('fishings.currentFishing');
     if (current) {
       throw new moleculer.Errors.ValidationError('Fishing already started');
     }
@@ -178,42 +193,47 @@ export default class FishTypesService extends moleculer.Service {
     if (toolsCount < 1) {
       throw new moleculer.Errors.ValidationError('No tools in storage');
     }
-
-    const params: Partial<Fishing> = {
-      ...ctx.params,
-      startDate: new Date(),
-    };
-    if (ctx.params.coordinates) {
-      params.geom = coordinatesToGeometry(ctx.params.coordinates);
-    }
-    return this.createEntity(ctx, params);
+    const geom = coordinatesToGeometry(ctx.params.coordinates);
+    const startEvent: FishingEvent = await ctx.call('fishingEvents.create', {
+      geom,
+      type: FishingEventType.START,
+    });
+    return this.createEntity(ctx, { ...ctx.params, startEvent: startEvent.id });
   }
 
   @Action({
     rest: 'POST /skip',
     params: {
       type: 'string',
+      coordinates: CoordinatesProp,
     },
   })
   async skipFishing(ctx: Context<any>) {
     //To skip fishing, create new fishing and mark it as skipped.
-    return this.createEntity(ctx, {
-      ...ctx.params,
-      skipDate: new Date(),
+    const geom = coordinatesToGeometry(ctx.params.coordinates);
+    const skipEvent: FishingEvent = await ctx.call('fishingEvents.create', {
+      geom,
+      type: FishingEventType.SKIP,
     });
+    return this.createEntity(ctx, { ...ctx.params, skipEvent: skipEvent.id });
   }
 
   @Action({
-    rest: 'PATCH /finish',
+    rest: 'POST /end',
+    params: {
+      coordinates: CoordinatesProp,
+    },
   })
-  async finishFishing(ctx: Context<any, UserAuthMeta>) {
+  async endFishing(
+    ctx: Context<{ type: FishingEventType; coordinates: Coordinates }, UserAuthMeta>,
+  ) {
     //Single active fishing validation
-    const current = await this.currentFishing(ctx);
+    const current: Fishing = await ctx.call('fishings.currentFishing');
     if (!current) {
       throw new moleculer.Errors.ValidationError('Fishing not started');
     }
-    //validate if fishing has loose toolsGroups weighing events
-    const fishWeightEvents: FishWeight[] = await ctx.call('fishWeights.find', {
+    //validate if fishing has unweighted fish
+    const fishWeightEvents: WeightEvent[] = await ctx.call('weightEvents.find', {
       query: {
         fishing: current.id,
       },
@@ -223,10 +243,12 @@ export default class FishTypesService extends moleculer.Service {
     if (fishWeightEvents.length > 0 && !finalFishEvent) {
       throw new moleculer.Errors.ValidationError('Fish must be weighted');
     }
-    return this.updateEntity(ctx, {
-      id: current.id,
-      endDate: new Date(),
+    const geom = coordinatesToGeometry(ctx.params.coordinates);
+    const endEvent: FishingEvent = await ctx.call('fishingEvents.create', {
+      geom,
+      type: FishingEventType.SKIP,
     });
+    return this.updateEntity(ctx, { id: current.id, endEvent: endEvent.id });
   }
 
   @Action({
@@ -234,24 +256,75 @@ export default class FishTypesService extends moleculer.Service {
   })
   async currentFishing(ctx: Context<any, UserAuthMeta>) {
     //Users in the same tenant do not share fishing. Each person should start and finish his/her own fishing.
-    let entities = [];
-    if (!!ctx.meta?.profile) {
-      entities = await this.findEntities(ctx, {
-        query: {
-          tenant: ctx.meta.profile,
-          user: ctx.meta.user.id,
-          endDate: { $exists: false },
-        },
-      });
-    } else {
-      entities = await this.findEntities(ctx, {
-        query: {
-          user: ctx.meta.user.id,
-          tenant: { $exists: false },
-          endDate: { $exists: false },
-        },
-      });
+    return await ctx.call('fishings.findOne', {
+      query: {
+        startEvent: { $exists: true },
+        endEvent: { $exists: false },
+        skipEvent: { $exists: false },
+      },
+    });
+  }
+
+  @Action({
+    rest: 'GET /weights',
+  })
+  async getPreliminaryFishWeight(ctx: Context) {
+    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
+    if (!currentFishing) {
+      throw new moleculer.Errors.ValidationError('Fishing not started');
     }
-    return entities[0];
+    const weightEvents: WeightEvent[] = await ctx.call('weightEvents.find', {
+      query: {
+        fishing: currentFishing.id,
+      },
+      sort: '-createdAt',
+    });
+    const totalWeightEvent = weightEvents.find((e) => !e.toolsGroup);
+    const toolsGroupsEvents = weightEvents.filter((e) => !!e.toolsGroup);
+
+    const data = toolsGroupsEvents.reduce(
+      (aggregate: any, currentValue) => {
+        if (aggregate.toolsGroups.includes(currentValue.toolsGroup)) {
+          return aggregate;
+        }
+        const data = currentValue.data;
+        for (const key in data) {
+          if (aggregate.fishWeights[key]) {
+            aggregate.fishWeights[key] = aggregate.fishWeights[key] + data[key];
+          } else {
+            aggregate.fishWeights[key] = data[key];
+          }
+        }
+        aggregate.toolsGroups.push(currentValue.toolsGroup);
+        return aggregate;
+      },
+      { toolsGroups: [], fishWeights: {} },
+    );
+    return { total: totalWeightEvent?.data, preliminary: data.fishWeights };
+  }
+
+  @Action({
+    rest: 'POST /weight',
+    params: {
+      coordinates: CoordinatesProp,
+      data: 'object',
+    },
+  })
+  async weighFish(
+    ctx: Context<
+      {
+        coordinates: Coordinates;
+        location: Location;
+        data: { [key: FishType['id']]: number };
+      },
+      UserAuthMeta
+    >,
+  ) {
+    await ctx.call('weightEvents.createWeightEvent', {
+      coordinates: ctx.params.coordinates,
+      location: ctx.params.location,
+      data: ctx.params.data,
+    });
+    return { success: true };
   }
 }
