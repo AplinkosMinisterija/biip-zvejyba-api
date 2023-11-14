@@ -1,7 +1,7 @@
 'use strict';
 
 import moleculer, { Context, RestSchema } from 'moleculer';
-import { Action, Service } from 'moleculer-decorators';
+import { Action, Method, Service } from 'moleculer-decorators';
 import PostgisMixin, { GeometryType } from 'moleculer-postgis';
 import DbConnection, { PopulateHandlerFn } from '../mixins/database.mixin';
 import {
@@ -54,6 +54,7 @@ interface Fields extends CommonFields {
   files: Array<{
     url: string;
     name: string;
+    size: number;
   }>;
   previousResearchData: {
     year: number;
@@ -129,6 +130,7 @@ export type Research<
           properties: {
             url: 'string|required',
             name: 'string',
+            size: 'number',
           },
         },
         columnType: 'json',
@@ -245,44 +247,18 @@ export default class ResearchesService extends moleculer.Service {
   }
 
   @Action({
-    rest: 'POST /',
+    rest: ['POST /', 'PATCH /:id'],
     auth: RestrictionType.INVESTIGATOR,
   })
-  async createEntity(ctx: Context<{ fishes: ResearchFish[] }, UserAuthMeta>) {
-    const { fishes } = ctx.params;
+  async createOrUpdate(ctx: Context<{ fishes: ResearchFish[]; id?: number }, UserAuthMeta>) {
+    const { fishes, id } = ctx.params;
 
-    const research: Research = await ctx.call('researches.create', ctx.params);
-
-    await Promise.all(
-      fishes?.map(
-        (f) =>
-          ctx.call('researches.fishes.createOrUpdate', {
-            ...f,
-            research: research.id,
-          }) as Promise<ResearchFish>,
-      ),
+    const research: Research = await ctx.call(
+      id ? 'researches.update' : 'researches.create',
+      ctx.params,
     );
 
-    return ctx.call('researches.resolve', { id: research.id });
-  }
-
-  @Action({
-    rest: 'PATCH /:id',
-    auth: RestrictionType.INVESTIGATOR,
-  })
-  async updateEntity(ctx: Context<{ fishes: ResearchFish[] }, UserAuthMeta>) {
-    const { fishes } = ctx.params;
-    const research: Research = await ctx.call('researches.update', ctx.params);
-
-    await Promise.all(
-      fishes?.map(
-        (f) =>
-          ctx.call('researches.fishes.createOrUpdate', {
-            ...f,
-            research: research.id,
-          }) as Promise<ResearchFish>,
-      ),
-    );
+    await this.saveOrUpdateFishesForResearch(research.id, fishes);
 
     return ctx.call('researches.resolve', { id: research.id });
   }
@@ -390,5 +366,33 @@ export default class ResearchesService extends moleculer.Service {
     }
 
     return research;
+  }
+
+  @Method
+  async saveOrUpdateFishesForResearch(id: number, fishes: ResearchFish[]) {
+    const savedIds: number[] = [];
+    for (const fish of fishes) {
+      const researchFish: ResearchFish = await this.broker.call(
+        'researches.fishes.createOrUpdate',
+        {
+          ...fish,
+          research: id,
+        },
+      );
+
+      savedIds.push(researchFish.id);
+    }
+
+    const allFishes: ResearchFish[] = await this.broker.call('researches.fishes.find', {
+      query: {
+        research: id,
+      },
+    });
+
+    const deletingIds: number[] = allFishes
+      .map((fish) => fish.id)
+      .filter((id) => !savedIds.includes(id));
+
+    deletingIds.map((id) => this.broker.call('researches.fishes.remove', { id }));
   }
 }
