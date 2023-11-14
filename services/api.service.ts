@@ -182,7 +182,7 @@ export default class ApiService extends moleculer.Service {
         error: 'Unauthorized',
       });
     }
-    const accesses = authUser?.permissions?.FISHING?.access || [];
+    const accesses = authUser?.permissions?.FISHING?.accesses || [];
 
     function hasAccess(access: string, accesses: string[]) {
       return accesses.includes(access) || accesses.includes('*');
