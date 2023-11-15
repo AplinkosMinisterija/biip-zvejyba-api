@@ -30,18 +30,41 @@ export enum FishingType {
   INLAND_WATERS = 'INLAND_WATERS',
 }
 
+enum EventType {
+  START = 'START',
+  END = 'END',
+  SKIP = 'SKIP',
+  WEIGHT_ON_SHORE = 'WEIGHT_ON_SHORE',
+  WEIGHT_ON_BOAT = 'WEIGHT_ON_BOAT',
+  BUILD_TOOLS = 'BUILD_TOOLS',
+  REMOVE_TOOLS = 'REMOVE_TOOLS',
+}
+
+type Event = {
+  id: number;
+  type: EventType;
+  date: Date;
+  geom: any;
+  location?: any;
+  data?: any;
+};
+
 interface Fields extends CommonFields {
   id: number;
   startEvent: FishingEvent['id'];
   endEvent: FishingEvent['id'];
-  skipDate: FishingEvent['id'];
+  skipEvent: FishingEvent['id'];
   geom: any;
   type: FishingType;
   tenant: Tenant['id'];
   user: User['id'];
 }
 
-interface Populates extends CommonPopulates {}
+interface Populates extends CommonPopulates {
+  startEvent: FishingEvent;
+  endEvent: FishingEvent;
+  skipEvent: FishingEvent;
+}
 
 export type Fishing<
   P extends keyof Populates = never,
@@ -133,7 +156,7 @@ export type Fishing<
         async populate(ctx: any, _values: any, fishings: Fishing[]) {
           return Promise.all(
             fishings.map((fishing: any) => {
-              return ctx.call('weightsEvents.findOne', {
+              return ctx.call('weightEvents.findOne', {
                 query: {
                   fishing: fishing.id,
                   toolsGroup: { $exists: false },
@@ -153,6 +176,9 @@ export type Fishing<
   },
   actions: {
     create: {
+      rest: null,
+    },
+    remove: {
       rest: null,
     },
     update: {
@@ -260,7 +286,6 @@ export default class FishTypesService extends moleculer.Service {
       query: {
         startEvent: { $exists: true },
         endEvent: { $exists: false },
-        skipEvent: { $exists: false },
       },
     });
   }
@@ -273,12 +298,14 @@ export default class FishTypesService extends moleculer.Service {
     if (!currentFishing) {
       throw new moleculer.Errors.ValidationError('Fishing not started');
     }
+
     const weightEvents: WeightEvent[] = await ctx.call('weightEvents.find', {
       query: {
         fishing: currentFishing.id,
       },
       sort: '-createdAt',
     });
+
     const totalWeightEvent = weightEvents.find((e) => !e.toolsGroup);
     const toolsGroupsEvents = weightEvents.filter((e) => !!e.toolsGroup);
 
@@ -326,5 +353,121 @@ export default class FishTypesService extends moleculer.Service {
       data: ctx.params.data,
     });
     return { success: true };
+  }
+
+  @Action({
+    rest: 'GET /history/:id',
+    params: {
+      id: 'number|convert',
+    },
+  })
+  async getHistory(
+    ctx: Context<
+      {
+        id: number;
+      },
+      UserAuthMeta
+    >,
+  ) {
+    const events: Event[] = [];
+    const fishing: any = await ctx.call('fishings.get', {
+      id: ctx.params.id,
+      populate: ['startEvent', 'skipEvent', 'endEvent', 'user'],
+    });
+
+    if (fishing?.skipEvent) {
+      events.push({
+        id: fishing?.skipEvent.id,
+        type: EventType.SKIP,
+        geom: fishing?.skipEvent.geom,
+        date: fishing?.skipEvent.createdAt,
+      });
+    }
+    if (fishing?.startEvent) {
+      events.push({
+        id: fishing?.startEvent.id,
+        type: EventType.START,
+        geom: fishing?.startEvent.geom,
+        date: fishing?.startEvent.createdAt,
+      });
+    }
+    if (fishing?.endEvent) {
+      events.push({
+        id: fishing?.endEvent.id,
+        type: EventType.END,
+        geom: fishing?.endEvent.geom,
+        date: fishing?.endEvent.createdAt,
+      });
+    }
+
+    const toolsGroupsEvents: any[] = await ctx.call('toolsGroupsEvents.find', {
+      query: { fishing: ctx.params.id },
+      populate: ['toolsGroup', 'geom'],
+    });
+    for (const t of toolsGroupsEvents.filter((e) => !!e.toolsGroup)) {
+      events.push({
+        id: t.id,
+        type: t.type as EventType,
+        geom: t.geom,
+        location: t.location,
+        date: t.createdAt,
+        data: t.toolsGroup,
+      });
+    }
+
+    const weights: WeightEvent<'toolsGroup'>[] = await ctx.call('weightEvents.find', {
+      query: {
+        fishing: ctx.params.id,
+      },
+      sort: 'createdAt',
+      limit: 1,
+      populate: ['toolsGroup', 'geom'],
+    });
+
+    const fishingWeights = weights?.reduce(
+      (acc: any, val: WeightEvent<'toolsGroup'>) => {
+        if (!val.toolsGroup) {
+          return {
+            ...acc,
+            fishOnShore: val,
+          };
+        }
+        return {
+          ...acc,
+          fishOnBoat: {
+            ...acc.fishOnBoat,
+            [val.toolsGroup.id]: val,
+          },
+        };
+      },
+      { fishOnShore: null, fishOnBoat: {} },
+    );
+    for (const w of Object.values(fishingWeights.fishOnBoat) as WeightEvent[]) {
+      events.push({
+        id: w.id,
+        type: EventType.WEIGHT_ON_BOAT,
+        geom: w.geom,
+        location: w.location,
+        date: w.createdAt,
+        data: w.toolsGroup,
+      });
+    }
+    if (fishingWeights.fishOnShore) {
+      events.push({
+        id: fishingWeights.fishOnShore.id,
+        type: EventType.WEIGHT_ON_SHORE,
+        geom: fishingWeights.fishOnShore.geom,
+        date: fishingWeights.fishOnShore.createdAt,
+        data: fishingWeights.fishOnShore.toolsGroup,
+      });
+    }
+
+    return {
+      id: fishing.id,
+      type: fishing.type,
+      tenant: fishing.tenant,
+      user: fishing.user,
+      history: events.sort((a, b) => a.date.getTime() - b.date.getTime()),
+    };
   }
 }

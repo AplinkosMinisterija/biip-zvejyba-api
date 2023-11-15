@@ -26,6 +26,8 @@ interface Fields extends CommonFields {
   id: number;
   data: any;
   date: string;
+  geom: any;
+  location: Location;
   fishing: Fishing['id'];
   toolsGroup: ToolsGroup['id'];
   tenant: Tenant['id'];
@@ -127,7 +129,7 @@ export type WeightEvent<
       ...COMMON_SCOPES,
     },
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
-    defaultPopulates: ['toolType'],
+    defaultPopulates: ['toolType', 'geom'],
   },
   hooks: {
     before: {

@@ -4,7 +4,7 @@ exports.up = function (knex) {
   return knex.schema
     .createTable('fishingEvents', (table) => {
       table.increments('id');
-      table.enu('locationType', ['START', 'END', 'SKIP']);
+      table.enu('type', ['START', 'END', 'SKIP']);
       table.jsonb('location');
       table.integer('tenantId').unsigned();
       table.integer('userId').unsigned();

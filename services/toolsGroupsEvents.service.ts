@@ -117,13 +117,33 @@ export type ToolsGroupsEvent<
           },
         },
       },
+      toolsGroup: {
+        type: 'array',
+        readonly: true,
+        virtual: true,
+        async populate(ctx: any, _values: any, entities: ToolsGroupsEvent[]) {
+          const fieldNames = {
+            [ToolsGroupHistoryTypes.BUILD_TOOLS]: 'buildEvent',
+            [ToolsGroupHistoryTypes.REMOVE_TOOLS]: 'removeEvent',
+          };
+          return Promise.all(
+            entities.map((entity: ToolsGroupsEvent) => {
+              return ctx.call('toolsGroups.findOne', {
+                query: {
+                  [fieldNames[entity.type]]: entity.id,
+                },
+              });
+            }),
+          );
+        },
+      },
       ...COMMON_FIELDS,
     },
     scopes: {
       ...COMMON_SCOPES,
     },
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
-    defaultPopulates: ['toolsGroup'],
+    defaultPopulates: ['geom'],
   },
   hooks: {
     before: {

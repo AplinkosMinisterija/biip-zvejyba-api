@@ -26,6 +26,7 @@ export enum FishingEventType {
 interface Fields extends CommonFields {
   id: number;
   geom: any;
+  type: FishingEventType;
   tenant: Tenant['id'];
   user: User['id'];
 }
@@ -59,6 +60,7 @@ export type FishingEvent<
           types: ['Point'],
         },
       },
+      type: 'string',
       tenant: {
         type: 'number',
         columnType: 'integer',
@@ -87,7 +89,7 @@ export type FishingEvent<
       ...COMMON_SCOPES,
     },
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
-    defaultPopulates: [],
+    defaultPopulates: ['geom'],
   },
   actions: {
     create: {
