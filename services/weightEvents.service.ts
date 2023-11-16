@@ -177,6 +177,40 @@ export default class ToolTypesService extends moleculer.Service {
   }
 
   @Action({
+    params: {
+      fishingId: 'number|convert',
+    },
+  })
+  async getFishByFishing(ctx: Context<{ fishingId: number }>) {
+    const weights: WeightEvent<'toolsGroup'>[] = await ctx.call('weightEvents.find', {
+      query: {
+        fishing: ctx.params.fishingId,
+      },
+      sort: 'createdAt',
+      populate: ['toolsGroup', 'geom'],
+    });
+
+    return weights?.reduce(
+      (acc: any, val: WeightEvent<'toolsGroup'>) => {
+        if (!val.toolsGroup) {
+          return {
+            ...acc,
+            fishOnShore: val,
+          };
+        }
+        return {
+          ...acc,
+          fishOnBoat: {
+            ...acc.fishOnBoat,
+            [val.toolsGroup.id]: val,
+          },
+        };
+      },
+      { fishOnShore: null, fishOnBoat: {} },
+    );
+  }
+
+  @Action({
     rest: 'POST /',
     params: {
       toolsGroup: 'number|convert|optional',

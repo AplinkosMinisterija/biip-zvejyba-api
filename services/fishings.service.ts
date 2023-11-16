@@ -149,19 +149,14 @@ export type Fishing<
           },
         },
       },
-      weightEvent: {
+      weightEvents: {
         type: 'array',
         readonly: true,
         virtual: true,
         async populate(ctx: any, _values: any, fishings: Fishing[]) {
           return Promise.all(
             fishings.map((fishing: any) => {
-              return ctx.call('weightEvents.findOne', {
-                query: {
-                  fishing: fishing.id,
-                  toolsGroup: { $exists: false },
-                },
-              });
+              return ctx.call('weightEvents.getFishByFishing', { fishingId: fishing.id });
             }),
           );
         },
@@ -189,6 +184,7 @@ export type Fishing<
     before: {
       startFishing: ['beforeCreate'],
       skipFishing: ['beforeCreate'],
+      currentFishing: ['beforeSelect'],
       list: ['beforeSelect'],
       find: ['beforeSelect'],
       count: ['beforeSelect'],
@@ -284,6 +280,7 @@ export default class FishTypesService extends moleculer.Service {
     //Users in the same tenant do not share fishing. Each person should start and finish his/her own fishing.
     return await ctx.call('fishings.findOne', {
       query: {
+        ...ctx.params.query,
         startEvent: { $exists: true },
         endEvent: { $exists: false },
       },
@@ -415,32 +412,13 @@ export default class FishTypesService extends moleculer.Service {
       });
     }
 
-    const weights: WeightEvent<'toolsGroup'>[] = await ctx.call('weightEvents.find', {
-      query: {
-        fishing: ctx.params.id,
+    const fishingWeights: { fishOnShore: WeightEvent; fishOnBoat: WeightEvent[] } = await ctx.call(
+      'weightEvents.getFishByFishing',
+      {
+        fishingId: ctx.params.id,
       },
-      sort: 'createdAt',
-      populate: ['toolsGroup', 'geom'],
-    });
-
-    const fishingWeights = weights?.reduce(
-      (acc: any, val: WeightEvent<'toolsGroup'>) => {
-        if (!val.toolsGroup) {
-          return {
-            ...acc,
-            fishOnShore: val,
-          };
-        }
-        return {
-          ...acc,
-          fishOnBoat: {
-            ...acc.fishOnBoat,
-            [val.toolsGroup.id]: val,
-          },
-        };
-      },
-      { fishOnShore: null, fishOnBoat: {} },
     );
+
     for (const w of Object.values(fishingWeights.fishOnBoat) as WeightEvent[]) {
       events.push({
         id: w.id,
