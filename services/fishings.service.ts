@@ -420,7 +420,6 @@ export default class FishTypesService extends moleculer.Service {
         fishing: ctx.params.id,
       },
       sort: 'createdAt',
-      limit: 1,
       populate: ['toolsGroup', 'geom'],
     });
 
@@ -449,7 +448,7 @@ export default class FishTypesService extends moleculer.Service {
         geom: w.geom,
         location: w.location,
         date: w.createdAt,
-        data: w.toolsGroup,
+        data: { fish: w.data, toolsGroup: w.toolsGroup },
       });
     }
     if (fishingWeights.fishOnShore) {
@@ -458,7 +457,7 @@ export default class FishTypesService extends moleculer.Service {
         type: EventType.WEIGHT_ON_SHORE,
         geom: fishingWeights.fishOnShore.geom,
         date: fishingWeights.fishOnShore.createdAt,
-        data: fishingWeights.fishOnShore.toolsGroup,
+        data: fishingWeights.fishOnShore.data,
       });
     }
 
