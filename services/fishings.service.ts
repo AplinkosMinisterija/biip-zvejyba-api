@@ -196,6 +196,7 @@ export type Fishing<
 export default class FishTypesService extends moleculer.Service {
   @Action({
     rest: 'POST /start',
+    auth: RestrictionType.USER,
     params: {
       type: 'string',
       coordinates: CoordinatesProp,
@@ -225,6 +226,7 @@ export default class FishTypesService extends moleculer.Service {
 
   @Action({
     rest: 'POST /skip',
+    auth: RestrictionType.USER,
     params: {
       type: 'string',
       coordinates: CoordinatesProp,
@@ -242,6 +244,7 @@ export default class FishTypesService extends moleculer.Service {
 
   @Action({
     rest: 'POST /end',
+    auth: RestrictionType.USER,
     params: {
       coordinates: CoordinatesProp,
     },
@@ -275,6 +278,7 @@ export default class FishTypesService extends moleculer.Service {
 
   @Action({
     rest: 'GET /current',
+    auth: RestrictionType.USER,
   })
   async currentFishing(ctx: Context<any, UserAuthMeta>) {
     //Users in the same tenant do not share fishing. Each person should start and finish his/her own fishing.
@@ -289,6 +293,7 @@ export default class FishTypesService extends moleculer.Service {
 
   @Action({
     rest: 'GET /weights',
+    auth: RestrictionType.USER,
   })
   async getPreliminaryFishWeight(ctx: Context) {
     const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
@@ -329,6 +334,7 @@ export default class FishTypesService extends moleculer.Service {
 
   @Action({
     rest: 'POST /weight',
+    auth: RestrictionType.USER,
     params: {
       coordinates: CoordinatesProp,
       data: 'object',
@@ -369,7 +375,7 @@ export default class FishTypesService extends moleculer.Service {
     const events: Event[] = [];
     const fishing: any = await ctx.call('fishings.get', {
       id: ctx.params.id,
-      populate: ['startEvent', 'skipEvent', 'endEvent', 'user'],
+      populate: ['startEvent', 'skipEvent', 'endEvent', 'user', 'tenant'],
     });
 
     if (fishing?.skipEvent) {

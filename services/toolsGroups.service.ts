@@ -11,6 +11,7 @@ import {
   COMMON_SCOPES,
   CommonFields,
   CommonPopulates,
+  RestrictionType,
   Table,
 } from '../types';
 import { UserAuthMeta } from './api.service';
@@ -169,6 +170,7 @@ export type ToolsGroup<
 export default class ToolsGroupsService extends moleculer.Service {
   @Action({
     rest: 'POST /build',
+    auth: RestrictionType.USER,
     params: {
       tools: {
         type: 'array',
@@ -253,6 +255,7 @@ export default class ToolsGroupsService extends moleculer.Service {
 
   @Action({
     rest: 'POST /remove/:id',
+    auth: RestrictionType.USER,
     params: {
       id: 'number|convert',
       coordinates: CoordinatesProp,
@@ -301,6 +304,7 @@ export default class ToolsGroupsService extends moleculer.Service {
 
   @Action({
     rest: 'POST /weigh/:id',
+    auth: RestrictionType.USER,
     params: {
       id: 'number|convert',
       coordinates: CoordinatesProp,
@@ -330,6 +334,7 @@ export default class ToolsGroupsService extends moleculer.Service {
 
   @Action({
     rest: 'GET /location/:id',
+    auth: RestrictionType.USER,
     params: {
       id: 'string',
     },

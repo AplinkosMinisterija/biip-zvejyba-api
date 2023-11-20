@@ -11,6 +11,7 @@ import {
   CommonFields,
   CommonPopulates,
   FieldHookCallback,
+  RestrictionType,
   Table,
   throwValidationError,
 } from '../types';
@@ -212,6 +213,7 @@ async function validateData({ ctx, params, entity, value }: FieldHookCallback) {
 export default class ToolTypesService extends moleculer.Service {
   @Action({
     rest: 'GET /available',
+    auth: RestrictionType.USER,
   })
   async availableTools(ctx: Context<any, UserAuthMeta>) {
     const tools: Tool[] = await this.findEntities(ctx, {

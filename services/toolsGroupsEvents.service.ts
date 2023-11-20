@@ -145,6 +145,17 @@ export type ToolsGroupsEvent<
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
     defaultPopulates: ['geom'],
   },
+  actions: {
+    create: {
+      rest: null,
+    },
+    update: {
+      rest: null,
+    },
+    remove: {
+      rest: null,
+    },
+  },
   hooks: {
     before: {
       create: ['beforeCreate'],
