@@ -169,7 +169,7 @@ export default class LocationsService extends moleculer.Service {
   async getRiverOrLakeFromPoint(geom: GeomFeatureCollection) {
     if (geom?.features?.length) {
       try {
-        const box = getBox(geom, 400);
+        const box = getBox(geom, 200);
 
         const bodyOfWatersUrl = `${process.env.GEO_SERVER}/qgisserver/uetk_public?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetFeatureInfo&QUERY_LAYERS=upes%2Cezerai_tvenkiniai&INFO_FORMAT=application%2Fjson&FEATURE_COUNT=1000&X=50&Y=50&SRS=EPSG%3A3346&STYLES=&WIDTH=101&HEIGHT=101&BBOX=${box}`;
         const bodyOfWatersData = await fetch(bodyOfWatersUrl, {
