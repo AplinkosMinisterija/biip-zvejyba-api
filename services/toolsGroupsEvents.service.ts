@@ -1,8 +1,6 @@
 'use strict';
-
 import moleculer from 'moleculer';
 import { Service } from 'moleculer-decorators';
-
 import PostgisMixin from 'moleculer-postgis';
 import DbConnection from '../mixins/database.mixin';
 import ProfileMixin from '../mixins/profile.mixin';
@@ -15,12 +13,10 @@ import {
   Table,
 } from '../types';
 import { Fishing } from './fishings.service';
-import { ToolsGroup } from './toolsGroups.service';
 
 export enum ToolsGroupHistoryTypes {
   BUILD_TOOLS = 'BUILD_TOOLS',
   REMOVE_TOOLS = 'REMOVE_TOOLS',
-  WEIGH_FISH = 'WEIGH_FISH',
 }
 
 interface Fields extends CommonFields {
@@ -37,23 +33,19 @@ interface Fields extends CommonFields {
   };
   data: any;
   fishing: Fishing['id'];
-  toolsGroup: ToolsGroup['id'];
 }
 
 interface Populates extends CommonPopulates {}
 
-export type ToolsGroupsHistory<
+export type ToolsGroupsEvent<
   P extends keyof Populates = never,
   F extends keyof (Fields & Populates) = keyof Fields,
 > = Table<Fields, Populates, P, F>;
 
 @Service({
-  name: 'toolsGroupsHistories',
+  name: 'toolsGroupsEvents',
   mixins: [
-    DbConnection({
-      collection: 'toolsGroupsHistories',
-      rest: false,
-    }),
+    DbConnection(),
     PostgisMixin({
       srid: 3346,
     }),
@@ -92,17 +84,6 @@ export type ToolsGroupsHistory<
         },
       },
       data: 'any', // Type is not clear yet
-      toolsGroup: {
-        type: 'number',
-        columnType: 'integer',
-        columnName: 'toolsGroupId',
-        populate: {
-          action: 'toolsGroups.resolve',
-          params: {
-            scope: false,
-          },
-        },
-      },
       fishing: {
         type: 'number',
         columnType: 'integer',
@@ -136,12 +117,44 @@ export type ToolsGroupsHistory<
           },
         },
       },
+      toolsGroup: {
+        type: 'array',
+        readonly: true,
+        virtual: true,
+        async populate(ctx: any, _values: any, entities: ToolsGroupsEvent[]) {
+          const fieldNames = {
+            [ToolsGroupHistoryTypes.BUILD_TOOLS]: 'buildEvent',
+            [ToolsGroupHistoryTypes.REMOVE_TOOLS]: 'removeEvent',
+          };
+          return Promise.all(
+            entities.map((entity: ToolsGroupsEvent) => {
+              return ctx.call('toolsGroups.findOne', {
+                query: {
+                  [fieldNames[entity.type]]: entity.id,
+                },
+              });
+            }),
+          );
+        },
+      },
       ...COMMON_FIELDS,
     },
     scopes: {
       ...COMMON_SCOPES,
     },
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
+    defaultPopulates: ['geom'],
+  },
+  actions: {
+    create: {
+      rest: null,
+    },
+    update: {
+      rest: null,
+    },
+    remove: {
+      rest: null,
+    },
   },
   hooks: {
     before: {
@@ -154,4 +167,4 @@ export type ToolsGroupsHistory<
     },
   },
 })
-export default class ToolsGroupsHistoriesService extends moleculer.Service {}
+export default class ToolsGroupsEventsService extends moleculer.Service {}

@@ -4,8 +4,51 @@ import { find, isEmpty, map } from 'lodash';
 import moleculer, { Context } from 'moleculer';
 import { Action, Method, Service } from 'moleculer-decorators';
 import { GeomFeatureCollection, coordinatesToGeometry } from '../modules/geometry';
-import { CommonFields, CommonPopulates, LocationType, RestrictionType, Table } from '../types';
 import { UserAuthMeta } from './api.service';
+import { Fishing, FishingType } from './fishings.service';
+
+export const CoordinatesProp = {
+  type: 'object',
+  properties: {
+    x: 'number',
+    y: 'number',
+  },
+};
+
+export type Coordinates = {
+  x: number;
+  y: number;
+};
+
+export const LocationProp = {
+  type: 'object',
+  properties: {
+    id: 'string',
+    name: 'string',
+    municipality: {
+      type: 'object',
+      properties: {
+        id: 'number',
+        name: 'string',
+      },
+    },
+  },
+};
+
+export type Location = {
+  id: string;
+  name: string;
+  municipality: {
+    id: number;
+    name: string;
+  };
+};
+
+interface LocationResult {
+  cadastral_id: string;
+  name: string;
+  municipality: string;
+}
 
 const getBox = (geom: GeomFeatureCollection, tolerance: number = 0.001) => {
   const coordinates: any = geom.features[0].geometry.coordinates;
@@ -20,29 +63,20 @@ const getBox = (geom: GeomFeatureCollection, tolerance: number = 0.001) => {
   return `${topLeft.lng},${bottomRight.lat},${bottomRight.lng},${topLeft.lat}`;
 };
 
-interface Fields extends CommonFields {
-  cadastral_id: string;
-  name: string;
-  municipality: string;
-}
-
-interface Populates extends CommonPopulates {}
-
-export type Location<
-  P extends keyof Populates = never,
-  F extends keyof (Fields & Populates) = keyof Fields,
-> = Table<Fields, Populates, P, F>;
-
 @Service({
   name: 'locations',
 })
 export default class LocationsService extends moleculer.Service {
   @Action({
     rest: 'GET /',
-    auth: RestrictionType.PUBLIC,
     cache: false,
   })
   async search(ctx: Context<any, UserAuthMeta>) {
+    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
+    if (!currentFishing) {
+      throw new moleculer.Errors.ValidationError('Fishing not started');
+    }
+
     let query = ctx.params.query;
 
     if (typeof query === 'string') {
@@ -52,12 +86,17 @@ export default class LocationsService extends moleculer.Service {
     if (!query?.coordinates) {
       throw new moleculer.Errors.ValidationError('Invalid coordinates');
     }
-    const geom = coordinatesToGeometry(query?.coordinates);
-    if (query?.type === LocationType.ESTUARY) {
+    const { x, y } = query.coordinates;
+
+    const geom = coordinatesToGeometry({ x: Number(x), y: Number(y) });
+    if (currentFishing.type === FishingType.ESTUARY) {
       return this.getBarFromPoint(geom);
-    } else if (query?.type === LocationType.INLAND_WATERS) {
+    } else if (currentFishing.type === FishingType.INLAND_WATERS) {
       return this.getRiverOrLakeFromPoint(geom);
+    } else if (currentFishing.type === FishingType.POLDERS) {
+      return this.getPolder(geom);
     } else {
+      throw new moleculer.Errors.ValidationError('Invalid fishing type');
     }
   }
 
@@ -69,7 +108,7 @@ export default class LocationsService extends moleculer.Service {
 
     const result: any = await Promise.all(promises);
 
-    const data: Location[] = [];
+    const data: LocationResult[] = [];
     for (const item of result) {
       if (!isEmpty(item)) {
         data.push(item[0]);
@@ -165,14 +204,12 @@ export default class LocationsService extends moleculer.Service {
     if (geom?.features?.length) {
       try {
         const box = getBox(geom);
-
         const bars = `${process.env.GEO_SERVER}/qgisserver/zuvinimas_barai?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetFeatureInfo&QUERY_LAYERS=fishing_sections&INFO_FORMAT=application%2Fjson&FEATURE_COUNT=1000&X=50&Y=50&SRS=EPSG%3A3346&STYLES=&WIDTH=101&HEIGHT=101&BBOX=${box}`;
         const barsData = await fetch(bars, {
           headers: {
             'Content-Type': 'application/json',
           },
         });
-
         const data = await barsData.json();
         const municipality = await this.getMunicipalityFromPoint(geom);
 
@@ -210,5 +247,19 @@ export default class LocationsService extends moleculer.Service {
       id: Number(properties.code),
       name: properties.name,
     };
+  }
+
+  @Method
+  async getPolder(geom: GeomFeatureCollection) {
+    if (geom?.features?.length) {
+      const municipality = await this.getMunicipalityFromPoint(geom);
+      return {
+        id: FishingType.POLDERS,
+        name: 'Polderiai',
+        municipality: municipality,
+      };
+    } else {
+      throw new moleculer.Errors.ValidationError('Invalid geometry');
+    }
   }
 }

@@ -11,11 +11,11 @@ import {
   CommonFields,
   CommonPopulates,
   FieldHookCallback,
+  RestrictionType,
   Table,
   throwValidationError,
 } from '../types';
 import { AuthUserRole, UserAuthMeta } from './api.service';
-import { BuiltToolsGroup } from './builtToolsGroups.service';
 import { Tenant } from './tenants.service';
 import { ToolCategory, ToolType } from './toolTypes.service';
 import { ToolsGroup } from './toolsGroups.service';
@@ -30,13 +30,12 @@ interface Fields extends CommonFields {
   toolType: ToolType['id'];
   tenant: Tenant['id'];
   user: User['id'];
-  builtToolsGroup?: BuiltToolsGroup['id'];
+  toolsGroup?: ToolsGroup['id'];
 }
 
 interface Populates extends CommonPopulates {
   toolType: ToolType;
   toolsGroup: ToolsGroup;
-  builtToolsGroup: BuiltToolsGroup;
   tenant: Tenant;
   user: User;
 }
@@ -150,14 +149,14 @@ async function validateData({ ctx, params, entity, value }: FieldHookCallback) {
           },
         },
       },
-      builtToolsGroup: {
+      toolsGroup: {
         type: 'number',
         readonly: true,
         virtual: true,
         async populate(ctx: any, _values: any, tools: Tool[]) {
           return Promise.all(
             tools.map(async (tool: Tool) => {
-              return await ctx.call('builtToolsGroups.findOne', {
+              return await ctx.call('toolsGroups.findOne', {
                 query: {
                   ...ctx.params.query,
                   $raw: `${tool.id} = ANY(tools)`,
@@ -214,13 +213,14 @@ async function validateData({ ctx, params, entity, value }: FieldHookCallback) {
 export default class ToolTypesService extends moleculer.Service {
   @Action({
     rest: 'GET /available',
+    auth: RestrictionType.USER,
   })
   async availableTools(ctx: Context<any, UserAuthMeta>) {
     const tools: Tool[] = await this.findEntities(ctx, {
       ...ctx.params,
-      populate: ['builtToolsGroup'],
+      populate: ['toolsGroup', 'toolType'],
     });
-    return tools?.filter((tool) => !tool.builtToolsGroup);
+    return tools?.filter((tool) => !tool.toolsGroup);
   }
 
   @Method
@@ -233,13 +233,13 @@ export default class ToolTypesService extends moleculer.Service {
           tenant: ctx.meta.profile ? ctx.meta.profile : { $exists: false },
           user: ctx.meta.profile ? { $exists: true } : ctx.meta.user.id,
         },
-        populate: ['builtToolsGroup'],
+        populate: ['toolsGroup'],
       });
       if (!tool) {
         throw new moleculer.Errors.ValidationError('Cannot delete tool');
       }
       //validate if tool is in the water
-      if (tool.builtToolsGroup) {
+      if (tool.toolsGroup) {
         throw new moleculer.Errors.ValidationError('Tools is in use');
       }
     }
