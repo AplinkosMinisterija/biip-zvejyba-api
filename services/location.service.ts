@@ -4,6 +4,7 @@ import { find, isEmpty, map } from 'lodash';
 import moleculer, { Context } from 'moleculer';
 import { Action, Method, Service } from 'moleculer-decorators';
 import { GeomFeatureCollection, coordinatesToGeometry } from '../modules/geometry';
+import { LocationType } from '../types';
 import { UserAuthMeta } from './api.service';
 import { Fishing, FishingType } from './fishings.service';
 
@@ -186,6 +187,7 @@ export default class LocationsService extends moleculer.Service {
           return {
             id: properties['2. Kadastro identifikavimo kodas'],
             name: properties['1. Pavadinimas'],
+            type: LocationType.INLAND_WATERS,
             municipality,
           };
         });
@@ -217,6 +219,7 @@ export default class LocationsService extends moleculer.Service {
           return {
             id: feature.properties.id,
             name: feature.properties.name,
+            type: LocationType.ESTUARY,
             municipality: municipality,
           };
         });
@@ -256,6 +259,7 @@ export default class LocationsService extends moleculer.Service {
       return {
         id: FishingType.POLDERS,
         name: 'Polderiai',
+        type: LocationType.POLDERS,
         municipality: municipality,
       };
     } else {
