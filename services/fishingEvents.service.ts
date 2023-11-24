@@ -61,7 +61,12 @@ export type FishingEvent<
         },
       },
       type: 'string',
-      note: 'string',
+      data: {
+        type: 'object',
+        params: {
+          note: 'string',
+        },
+      },
       tenant: {
         type: 'number',
         columnType: 'integer',

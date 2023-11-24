@@ -240,7 +240,7 @@ export default class FishTypesService extends moleculer.Service {
     const skipEvent: FishingEvent = await ctx.call('fishingEvents.create', {
       geom,
       type: FishingEventType.SKIP,
-      note: ctx.params.note,
+      data: { note: ctx.params.note },
     });
     return this.createEntity(ctx, { ...ctx.params, skipEvent: skipEvent.id });
   }
