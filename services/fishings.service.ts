@@ -15,7 +15,7 @@ import {
 } from '../types';
 
 import ProfileMixin from '../mixins/profile.mixin';
-import { coordinatesToGeometry } from '../modules/geometry';
+import { coordinatesToGeometry, geomToWgs } from '../modules/geometry';
 import { UserAuthMeta } from './api.service';
 import { FishType } from './fishTypes.service';
 import { FishingEvent, FishingEventType } from './fishingEvents.service';
@@ -45,6 +45,7 @@ type Event = {
   type: EventType;
   date: Date;
   geom: any;
+  coordinates?: Coordinates;
   location?: any;
   data?: any;
 };
@@ -380,26 +381,26 @@ export default class FishTypesService extends moleculer.Service {
 
     if (fishing?.skipEvent) {
       events.push({
-        id: fishing?.skipEvent.id,
+        id: fishing.skipEvent.id,
         type: EventType.SKIP,
-        geom: fishing?.skipEvent.geom,
-        date: fishing?.skipEvent.createdAt,
+        geom: fishing.skipEvent.geom,
+        date: fishing.skipEvent.createdAt,
       });
     }
     if (fishing?.startEvent) {
       events.push({
-        id: fishing?.startEvent.id,
+        id: fishing.startEvent.id,
         type: EventType.START,
-        geom: fishing?.startEvent.geom,
-        date: fishing?.startEvent.createdAt,
+        geom: fishing.startEvent.geom,
+        date: fishing.startEvent.createdAt,
       });
     }
     if (fishing?.endEvent) {
       events.push({
-        id: fishing?.endEvent.id,
+        id: fishing.endEvent.id,
         type: EventType.END,
-        geom: fishing?.endEvent.geom,
-        date: fishing?.endEvent.createdAt,
+        geom: fishing.endEvent.geom,
+        date: fishing.endEvent.createdAt,
       });
     }
 
@@ -408,10 +409,12 @@ export default class FishTypesService extends moleculer.Service {
       populate: ['toolsGroup', 'geom'],
     });
     for (const t of toolsGroupsEvents.filter((e) => !!e.toolsGroup)) {
+      const coordinates = geomToWgs(t.geom);
       events.push({
         id: t.id,
         type: t.type as EventType,
         geom: t.geom,
+        coordinates,
         location: t.location,
         date: t.createdAt,
         data: t.toolsGroup,
@@ -426,20 +429,25 @@ export default class FishTypesService extends moleculer.Service {
     );
 
     for (const w of Object.values(fishingWeights.fishOnBoat) as WeightEvent[]) {
+      const coordinates = geomToWgs(w.geom);
+
       events.push({
         id: w.id,
         type: EventType.WEIGHT_ON_BOAT,
         geom: w.geom,
+        coordinates,
         location: w.location,
         date: w.createdAt,
         data: { fish: w.data, toolsGroup: w.toolsGroup },
       });
     }
     if (fishingWeights.fishOnShore) {
+      const coordinates = geomToWgs(fishingWeights.fishOnShore.geom);
       events.push({
         id: fishingWeights.fishOnShore.id,
         type: EventType.WEIGHT_ON_SHORE,
         geom: fishingWeights.fishOnShore.geom,
+        coordinates,
         date: fishingWeights.fishOnShore.createdAt,
         data: fishingWeights.fishOnShore.data,
       });

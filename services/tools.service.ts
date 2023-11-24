@@ -162,6 +162,7 @@ async function validateData({ ctx, params, entity, value }: FieldHookCallback) {
                   $raw: `${tool.id} = ANY(tools)`,
                   removeEvent: { $exists: false },
                 },
+                populate: ['buildEvent'],
               });
             }),
           );
