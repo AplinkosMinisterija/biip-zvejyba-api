@@ -20,6 +20,10 @@ import { UserAuthMeta } from './api.service';
 interface Fields extends CommonFields {
   id: number;
   label: string;
+  photo: {
+    url: string;
+    name: string;
+  };
 }
 
 interface Populates extends CommonPopulates {}
@@ -129,5 +133,22 @@ export default class FishTypesService extends moleculer.Service {
       { label: 'plačiakakčiai' },
       { label: 'margieji plačiakakčiai' },
     ]);
+  }
+
+  @Action({
+    rest: <RestSchema>{
+      method: 'GET',
+      basePath: '/public/fishTypes',
+      path: '/',
+    },
+    auth: RestrictionType.PUBLIC,
+  })
+  async getPublicFishType(ctx: Context) {
+    const fishTypes: FishType[] = await this.findEntities(ctx);
+    return fishTypes?.map((fishType) => ({
+      id: fishType.id,
+      label: fishType.label,
+      photo: fishType.photo,
+    }));
   }
 }
