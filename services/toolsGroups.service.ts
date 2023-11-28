@@ -364,4 +364,19 @@ export default class ToolsGroupsService extends moleculer.Service {
       (toolGroup) => toolGroup.buildEvent.location.id === ctx.params.id,
     );
   }
+
+  @Action({
+    auth: RestrictionType.PUBLIC,
+  })
+  async getUniqueToolsLocationsCount(ctx: Context) {
+    const locations = await this.rawQuery(
+      ctx,
+      `SELECT COUNT(DISTINCT (location->>'id')::text) +
+        CASE WHEN EXISTS ( SELECT 1 FROM tools_groups_events WHERE location IS NOT NULL AND (location->>'name') ILIKE '%baras%') 
+        THEN 1 ELSE 0 END AS location_count
+        FROM tools_groups_events
+        WHERE location IS NOT NULL AND (location->>'name') NOT ILIKE '%baras%';`,
+    );
+    return Number(locations[0]?.location_count);
+  }
 }
