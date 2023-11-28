@@ -1,6 +1,6 @@
 'use strict';
 
-import moleculer, { Context } from 'moleculer';
+import moleculer, { Context, RestSchema } from 'moleculer';
 import { Action, Method, Service } from 'moleculer-decorators';
 import PostgisMixin from 'moleculer-postgis';
 import DbConnection from '../mixins/database.mixin';
@@ -12,6 +12,7 @@ import {
   COMMON_SCOPES,
   CommonFields,
   CommonPopulates,
+  RestrictionType,
   Table,
 } from '../types';
 import { FishType } from './fishTypes.service';
@@ -274,5 +275,30 @@ export default class ToolTypesService extends moleculer.Service {
     ctx.params.fishing = currentFishing.id;
     const geom = coordinatesToGeometry(ctx.params.coordinates);
     ctx.params.geom = geom;
+  }
+
+  @Action({
+    rest: <RestSchema>{
+      method: 'GET',
+      basePath: '/public',
+      path: '/statistics',
+    },
+    auth: RestrictionType.PUBLIC,
+  })
+  async getStatistics(ctx: Context<any>) {
+    const data = await this.rawQuery(
+      ctx,
+      `SELECT SUM((fish_data.value)::numeric) AS total_weight, COUNT(DISTINCT fish_data.key) AS fish_types
+        FROM weight_events, LATERAL jsonb_each_text(data) AS fish_data
+        WHERE tools_group_id IS NULL;`,
+    );
+
+    const locationsCount: number = await ctx.call('toolsGroups.getUniqueToolsLocationsCount');
+
+    return {
+      totalWeigh: Number(data[0]?.total_weight),
+      totalFishTypes: Number(data[0]?.fish_types),
+      totalLocations: locationsCount,
+    };
   }
 }
