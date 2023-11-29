@@ -301,4 +301,37 @@ export default class ToolTypesService extends moleculer.Service {
       totalLocations: locationsCount,
     };
   }
+
+  @Action({
+    rest: <RestSchema>{
+      method: 'GET',
+      basePath: '/public',
+      path: '/uetk/statistics',
+    },
+    auth: RestrictionType.PUBLIC,
+  })
+  async getStatisticsForUETK(ctx: Context<any>) {
+    const events: WeightEvent[] = await ctx.call('weightEvents.find', {
+      query: {
+        toolsGroup: { $exists: false },
+      },
+    });
+
+    const fishesCountById = events
+      ?.map((e) => e.data || {})
+      .reduce((acc: any, data: any) => {
+        Object.entries(data || {}).forEach(([key, value]) => {
+          acc[key] = acc[key] || 0;
+          acc[key] += value || 0;
+        });
+        return acc;
+      }, {});
+
+    const fishTypes: FishType[] = await ctx.call('fishTypes.resolve', {
+      id: Object.keys(fishesCountById),
+      fields: ['id', 'label', 'photo'],
+    });
+
+    return fishTypes.map((ft) => ({ fish: ft, count: fishesCountById[ft.id] || 0 }));
+  }
 }
