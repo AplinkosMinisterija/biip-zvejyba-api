@@ -166,6 +166,11 @@ export default class LocationsService extends moleculer.Service {
     return find(municipalities?.rows, { id: ctx.params.id });
   }
 
+  @Action()
+  async findMunicipality(ctx: Context<{ geom: GeomFeatureCollection }>) {
+    return await this.getMunicipalityFromPoint(ctx.params.geom);
+  }
+
   @Method
   async getRiverOrLakeFromPoint(geom: GeomFeatureCollection) {
     if (geom?.features?.length) {

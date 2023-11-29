@@ -17,6 +17,7 @@ import {
 
 import _ from 'lodash';
 import ProfileMixin from '../mixins/profile.mixin';
+import { GeomFeatureCollection } from '../modules/geometry';
 import { getFolderName } from '../utils';
 import { UserAuthMeta } from './api.service';
 import { ResearchFish } from './researches.fishes.service';
@@ -213,7 +214,7 @@ export type Research<
   },
   hooks: {
     before: {
-      create: ['beforeCreate'],
+      create: ['beforeCreate', 'handleMunicipality'],
       list: ['beforeSelect'],
       find: ['beforeSelect'],
       count: ['beforeSelect'],
@@ -394,5 +395,22 @@ export default class ResearchesService extends moleculer.Service {
       .filter((id) => !savedIds.includes(id));
 
     deletingIds.map((id) => this.broker.call('researches.fishes.remove', { id }));
+  }
+
+  @Method
+  async handleMunicipality(ctx: Context<{ geom?: GeomFeatureCollection; waterBodyData: any }>) {
+    if (ctx.params.geom) {
+      const municipality: { id: number; name: string } = await ctx.call(
+        'locations.findMunicipality',
+        {
+          geom: ctx.params.geom,
+        },
+      );
+      const waterBody = {
+        ...ctx.params.waterBodyData,
+        municipality: municipality.name,
+      };
+      ctx.params.waterBodyData = waterBody;
+    }
   }
 }
