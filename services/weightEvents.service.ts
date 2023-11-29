@@ -296,7 +296,7 @@ export default class ToolTypesService extends moleculer.Service {
     const locationsCount: number = await ctx.call('toolsGroups.getUniqueToolsLocationsCount');
 
     return {
-      totalWeigh: Number(data[0]?.total_weight),
+      totalWeight: Number(data[0]?.total_weight),
       totalFishTypes: Number(data[0]?.fish_types),
       totalLocations: locationsCount,
     };
