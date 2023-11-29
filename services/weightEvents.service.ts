@@ -309,13 +309,36 @@ export default class ToolTypesService extends moleculer.Service {
       basePath: '/public',
       path: '/uetk/statistics',
     },
+    params: {
+      date: [
+        {
+          type: 'string',
+          optional: true,
+        },
+        {
+          type: 'object',
+          optional: true,
+        },
+      ],
+      fish: {
+        type: 'number',
+        convert: true,
+        optional: true,
+      },
+    },
     auth: RestrictionType.PUBLIC,
   })
-  async getStatisticsForUETK(ctx: Context<any>) {
+  async getStatisticsForUETK(ctx: Context<{ date: any; fish: number }>) {
+    const { fish: fishId, date } = ctx.params;
+    const query: any = {
+      toolsGroup: { $exists: false },
+    };
+
+    if (date) {
+      query.createdAt = ctx.params.date;
+    }
     const events: WeightEvent<'fishing'>[] = await ctx.call('weightEvents.find', {
-      query: {
-        toolsGroup: { $exists: false },
-      },
+      query,
       populate: 'fishing',
     });
 
@@ -332,6 +355,8 @@ export default class ToolTypesService extends moleculer.Service {
         const byCadastralId = acc[cadastralId] || {};
 
         Object.entries(event?.data || {}).forEach(([key, value]) => {
+          if (fishId && Number(key) !== fishId) return;
+
           byCadastralId[`${key}`] = byCadastralId[key] || { count: 0, fish: fishTypes[`${key}`] };
           byCadastralId[`${key}`].count += value || 0;
         });
