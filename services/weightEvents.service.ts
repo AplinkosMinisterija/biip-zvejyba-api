@@ -335,7 +335,10 @@ export default class ToolTypesService extends moleculer.Service {
     };
 
     if (date) {
-      query.createdAt = ctx.params.date;
+      query.createdAt = date;
+      try {
+        query.createdAt = JSON.parse(date);
+      } catch (err) {}
     }
     const events: WeightEvent<'fishing'>[] = await ctx.call('weightEvents.find', {
       query,
