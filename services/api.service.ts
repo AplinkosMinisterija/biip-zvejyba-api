@@ -43,22 +43,6 @@ export enum AuthUserRole {
 
     routes: [
       {
-        path: '/uml',
-        aliases: {
-          'GET /': 'uml.generate',
-          'GET /entity': 'uml.entity.generate',
-        },
-      },
-      // moleculer-auto-openapi routes
-      {
-        path: '/api/openapi',
-        aliases: {
-          'GET /openapi.json': 'openapi.generateDocs', // swagger scheme
-          'GET /ui': 'openapi.ui', // ui
-          'GET /assets/:file': 'openapi.assets', // js/css files
-        },
-      },
-      {
         path: '/api',
         whitelist: [
           // Access to any actions in all services under "/api" URL
