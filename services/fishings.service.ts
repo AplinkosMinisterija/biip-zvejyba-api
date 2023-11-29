@@ -56,6 +56,7 @@ interface Fields extends CommonFields {
   endEvent: FishingEvent['id'];
   skipEvent: FishingEvent['id'];
   geom: any;
+  uetkCadastralId?: string;
   type: FishingType;
   tenant: Tenant['id'];
   user: User['id'];

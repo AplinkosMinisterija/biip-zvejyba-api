@@ -38,6 +38,7 @@ interface Fields extends CommonFields {
 interface Populates extends CommonPopulates {
   toolType: ToolType;
   toolsGroup: ToolsGroup;
+  fishing: Fishing;
   tenant: Tenant;
   user: User;
 }
@@ -311,27 +312,40 @@ export default class ToolTypesService extends moleculer.Service {
     auth: RestrictionType.PUBLIC,
   })
   async getStatisticsForUETK(ctx: Context<any>) {
-    const events: WeightEvent[] = await ctx.call('weightEvents.find', {
+    const events: WeightEvent<'fishing'>[] = await ctx.call('weightEvents.find', {
       query: {
         toolsGroup: { $exists: false },
       },
+      populate: 'fishing',
     });
 
-    const fishesCountById = events
-      ?.map((e) => e.data || {})
-      .reduce((acc: any, data: any) => {
-        Object.entries(data || {}).forEach(([key, value]) => {
-          acc[key] = acc[key] || 0;
-          acc[key] += value || 0;
+    const fishTypes: { [key: string]: FishType[] } = await ctx.call('fishTypes.find', {
+      mapping: 'id',
+      fields: ['id', 'label'],
+    });
+
+    return Object.entries(
+      events.reduce((acc: any, event: any) => {
+        const cadastralId = event.fishing.uetkCadastralId;
+        if (!cadastralId) return acc;
+
+        const byCadastralId = acc[cadastralId] || {};
+
+        Object.entries(event?.data || {}).forEach(([key, value]) => {
+          byCadastralId[`${key}`] = byCadastralId[key] || { count: 0, fish: fishTypes[`${key}`] };
+          byCadastralId[`${key}`].count += value || 0;
         });
+
+        acc[cadastralId] = byCadastralId;
         return acc;
-      }, {});
-
-    const fishTypes: FishType[] = await ctx.call('fishTypes.resolve', {
-      id: Object.keys(fishesCountById),
-      fields: ['id', 'label', 'photo'],
-    });
-
-    return fishTypes.map((ft) => ({ fish: ft, count: fishesCountById[ft.id] || 0 }));
+      }, {}),
+    ).reduce((acc: any, [key, value]) => {
+      const items = Object.values(value).filter((i) => i.count > 0);
+      acc[key] = {
+        byFishes: items,
+        count: items.reduce((acc: number, i) => acc + i.count, 0),
+      };
+      return acc;
+    }, {});
   }
 }
