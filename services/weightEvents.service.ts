@@ -38,6 +38,7 @@ interface Fields extends CommonFields {
 interface Populates extends CommonPopulates {
   toolType: ToolType;
   toolsGroup: ToolsGroup;
+  fishing: Fishing;
   tenant: Tenant;
   user: User;
 }
@@ -300,5 +301,79 @@ export default class ToolTypesService extends moleculer.Service {
       totalFishTypes: Number(data[0]?.fish_types),
       totalLocations: locationsCount,
     };
+  }
+
+  @Action({
+    rest: <RestSchema>{
+      method: 'GET',
+      basePath: '/public',
+      path: '/uetk/statistics',
+    },
+    params: {
+      date: [
+        {
+          type: 'string',
+          optional: true,
+        },
+        {
+          type: 'object',
+          optional: true,
+        },
+      ],
+      fish: {
+        type: 'number',
+        convert: true,
+        optional: true,
+      },
+    },
+    auth: RestrictionType.PUBLIC,
+  })
+  async getStatisticsForUETK(ctx: Context<{ date: any; fish: number }>) {
+    const { fish: fishId, date } = ctx.params;
+    const query: any = {
+      toolsGroup: { $exists: false },
+    };
+
+    if (date) {
+      query.createdAt = date;
+      try {
+        query.createdAt = JSON.parse(date);
+      } catch (err) {}
+    }
+    const events: WeightEvent<'fishing'>[] = await ctx.call('weightEvents.find', {
+      query,
+      populate: 'fishing',
+    });
+
+    const fishTypes: { [key: string]: FishType[] } = await ctx.call('fishTypes.find', {
+      mapping: 'id',
+      fields: ['id', 'label'],
+    });
+
+    return Object.entries(
+      events.reduce((acc: any, event: any) => {
+        const cadastralId = event.fishing.uetkCadastralId;
+        if (!cadastralId) return acc;
+
+        const byCadastralId = acc[cadastralId] || {};
+
+        Object.entries(event?.data || {}).forEach(([key, value]) => {
+          if (fishId && Number(key) !== fishId) return;
+
+          byCadastralId[`${key}`] = byCadastralId[key] || { count: 0, fish: fishTypes[`${key}`] };
+          byCadastralId[`${key}`].count += value || 0;
+        });
+
+        acc[cadastralId] = byCadastralId;
+        return acc;
+      }, {}),
+    ).reduce((acc: any, [key, value]) => {
+      const items = Object.values(value).filter((i) => i.count > 0);
+      acc[key] = {
+        byFishes: items,
+        count: items.reduce((acc: number, i) => acc + i.count, 0),
+      };
+      return acc;
+    }, {});
   }
 }

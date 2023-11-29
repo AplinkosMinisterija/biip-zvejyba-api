@@ -56,6 +56,7 @@ interface Fields extends CommonFields {
   endEvent: FishingEvent['id'];
   skipEvent: FishingEvent['id'];
   geom: any;
+  uetkCadastralId?: string;
   type: FishingType;
   tenant: Tenant['id'];
   user: User['id'];
@@ -139,6 +140,7 @@ export type Fishing<
           },
         },
       },
+      uetkCadastralId: 'string',
       user: {
         type: 'number',
         columnType: 'integer',
@@ -204,7 +206,10 @@ export default class FishTypesService extends moleculer.Service {
     },
   })
   async startFishing(
-    ctx: Context<{ type: FishingType; coordinates: { x: number; y: number } }, UserAuthMeta>,
+    ctx: Context<
+      { type: FishingType; coordinates: { x: number; y: number }; uetkCadastralId: string },
+      UserAuthMeta
+    >,
   ) {
     //Single active fishing validation
     const current: Fishing = await ctx.call('fishings.currentFishing');
@@ -222,6 +227,11 @@ export default class FishTypesService extends moleculer.Service {
       geom,
       type: FishingEventType.START,
     });
+
+    if (ctx.params.type === FishingType.ESTUARY) {
+      ctx.params.uetkCadastralId = '00070001'; // Kuršių marios
+    }
+
     return this.createEntity(ctx, { ...ctx.params, startEvent: startEvent.id });
   }
 

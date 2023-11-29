@@ -28,23 +28,20 @@ export enum AuthUserRole {
   settings: {
     port: process.env.PORT || 3000,
     path: '/zvejyba',
+
+    // Global CORS settings for all routes
+    cors: {
+      // Configures the Access-Control-Allow-Origin CORS header.
+      origin: '*',
+      // Configures the Access-Control-Allow-Methods CORS header.
+      methods: ['GET', 'OPTIONS', 'POST', 'PUT', 'DELETE'],
+      // Configures the Access-Control-Allow-Headers CORS header.
+      allowedHeaders: '*',
+      // Configures the Access-Control-Max-Age CORS header.
+      maxAge: 3600,
+    },
+
     routes: [
-      {
-        path: '/uml',
-        aliases: {
-          'GET /': 'uml.generate',
-          'GET /entity': 'uml.entity.generate',
-        },
-      },
-      // moleculer-auto-openapi routes
-      {
-        path: '/api/openapi',
-        aliases: {
-          'GET /openapi.json': 'openapi.generateDocs', // swagger scheme
-          'GET /ui': 'openapi.ui', // ui
-          'GET /assets/:file': 'openapi.assets', // js/css files
-        },
-      },
       {
         path: '/api',
         whitelist: [
