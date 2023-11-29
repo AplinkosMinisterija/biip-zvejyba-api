@@ -231,6 +231,7 @@ export default class FishTypesService extends moleculer.Service {
     params: {
       type: 'string',
       coordinates: CoordinatesProp,
+      note: 'string',
     },
   })
   async skipFishing(ctx: Context<any>) {
@@ -239,6 +240,7 @@ export default class FishTypesService extends moleculer.Service {
     const skipEvent: FishingEvent = await ctx.call('fishingEvents.create', {
       geom,
       type: FishingEventType.SKIP,
+      data: { note: ctx.params.note },
     });
     return this.createEntity(ctx, { ...ctx.params, skipEvent: skipEvent.id });
   }
