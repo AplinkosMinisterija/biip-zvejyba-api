@@ -361,7 +361,7 @@ export default class ToolTypesService extends moleculer.Service {
           if (fishId && Number(key) !== fishId) return;
 
           byCadastralId[`${key}`] = byCadastralId[key] || { count: 0, fish: fishTypes[`${key}`] };
-          byCadastralId[`${key}`].count += value || 0;
+          byCadastralId[`${key}`].count += Number(value) || 0;
         });
 
         acc[cadastralId] = byCadastralId;
