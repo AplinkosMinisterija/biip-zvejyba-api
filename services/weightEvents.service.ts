@@ -12,6 +12,7 @@ import {
   COMMON_SCOPES,
   CommonFields,
   CommonPopulates,
+  FieldHookCallback,
   RestrictionType,
   Table,
 } from '../types';
@@ -64,7 +65,16 @@ export type WeightEvent<
         primaryKey: true,
         secure: true,
       },
-      data: 'any',
+      data: {
+        type: 'object',
+        set: ({ value }: FieldHookCallback) => {
+          const numericData: { [key: string]: number } = {};
+          for (const i in value) {
+            numericData[i] = Number(value[i]);
+          }
+          return numericData;
+        },
+      },
       date: {
         type: 'date',
         columnType: 'datetime',
