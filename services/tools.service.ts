@@ -229,8 +229,8 @@ export default class ToolTypesService extends moleculer.Service {
     //Tool ownership validation
     if (![AuthUserRole.SUPER_ADMIN, AuthUserRole.ADMIN].some((r) => r === ctx.meta.authUser.type)) {
       const tool = await this.findEntity(ctx, {
-        id: ctx.params.id,
         query: {
+          id: ctx.params.id,
           tenant: ctx.meta.profile ? ctx.meta.profile : { $exists: false },
           user: ctx.meta.profile ? { $exists: true } : ctx.meta.user.id,
         },

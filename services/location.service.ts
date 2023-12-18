@@ -6,7 +6,7 @@ import { Action, Method, Service } from 'moleculer-decorators';
 import { GeomFeatureCollection, coordinatesToGeometry } from '../modules/geometry';
 import { LocationType } from '../types';
 import { UserAuthMeta } from './api.service';
-import { Fishing, FishingType } from './fishings.service';
+import { FishingType } from './fishings.service';
 
 export const CoordinatesProp = {
   type: 'object',
@@ -73,11 +73,6 @@ export default class LocationsService extends moleculer.Service {
     cache: false,
   })
   async search(ctx: Context<any, UserAuthMeta>) {
-    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
-    if (!currentFishing) {
-      throw new moleculer.Errors.ValidationError('Fishing not started');
-    }
-
     let query = ctx.params.query;
 
     if (typeof query === 'string') {
@@ -90,11 +85,11 @@ export default class LocationsService extends moleculer.Service {
     const { x, y } = query.coordinates;
 
     const geom = coordinatesToGeometry({ x: Number(x), y: Number(y) });
-    if (currentFishing.type === FishingType.ESTUARY) {
+    if (query.type === FishingType.ESTUARY) {
       return this.getBarFromPoint(geom);
-    } else if (currentFishing.type === FishingType.INLAND_WATERS) {
+    } else if (query.type === FishingType.INLAND_WATERS) {
       return this.getRiverOrLakeFromPoint(geom);
-    } else if (currentFishing.type === FishingType.POLDERS) {
+    } else if (query.type === FishingType.POLDERS) {
       return this.getPolder(geom);
     } else {
       throw new moleculer.Errors.ValidationError('Invalid fishing type');
@@ -166,11 +161,6 @@ export default class LocationsService extends moleculer.Service {
     return find(municipalities?.rows, { id: ctx.params.id });
   }
 
-  @Action()
-  async findMunicipality(ctx: Context<{ geom: GeomFeatureCollection }>) {
-    return await this.getMunicipalityFromPoint(ctx.params.geom);
-  }
-
   @Method
   async getRiverOrLakeFromPoint(geom: GeomFeatureCollection) {
     if (geom?.features?.length) {
@@ -183,7 +173,11 @@ export default class LocationsService extends moleculer.Service {
             'Content-Type': 'application/json',
           },
         });
+
         const { features } = await bodyOfWatersData.json();
+        if (!features.length) {
+          return null;
+        }
 
         const municipality = await this.getMunicipalityFromPoint(geom);
 
@@ -217,10 +211,13 @@ export default class LocationsService extends moleculer.Service {
             'Content-Type': 'application/json',
           },
         });
-        const data = await barsData.json();
+        const { features } = await barsData.json();
+        if (!features?.length) {
+          return null;
+        }
         const municipality = await this.getMunicipalityFromPoint(geom);
 
-        const mappedList = map(data?.features, (feature) => {
+        const mappedList = map(features, (feature) => {
           return {
             id: feature.properties.id,
             name: feature.properties.name,
@@ -249,6 +246,10 @@ export default class LocationsService extends moleculer.Service {
       },
     });
     const { features } = await data.json();
+    if (!features.length) {
+      return null;
+    }
+
     const { properties } = features[0];
 
     return {
