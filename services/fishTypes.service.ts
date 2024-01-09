@@ -72,18 +72,20 @@ export type FishType<
   },
   actions: {
     remove: {
-      auth: [RestrictionType.ADMIN],
+      auth: RestrictionType.ADMIN,
     },
     create: {
-      auth: [RestrictionType.ADMIN],
+      auth: RestrictionType.ADMIN,
     },
     update: {
-      auth: [RestrictionType.ADMIN],
+      auth: RestrictionType.ADMIN,
+    },
+    find: {
+      auth: RestrictionType.PUBLIC,
     },
   },
   hooks: {
     before: {
-      getPublicFishType: ['beforeSelect'],
       list: ['beforeSelect'],
       find: ['beforeSelect'],
       count: ['beforeSelect'],
@@ -175,7 +177,7 @@ export default class FishTypesService extends moleculer.Service {
   @Method
   async beforeSelect(ctx: Context<any>) {
     if (!ctx.params.sort) {
-      ctx.params.sort = '-priority';
+      ctx.params.sort = '-priority,label';
     }
   }
 
@@ -188,13 +190,10 @@ export default class FishTypesService extends moleculer.Service {
     auth: RestrictionType.PUBLIC,
   })
   async getPublicFishType(ctx: Context) {
-    const fishTypes: FishType[] = await this.findEntities(ctx);
-    return fishTypes?.map((fishType) => ({
-      id: fishType.id,
-      label: fishType.label,
-      photo: fishType.photo,
-      priority: fishType.priority,
-    }));
+    return await this.findEntities(ctx, {
+      fields: ['id', 'label', 'photo', 'priority'],
+      sort: 'label',
+    });
   }
 
   @Action()
@@ -208,7 +207,7 @@ export default class FishTypesService extends moleculer.Service {
 
   @Action({
     rest: 'PATCH /priority',
-    auth: RestrictionType.ADMIN,
+    auth: RestrictionType.PUBLIC,
   })
   async updatePriorityByFrequency(ctx: Context) {
     const fishTypes: FishType[] = await this.findEntities(ctx);
