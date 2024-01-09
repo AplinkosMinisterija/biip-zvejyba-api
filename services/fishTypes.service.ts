@@ -188,7 +188,6 @@ export default class FishTypesService extends moleculer.Service {
     auth: RestrictionType.PUBLIC,
   })
   async getPublicFishType(ctx: Context) {
-    console.log('getPublicFishTypes!!!');
     const fishTypes: FishType[] = await this.findEntities(ctx);
     return fishTypes?.map((fishType) => ({
       id: fishType.id,
@@ -200,7 +199,9 @@ export default class FishTypesService extends moleculer.Service {
 
   @Action()
   async updatePriority(ctx: Context) {
-    if (new Date().getTime() >= new Date('2025-01-01T00:00:00').getTime()) {
+    // There is no data yet, so the sort would be inaccurate if sorted now.
+    // A year later might be better.
+    if (new Date() >= new Date('2025-01-01T00:00:00')) {
       await ctx.call('fishTypes.updatePriorityByFrequency');
     }
   }
