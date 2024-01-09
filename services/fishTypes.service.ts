@@ -25,6 +25,7 @@ interface Fields extends CommonFields {
     url: string;
     name: string;
   };
+  priority: number;
 }
 
 interface Populates extends CommonPopulates {}
@@ -82,6 +83,7 @@ export type FishType<
   },
   hooks: {
     before: {
+      getPublicFishType: ['beforeSelect'],
       list: ['beforeSelect'],
       find: ['beforeSelect'],
       count: ['beforeSelect'],
@@ -186,11 +188,13 @@ export default class FishTypesService extends moleculer.Service {
     auth: RestrictionType.PUBLIC,
   })
   async getPublicFishType(ctx: Context) {
+    console.log('getPublicFishTypes!!!');
     const fishTypes: FishType[] = await this.findEntities(ctx);
     return fishTypes?.map((fishType) => ({
       id: fishType.id,
       label: fishType.label,
       photo: fishType.photo,
+      priority: fishType.priority,
     }));
   }
 
