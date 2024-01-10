@@ -86,11 +86,9 @@ export type FishType<
   },
   hooks: {
     before: {
-      list: ['beforeSelect'],
-      find: ['beforeSelect'],
-      count: ['beforeSelect'],
-      get: ['beforeSelect'],
-      all: ['beforeSelect'],
+      list: ['sortItems'],
+      find: ['sortItems'],
+      all: ['sortItems'],
     },
   },
   crons: [
@@ -175,7 +173,7 @@ export default class FishTypesService extends moleculer.Service {
   }
 
   @Method
-  async beforeSelect(ctx: Context<any>) {
+  async sortItems(ctx: Context<any>) {
     if (!ctx.params.sort) {
       ctx.params.sort = '-priority,label';
     }
@@ -206,7 +204,7 @@ export default class FishTypesService extends moleculer.Service {
 
   @Action({
     rest: 'PATCH /priority',
-    auth: RestrictionType.PUBLIC,
+    auth: RestrictionType.ADMIN,
   })
   async updatePriorityByFrequency(ctx: Context) {
     const fishTypes: FishType[] = await this.findEntities(ctx);
