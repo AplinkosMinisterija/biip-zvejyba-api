@@ -199,7 +199,6 @@ export default class FishTypesService extends moleculer.Service {
   @Action()
   async updatePriority(ctx: Context) {
     // There is no data yet, so the sort would be inaccurate if sorted now.
-    // A year later might be better.
     if (new Date() >= new Date('2025-01-01T00:00:00')) {
       await ctx.call('fishTypes.updatePriorityByFrequency');
     }
