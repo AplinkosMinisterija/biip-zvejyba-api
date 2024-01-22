@@ -64,7 +64,6 @@
     "ioredis": "^5.3.1",
     "knex": "^3.0.1",
     "lodash": "^4.17.21",
-    "moment": "^2.29.4",
     "mime-types": "^2.1.35",
     "minio": "^7.0.33",
     "moleculer": "^0.14.29",
@@ -76,10 +75,10 @@
     "moleculer-postgis": "^0.2.7",
     "moleculer-sentry": "^2.0.0",
     "moleculer-web": "^0.10.5",
+    "moment": "^2.29.4",
     "nats": "^2.13.1",
     "objection": "^3.0.1",
     "pg": "^8.10.0",
-    "postmark": "^3.0.18",
     "transform-coordinates": "^1.0.0"
   },
   "engines": {
