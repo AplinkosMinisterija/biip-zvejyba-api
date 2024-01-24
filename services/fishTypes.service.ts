@@ -18,6 +18,50 @@ import { UserAuthMeta } from './api.service';
 
 const Cron = require('@r2d2bzh/moleculer-cron');
 
+const data = [
+  { label: 'karšiai', priority: 26 },
+  { label: 'žiobriai', priority: 25 },
+  { label: 'kuojos', priority: 24 },
+  { label: 'sterkai', priority: 23 },
+  { label: 'ešeriai', priority: 22 },
+  { label: 'strintos', priority: 21 },
+  { label: 'perpelės', priority: 20 },
+  { label: 'karosai, auksiniai', priority: 19 },
+  { label: 'karosai, sidabriniai', priority: 18 },
+  { label: 'unguriai', priority: 17 },
+  { label: 'lydekos', priority: 16 },
+  { label: 'salačiai', priority: 15 },
+  { label: 'vėgėlės', priority: 14 },
+  { label: 'ožkos', priority: 13 },
+  { label: 'karpiai', priority: 12 },
+  { label: 'plakiai', priority: 11 },
+  { label: 'šamai', priority: 10 },
+  { label: 'nėgės', priority: 9 },
+  { label: 'pūgžliai', priority: 8 },
+  { label: 'lynai', priority: 7 },
+  { label: 'meknės', priority: 6 },
+  { label: 'plekšnės', priority: 5 },
+  { label: 'sykai', priority: 4 },
+  { label: 'strimelės', priority: 3 },
+  { label: 'plačiakačiai', priority: 2 },
+  { label: 'aukšlės', priority: 1 },
+  { label: 'seliavos', priority: 0 },
+  { label: 'sterkai', priority: 0 },
+  { label: 'vaivorykštiniai upėtakiai', priority: 0 },
+  { label: 'vėžiai, plačiažnypliai', priority: 0 },
+  { label: 'margieji plačiakačiai', priority: 0 },
+  { label: 'lašišos', priority: 0 },
+  { label: 'šlakiai', priority: 0 },
+  { label: 'margieji upėtakiai', priority: 0 },
+  { label: 'aštriašnipiai eršketai', priority: 0 },
+  { label: 'kiršliai', priority: 0 },
+  { label: 'ūsoriai', priority: 0 },
+  { label: 'skersnukiai', priority: 0 },
+  { label: 'plačiakakčiai', priority: 0 },
+  { label: 'margieji plačiakakčiai', priority: 0 },
+  { label: 'baltieji amūrai', priority: 0 },
+];
+
 interface Fields extends CommonFields {
   id: number;
   label: string;
@@ -81,7 +125,7 @@ export type FishType<
       auth: RestrictionType.ADMIN,
     },
     find: {
-      auth: RestrictionType.PUBLIC,
+      auth: RestrictionType.ADMIN,
     },
   },
   hooks: {
@@ -96,11 +140,46 @@ export type FishType<
       name: 'updatePriority',
       cronTime: '0 0 * * 0',
       async onTick() {
-        return await this.call('fishTypes.updatePriority');
+        // There is no data yet, so the sort would be inaccurate if sorted now.
+        if (new Date() >= new Date('2025-01-01T00:00:00')) {
+          const fishTypes: FishType[] = await this.call('fishTypes.find');
+          for (const fishType of fishTypes) {
+            const weightEventsCount: number = await this.call('weightEvents.count', {
+              query: {
+                toolsGroup: { $exists: false },
+                $raw: {
+                  condition: `data->> ? IS NOT NULL`,
+                  bindings: fishType.id,
+                },
+              },
+            });
+            await this.call('fishTypes.update', {
+              id: fishType.id,
+              priority: weightEventsCount,
+            });
+          }
+        }
       },
       timeZone: 'Europe/Vilnius',
     },
   ],
+  async started() {
+    //Initial priority to sort fish types according to predefined priority before automatic priority update
+    //TODO: can be deleted after release to production
+    const entities = await this.findEntities(null, { scope: false });
+    const entitiesWithDefaultPriority = await this.findEntities(null, {
+      query: { priority: 0 },
+      scope: false,
+    });
+    if (entities.length === entitiesWithDefaultPriority.length) {
+      for (const entity of entities) {
+        const priority = data.find((item) => item.label === entity.label)?.priority;
+        if (priority) {
+          await this.updateEntity(null, { id: entity.id, priority });
+        }
+      }
+    }
+  },
 })
 export default class FishTypesService extends moleculer.Service {
   @Action({
@@ -125,60 +204,6 @@ export default class FishTypesService extends moleculer.Service {
     });
   }
 
-  @Method
-  async seedDB() {
-    await this.createEntities(null, [
-      { label: 'karšiai', priority: 26 },
-      { label: 'žiobriai', priority: 25 },
-      { label: 'kuojos', priority: 24 },
-      { label: 'sterkai', priority: 23 },
-      { label: 'ešeriai', priority: 22 },
-      { label: 'strintos', priority: 21 },
-      { label: 'perpelės', priority: 20 },
-      { label: 'karosai, auksiniai', priority: 19 },
-      { label: 'karosai, sidabriniai', priority: 18 },
-      { label: 'unguriai', priority: 17 },
-      { label: 'lydekos', priority: 16 },
-      { label: 'salačiai', priority: 15 },
-      { label: 'vėgėlės', priority: 14 },
-      { label: 'ožkos', priority: 13 },
-      { label: 'karpiai', priority: 12 },
-      { label: 'plakiai', priority: 11 },
-      { label: 'šamai', priority: 10 },
-      { label: 'nėgės', priority: 9 },
-      { label: 'pūgžliai', priority: 8 },
-      { label: 'lynai', priority: 7 },
-      { label: 'meknės', priority: 6 },
-      { label: 'plekšnės', priority: 5 },
-      { label: 'sykai', priority: 4 },
-      { label: 'strimelės', priority: 3 },
-      { label: 'plačiakačiai', priority: 2 },
-      { label: 'aukšlės', priority: 1 },
-      { label: 'seliavos', priority: 0 },
-      { label: 'sterkai', priority: 0 },
-      { label: 'vaivorykštiniai upėtakiai', priority: 0 },
-      { label: 'vėžiai, plačiažnypliai', priority: 0 },
-      { label: 'margieji plačiakačiai', priority: 0 },
-      { label: 'lašišos', priority: 0 },
-      { label: 'šlakiai', priority: 0 },
-      { label: 'margieji upėtakiai', priority: 0 },
-      { label: 'aštriašnipiai eršketai', priority: 0 },
-      { label: 'kiršliai', priority: 0 },
-      { label: 'ūsoriai', priority: 0 },
-      { label: 'skersnukiai', priority: 0 },
-      { label: 'plačiakakčiai', priority: 0 },
-      { label: 'margieji plačiakakčiai', priority: 0 },
-      { label: 'baltieji amūrai', priority: 0 },
-    ]);
-  }
-
-  @Method
-  async sortItems(ctx: Context<any>) {
-    if (!ctx.params.sort) {
-      ctx.params.sort = '-priority,label';
-    }
-  }
-
   @Action({
     rest: <RestSchema>{
       method: 'GET',
@@ -194,31 +219,15 @@ export default class FishTypesService extends moleculer.Service {
     });
   }
 
-  @Action()
-  async updatePriority(ctx: Context) {
-    // There is no data yet, so the sort would be inaccurate if sorted now.
-    if (new Date() >= new Date('2025-01-01T00:00:00')) {
-      await ctx.call('fishTypes.updatePriorityByFrequency');
+  @Method
+  async sortItems(ctx: Context<any>) {
+    if (!ctx.params.sort) {
+      ctx.params.sort = '-priority,label';
     }
   }
 
-  @Action({
-    rest: 'PATCH /priority',
-    auth: RestrictionType.ADMIN,
-  })
-  async updatePriorityByFrequency(ctx: Context) {
-    const fishTypes: FishType[] = await this.findEntities(ctx);
-    for (const fishType of fishTypes) {
-      const weightEventsCount: number = await ctx.call('weightEvents.count', {
-        query: {
-          toolsGroup: { $exists: false },
-          $raw: {
-            condition: `data->> ? IS NOT NULL`,
-            bindings: fishType.id,
-          },
-        },
-      });
-      await this.updateEntity(ctx, { id: fishType.id, priority: weightEventsCount });
-    }
+  @Method
+  async seedDB() {
+    await this.createEntities(null, data);
   }
 }
