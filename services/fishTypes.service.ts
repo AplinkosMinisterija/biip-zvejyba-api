@@ -163,23 +163,6 @@ export type FishType<
       timeZone: 'Europe/Vilnius',
     },
   ],
-  async started() {
-    //Initial priority to sort fish types according to predefined priority before automatic priority update
-    //TODO: can be deleted after release to production
-    const entities = await this.findEntities(null, { scope: false });
-    const entitiesWithDefaultPriority = await this.findEntities(null, {
-      query: { priority: 0 },
-      scope: false,
-    });
-    if (entities.length === entitiesWithDefaultPriority.length) {
-      for (const entity of entities) {
-        const priority = data.find((item) => item.label === entity.label)?.priority;
-        if (priority) {
-          await this.updateEntity(null, { id: entity.id, priority });
-        }
-      }
-    }
-  },
 })
 export default class FishTypesService extends moleculer.Service {
   @Action({
