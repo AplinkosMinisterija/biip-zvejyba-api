@@ -59,6 +59,7 @@
   },
   "dependencies": {
     "@moleculer/database": "github:ambrazasp/moleculerjs-database",
+    "@r2d2bzh/moleculer-cron": "^0.1.4",
     "biip-auth-nodejs": "github:DadPatch/biip-auth-nodejs",
     "dotenv": "^16.0.3",
     "ioredis": "^5.3.1",
