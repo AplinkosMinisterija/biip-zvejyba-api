@@ -124,9 +124,6 @@ export type FishType<
     update: {
       auth: RestrictionType.ADMIN,
     },
-    find: {
-      auth: RestrictionType.ADMIN,
-    },
   },
   hooks: {
     before: {
