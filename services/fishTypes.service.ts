@@ -18,9 +18,9 @@ import { UserAuthMeta } from './api.service';
 
 const Cron = require('@r2d2bzh/moleculer-cron');
 
-const START_PRIORITY_UPDATE_DATE = '2025-01-01T00:00:00';
+export const START_PRIORITY_UPDATE_DATE = '2025-01-01T00:00:00';
 
-const data = [
+export const fishTypesSeedData = [
   { label: 'karšiai', priority: 26 },
   { label: 'žiobriai', priority: 25 },
   { label: 'kuojos', priority: 24 },
@@ -209,26 +209,6 @@ export default class FishTypesService extends moleculer.Service {
 
   @Method
   async seedDB() {
-    await this.createEntities(null, data);
+    await this.createEntities(null, fishTypesSeedData);
   }
-
-  // async started() {
-  //   if (new Date() <= new Date(START_PRIORITY_UPDATE_DATE)) {
-  //     const fishTypes = await this.findEntities(null, {
-  //       scope: false,
-  //     });
-  //     if (fishTypes !== 0) {
-  //       for (const fishType of fishTypes) {
-  //         const name = fishType.label;
-  //         const priority = data.find((item) => item.label === name)?.priority;
-  //         if (priority) {
-  //           await this.updateEntity(null, {
-  //             id: fishType.id,
-  //             priority,
-  //           });
-  //         }
-  //       }
-  //     }
-  //   }
-  // }
 }
