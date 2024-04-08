@@ -48,7 +48,6 @@ const data = [
   { label: 'plačiakačiai', priority: 2 },
   { label: 'aukšlės', priority: 1 },
   { label: 'seliavos', priority: 0 },
-  { label: 'sterkai', priority: 0 },
   { label: 'vaivorykštiniai upėtakiai', priority: 0 },
   { label: 'vėžiai, plačiažnypliai', priority: 0 },
   { label: 'margieji plačiakačiai', priority: 0 },
