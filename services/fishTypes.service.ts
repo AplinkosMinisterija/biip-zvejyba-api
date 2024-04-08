@@ -217,18 +217,18 @@ export default class FishTypesService extends moleculer.Service {
       const fishTypes: FishType[] = await this.findEntities(null, {
         scope: false,
       });
-      if (fishTypes.length !== 0) {
-        for (const fishType of fishTypes) {
-          const name = fishType?.label;
-          const seed = fishTypesSeedData.find((item) => item.label === name);
-          if (seed) {
-            await this.updateEntity(null, {
-              id: fishType.id,
-              priority: seed.priority,
-            });
-          }
-        }
-      }
+      // if (fishTypes.length !== 0) {
+      //   for (const fishType of fishTypes) {
+      //     const name = fishType?.label;
+      //     const seed = fishTypesSeedData.find((item) => item.label === name);
+      //     if (seed) {
+      //       await this.updateEntity(null, {
+      //         id: fishType.id,
+      //         priority: seed.priority,
+      //       });
+      //     }
+      //   }
+      // }
     }
   }
 }
