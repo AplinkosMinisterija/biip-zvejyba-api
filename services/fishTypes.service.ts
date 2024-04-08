@@ -214,17 +214,17 @@ export default class FishTypesService extends moleculer.Service {
 
   async started() {
     if (new Date() <= new Date(START_PRIORITY_UPDATE_DATE)) {
-      const fishTypes = await this.findEntities(null, {
+      const fishTypes: FishType[] = await this.findEntities(null, {
         scope: false,
       });
       if (fishTypes.length !== 0) {
         for (const fishType of fishTypes) {
-          const name = fishType.label;
-          const priority = fishTypesSeedData.find((item) => item.label === name)?.priority;
-          if (priority) {
+          const name = fishType?.label;
+          const seed = fishTypesSeedData.find((item) => item.label === name);
+          if (seed) {
             await this.updateEntity(null, {
               id: fishType.id,
-              priority,
+              priority: seed.priority,
             });
           }
         }
