@@ -18,6 +18,8 @@ import { UserAuthMeta } from './api.service';
 
 const Cron = require('@r2d2bzh/moleculer-cron');
 
+const START_PRIORITY_UPDATE_DATE = '2025-01-01T00:00:00';
+
 const data = [
   { label: 'karšiai', priority: 26 },
   { label: 'žiobriai', priority: 25 },
@@ -138,7 +140,7 @@ export type FishType<
       cronTime: '0 0 * * 0',
       async onTick() {
         // There is no data yet, so the sort would be inaccurate if sorted now.
-        if (new Date() >= new Date('2025-01-01T00:00:00')) {
+        if (new Date() >= new Date(START_PRIORITY_UPDATE_DATE)) {
           const fishTypes: FishType[] = await this.call('fishTypes.find');
           for (const fishType of fishTypes) {
             const weightEventsCount: number = await this.call('weightEvents.count', {
@@ -209,5 +211,25 @@ export default class FishTypesService extends moleculer.Service {
   @Method
   async seedDB() {
     await this.createEntities(null, data);
+  }
+
+  async started() {
+    if (new Date() <= new Date(START_PRIORITY_UPDATE_DATE)) {
+      const fishTypes = await this.findEntities(null, {
+        scope: false,
+      });
+      if (fishTypes !== 0) {
+        for (const fishType of fishTypes) {
+          const name = fishType.label;
+          const priority = data.find((item) => item.label === name)?.priority;
+          if (priority) {
+            await this.updateEntity(null, {
+              id: fishType.id,
+              priority,
+            });
+          }
+        }
+      }
+    }
   }
 }
