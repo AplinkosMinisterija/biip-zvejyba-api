@@ -1,6 +1,5 @@
 'use strict';
 import { BrokerOptions, Errors, MetricRegistry, ServiceBroker } from 'moleculer';
-import { START_PRIORITY_UPDATE_DATE, fishTypesSeedData } from './services/fishTypes.service';
 
 /**
  * Moleculer ServiceBroker configuration file
@@ -235,24 +234,6 @@ const brokerConfig: BrokerOptions = {
   started: async (broker: ServiceBroker): Promise<void> => {},
 	stopped: async (broker: ServiceBroker): Promise<void> => {},
 	 */
-  started: async (broker: ServiceBroker): Promise<void> => {
-    if (new Date() <= new Date(START_PRIORITY_UPDATE_DATE)) {
-      const fishTypes = await broker.findEntities(null, {
-        scope: false,
-      });
-      if (fishTypes !== 0) {
-        for (const fishType of fishTypes) {
-          const name = fishType.label;
-          const priority = fishTypesSeedData.find((item) => item.label === name)?.priority;
-          if (priority) {
-            await broker.updateEntity(null, {
-              id: fishType.id,
-              priority,
-            });
-          }
-        }
-      }
-    }
-  },
+  started: async (broker: ServiceBroker): Promise<void> => {},
 };
 export = brokerConfig;
