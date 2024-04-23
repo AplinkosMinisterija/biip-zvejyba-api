@@ -65,6 +65,8 @@ interface Fields extends CommonFields {
     totalAbundance: number;
     totalBiomass: number;
   };
+  totalFishesAbundance?: number;
+  totalBiomass?: number;
   fishes?: ResearchFish[];
   tenant: Tenant['id'];
   user: User['id'];
@@ -125,6 +127,8 @@ export type Research<
       },
       predatoryFishesRelativeAbundance: 'number|required',
       predatoryFishesRelativeBiomass: 'number|required',
+      totalFishesAbundance: 'number|optional',
+      totalBiomass: 'number|optional',
       averageWeight: 'number|required',
       valuableFishesRelativeBiomass: 'number|required',
       conditionIndex: 'number|required',
