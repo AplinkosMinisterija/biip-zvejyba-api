@@ -39,6 +39,8 @@ const publicFields = [
   'files',
   'previousResearchData',
   'fishes',
+  'totalFishesAbundance',
+  'totalBiomass',
 ];
 
 interface Fields extends CommonFields {
@@ -67,6 +69,8 @@ interface Fields extends CommonFields {
   tenant: Tenant['id'];
   user: User['id'];
   previous?: Research;
+  totalBiomass: number;
+  totalFishesAbundance: number;
 }
 
 interface Populates extends CommonPopulates {}
@@ -168,6 +172,8 @@ export type Research<
           },
         },
       },
+      totalFishesAbundance: 'number',
+      totalBiomass: 'number',
       tenant: {
         type: 'number',
         columnType: 'integer',
@@ -323,6 +329,7 @@ export default class ResearchesService extends moleculer.Service {
     });
 
     const researches: Research[] = [];
+
     Object.entries(researchesById).forEach(([cadastralId, items]) => {
       if (cadastralId) {
         researches.push(items[0]);
