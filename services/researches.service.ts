@@ -71,8 +71,6 @@ interface Fields extends CommonFields {
   tenant: Tenant['id'];
   user: User['id'];
   previous?: Research;
-  totalBiomass: number;
-  totalFishesAbundance: number;
 }
 
 interface Populates extends CommonPopulates {}
@@ -176,8 +174,6 @@ export type Research<
           },
         },
       },
-      totalFishesAbundance: 'number',
-      totalBiomass: 'number',
       tenant: {
         type: 'number',
         columnType: 'integer',
