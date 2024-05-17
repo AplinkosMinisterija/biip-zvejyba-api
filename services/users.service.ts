@@ -239,12 +239,22 @@ export default class UsersService extends moleculer.Service {
     return this.findEntities(ctx);
   }
 
-  @Action()
-  async test(ctx: Context) {
-    const adapter = await this.getAdapter(ctx);
-    const knex = adapter.client;
-    const response = await knex.raw('select * from users where id = ?', [1]);
-    return response.rows;
+
+  @Action({
+    rest: 'POST /:id/impersonate',
+    params: {
+      id: {
+        type: 'number',
+        convert: true,
+      },
+    },
+  })
+  async impersonate(ctx: Context<{ id: number }, UserAuthMeta>) {
+    const { id } = ctx.params;
+
+    const user: User = await ctx.call('users.resolve', { id });
+
+    return ctx.call('auth.users.impersonate', { id: user.authUser });
   }
 
   @Action({
