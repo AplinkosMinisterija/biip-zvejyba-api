@@ -101,37 +101,40 @@ export default class LocationsService extends moleculer.Service {
   async uetkSearchByCadastralId(
     ctx: Context<
       {
-        cadastralId: string;
+        cadastralId: string | string[];
       },
       UserAuthMeta
     >,
   ) {
-    const targetUrl = `${process.env.UETK_URL}/objects/search`;
+    const targetUrl = `${process.env.UETK_URL}/objects`;
     const params: any = ctx.params;
     const searchParams = new URLSearchParams(params);
-    const query = {
-      cadastralId: ctx.params.cadastralId,
-    };
+    const multi = typeof ctx.params.cadastralId !== 'string';
+    let query;
+    if (multi) {
+      query = { cadastralId: { $in: ctx.params.cadastralId } };
+    } else {
+      query = { cadastralId: ctx.params.cadastralId };
+    }
+    if (!query) return;
+
     searchParams.set('query', JSON.stringify(query));
     const queryString = searchParams.toString();
 
     const url = `${targetUrl}?${queryString}`;
-    try {
-      const data = await fetch(url).then((r) => r.json());
-      const location = data?.rows?.[0];
-      if (!location) return;
-      const municipalities = await this.actions.getMunicipalities();
-      const municipality = find(municipalities?.rows, { name: location.municipality });
 
+    const data = await fetch(url).then((r) => r.json());
+    const locations = data?.rows;
+    if (!locations || !locations.length) return;
+    const mappedLocations = locations.map((location: any) => {
+      const municipality = { name: location.municipality, id: location.municipalityCode };
       return {
         id: location.cadastralId,
         name: location.name,
         municipality: municipality,
       };
-      return this.mapUETKObject(ctx, data?.rows?.[0]);
-    } catch (error) {
-      throw new Error(`Failed to fetch: ${error.message}`);
-    }
+    });
+    return multi ? mappedLocations : mappedLocations[0];
   }
 
   @Action()

@@ -169,20 +169,12 @@ export type Fishing<
         readonly: true,
         virtual: true,
         async populate(ctx: any, _values: any, fishings: Fishing[]) {
-          return Promise.all(
-            fishings.map((fishing: any) => {
-              try {
-                if (!fishing?.uetkCadastralId) {
-                  return null;
-                }
-                return ctx.call('locations.uetkSearchByCadastralId', {
-                  cadastralId: fishing.uetkCadastralId,
-                });
-              } catch (e) {
-                return null;
-              }
-            }),
-          );
+          const cadastralIds = fishings
+            .filter((fishing) => !!fishing.uetkCadastralId)
+            .map((fishing: any) => fishing.uetkCadastralId);
+          return ctx.call('locations.uetkSearchByCadastralId', {
+            cadastralId: cadastralIds,
+          });
         },
       },
       ...COMMON_FIELDS,
