@@ -175,10 +175,9 @@ export type Fishing<
           const locations = await ctx.call('locations.uetkSearchByCadastralId', {
             cadastralId: cadastralIds,
           });
+
           return fishings.map((fishing: any) => {
-            return locations.find(
-              (location: any) => location.uetkCadastralId === fishing.uetkCadastralId,
-            );
+            return locations.find((location: any) => location.id === fishing.uetkCadastralId);
           });
         },
       },

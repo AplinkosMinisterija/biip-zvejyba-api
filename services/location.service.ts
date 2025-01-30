@@ -1,7 +1,6 @@
 'use strict';
 
 import centroid from '@turf/centroid';
-import { find, isEmpty, map } from 'lodash';
 import moleculer, { Context } from 'moleculer';
 import { Action, Method, Service } from 'moleculer-decorators';
 import { GeomFeatureCollection, coordinatesToGeometry } from '../modules/geometry';
@@ -46,12 +45,6 @@ export type Location = {
   };
 };
 
-interface LocationResult {
-  cadastral_id: string;
-  name: string;
-  municipality: string;
-}
-
 const getBox = (geom: GeomFeatureCollection, tolerance: number = 0.001) => {
   const coordinates: any = geom.features[0].geometry.coordinates;
   const topLeft = {
@@ -87,7 +80,7 @@ export default class LocationsService extends moleculer.Service {
 
     const geom = coordinatesToGeometry({ x: Number(x), y: Number(y) });
     if (query.type === FishingType.ESTUARY) {
-      return this.getBarFromPoint(geom);
+      return this.getFishingSectionFromPoint(geom);
     } else if (query.type === FishingType.INLAND_WATERS) {
       return this.getRiverOrLakeFromPoint(geom);
     } else if (query.type === FishingType.POLDERS) {
@@ -97,7 +90,11 @@ export default class LocationsService extends moleculer.Service {
     }
   }
 
-  @Action()
+  @Action({
+    params: {
+      cadastralId: [{ type: 'string' }, { type: 'array', items: 'string' }],
+    },
+  })
   async uetkSearchByCadastralId(
     ctx: Context<
       {
@@ -137,23 +134,6 @@ export default class LocationsService extends moleculer.Service {
     return multi ? mappedLocations : mappedLocations[0];
   }
 
-  @Action()
-  async getLocationsByCadastralIds(ctx: Context<{ locations: string[] }>) {
-    const promises = map(ctx.params.locations, (location) =>
-      ctx.call('locations.search', { search: location }),
-    );
-
-    const result: any = await Promise.all(promises);
-
-    const data: LocationResult[] = [];
-    for (const item of result) {
-      if (!isEmpty(item)) {
-        data.push(item[0]);
-      }
-    }
-    return data;
-  }
-
   @Action({
     rest: 'GET /municipalities',
     cache: {
@@ -188,18 +168,6 @@ export default class LocationsService extends moleculer.Service {
       rows: items,
       total: items.length,
     };
-  }
-
-  @Action({
-    params: {
-      id: 'number',
-    },
-  })
-  async findMunicipalityById(ctx: Context<{ id: number }>) {
-    const municipalities = await this.actions.getMunicipalities(null, {
-      parentCtx: ctx,
-    });
-    return find(municipalities?.rows, { id: ctx.params.id });
   }
 
   @Action({
@@ -267,7 +235,7 @@ export default class LocationsService extends moleculer.Service {
 
         const municipality = await this.getMunicipalityFromPoint(geom);
 
-        const mappedList = map(features, (item) => {
+        const mappedList = features?.map((item: any) => {
           const { properties } = item;
           return {
             id: properties['2. Kadastro identifikavimo kodas'],
@@ -287,7 +255,7 @@ export default class LocationsService extends moleculer.Service {
   }
 
   @Method
-  async getBarFromPoint(geom: GeomFeatureCollection) {
+  async getFishingSectionFromPoint(geom: GeomFeatureCollection) {
     if (geom?.features?.length) {
       const box = getBox(geom);
       const bars = `${process.env.GEO_SERVER}/qgisserver/zuvinimas_barai?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetFeatureInfo&QUERY_LAYERS=fishing_sections&INFO_FORMAT=application%2Fjson&FEATURE_COUNT=1000&X=50&Y=50&SRS=EPSG%3A3346&STYLES=&WIDTH=101&HEIGHT=101&BBOX=${box}`;
@@ -302,7 +270,7 @@ export default class LocationsService extends moleculer.Service {
       }
       const municipality = await this.getMunicipalityFromPoint(geom);
 
-      const mappedList = map(features, (feature) => {
+      const mappedList = features?.map((feature: any) => {
         return {
           id: feature.properties.id,
           name: feature.properties.name,
