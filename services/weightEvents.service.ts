@@ -218,7 +218,7 @@ export default class ToolTypesService extends moleculer.Service {
           },
         };
       },
-      { fishOnShore: null, fishOnBoat: {} },
+      { fishOnShore: null, fishOnBoat: null },
     );
   }
 
@@ -263,19 +263,8 @@ export default class ToolTypesService extends moleculer.Service {
       throw new moleculer.Errors.ValidationError('Invalid fishTypes');
     }
 
-    if (!ctx.params.id) {
-      //validate if fish is already weighted
-      const fishWeight = await this.findEntity(ctx, {
-        query: {
-          fishing: currentFishing.id,
-          toolsGroup: { $exists: false },
-        },
-      });
-      if (fishWeight) {
-        throw new moleculer.Errors.ValidationError('Fish already weighted');
-      }
-    } else {
-      //toolsGroup validation
+    //toolsGroup validation
+    if (ctx.params.id) {
       const group: ToolsGroup = await ctx.call('toolsGroups.get', {
         id: ctx.params.id,
       });
@@ -283,6 +272,7 @@ export default class ToolTypesService extends moleculer.Service {
         throw new moleculer.Errors.ValidationError('Invalid group');
       }
     }
+
     ctx.params.fishing = currentFishing.id;
     const geom = coordinatesToGeometry(ctx.params.coordinates);
     ctx.params.geom = geom;

@@ -164,6 +164,23 @@ export type Fishing<
           );
         },
       },
+      location: {
+        type: 'array',
+        readonly: true,
+        virtual: true,
+        async populate(ctx: any, _values: any, fishings: Fishing[]) {
+          const cadastralIds = fishings
+            .filter((fishing) => !!fishing.uetkCadastralId)
+            .map((fishing: any) => fishing.uetkCadastralId);
+          const locations = await ctx.call('locations.uetkSearchByCadastralId', {
+            cadastralId: cadastralIds,
+          });
+
+          return fishings.map((fishing: any) => {
+            return locations.find((location: any) => location.id === fishing.uetkCadastralId);
+          });
+        },
+      },
       ...COMMON_FIELDS,
     },
     scopes: {
@@ -301,6 +318,7 @@ export default class FishTypesService extends moleculer.Service {
         startEvent: { $exists: true },
         endEvent: { $exists: false },
       },
+      populate: ['location', ...(ctx?.params?.populate || [])],
     });
   }
 
@@ -440,7 +458,7 @@ export default class FishTypesService extends moleculer.Service {
       },
     );
 
-    for (const w of Object.values(fishingWeights.fishOnBoat) as WeightEvent[]) {
+    for (const w of Object.values(fishingWeights.fishOnBoat || {}) as WeightEvent[]) {
       const coordinates = geomToWgs(w.geom);
 
       events.push({
