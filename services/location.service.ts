@@ -294,12 +294,12 @@ export default class LocationsService extends moleculer.Service {
   async getMunicipalityFromPoint(geom: GeomFeatureCollection) {
     const box = getBox(geom);
     const endPoint = `${process.env.GEO_SERVER}/qgisserver/administrative_boundaries?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetFeatureInfo&QUERY_LAYERS=municipalities&INFO_FORMAT=application%2Fjson&FEATURE_COUNT=1000&X=50&Y=50&SRS=EPSG%3A3346&STYLES=&WIDTH=101&HEIGHT=101&BBOX=${box}`;
-    const data = await fetch(endPoint, {
+    const response = await fetch(endPoint, {
       headers: {
         'Content-Type': 'application/json',
       },
-    });
-    const response = await data.json();
+    }).then((r) => r.json());
+
     const features = response.features;
     if (!features.length) {
       return null;
