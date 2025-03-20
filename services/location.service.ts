@@ -113,7 +113,7 @@ export default class LocationsService extends moleculer.Service {
     } else {
       query = { cadastralId: ctx.params.cadastralId };
     }
-    if (!query) return;
+    if (!query) return multi ? [] : undefined;
 
     searchParams.set('query', JSON.stringify(query));
     const queryString = searchParams.toString();
@@ -122,7 +122,7 @@ export default class LocationsService extends moleculer.Service {
 
     const data = await fetch(url).then((r) => r.json());
     const locations = data?.rows;
-    if (!locations || !locations.length) return;
+    if (!locations || !locations.length) return multi ? [] : undefined;
     const mappedLocations = locations.map((location: any) => {
       const municipality = { name: location.municipality, id: location.municipalityCode };
       return {
