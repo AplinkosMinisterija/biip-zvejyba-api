@@ -324,18 +324,24 @@ export default class FishTypesService extends moleculer.Service {
 
   @Action({
     rest: 'GET /weights',
+    params: {
+      toolsGroup: 'number|convert|optional',
+    },
     auth: RestrictionType.USER,
   })
-  async getPreliminaryFishWeight(ctx: Context) {
+  async getPreliminaryFishWeight(ctx: Context<{ toolsGroup?: number }>) {
+    const { toolsGroup } = ctx.params;
     const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
     if (!currentFishing) {
       throw new moleculer.Errors.ValidationError('Fishing not started');
     }
 
+    const weightEventsQuery: any = { fishing: currentFishing.id };
+
+    if (toolsGroup) weightEventsQuery.toolsGroup = toolsGroup;
+
     const weightEvents: WeightEvent[] = await ctx.call('weightEvents.find', {
-      query: {
-        fishing: currentFishing.id,
-      },
+      query: weightEventsQuery,
       sort: '-createdAt',
     });
 
