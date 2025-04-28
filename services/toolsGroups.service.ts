@@ -19,7 +19,6 @@ import { FishType } from './fishTypes.service';
 import { Fishing } from './fishings.service';
 import { Coordinates, CoordinatesProp, Location, LocationProp } from './location.service';
 import { Tenant } from './tenants.service';
-import { ToolCategory } from './toolTypes.service';
 import { Tool } from './tools.service';
 import { ToolsGroupHistoryTypes, ToolsGroupsEvent } from './toolsGroupsEvents.service';
 import { User } from './users.service';
@@ -225,10 +224,6 @@ export default class ToolsGroupsService extends moleculer.Service {
       }, []);
       if (uniqueToolTypes.length > 1) {
         throw new moleculer.Errors.ValidationError('To many tool types');
-      }
-      //is valid tool category
-      if (tools[0].toolType.type !== ToolCategory.NET) {
-        throw new moleculer.Errors.ValidationError('Invalid tool category');
       }
     }
     const geom = coordinatesToGeometry(ctx.params.coordinates);
