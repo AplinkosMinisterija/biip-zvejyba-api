@@ -421,6 +421,7 @@ export default class FishTypesService extends moleculer.Service {
         type: EventType.SKIP,
         geom: fishing.skipEvent.geom,
         date: fishing.skipEvent.createdAt,
+        data: fishing.skipEvent.data,
       });
     }
     if (fishing?.startEvent) {
