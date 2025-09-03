@@ -206,7 +206,7 @@ export default class LocationsService extends moleculer.Service {
           y: centerFeature?.geometry?.coordinates[1],
         });
         const municipality = await this.getMunicipalityFromPoint(geometry);
-        const coordinates = centerFeature?.geometry?.coordinates?.reverse();
+        const coordinates = centerFeature?.geometry?.coordinates;
         return {
           x: coordinates[0],
           y: coordinates[1],
