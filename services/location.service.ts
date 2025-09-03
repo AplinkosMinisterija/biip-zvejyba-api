@@ -104,8 +104,7 @@ export default class LocationsService extends moleculer.Service {
     >,
   ) {
     const targetUrl = `${process.env.UETK_URL}/objects`;
-    const params: any = ctx.params;
-    const searchParams = new URLSearchParams(params);
+    const searchParams = new URLSearchParams();
     const multi = typeof ctx.params.cadastralId !== 'string';
     let query;
     if (multi) {
@@ -116,6 +115,10 @@ export default class LocationsService extends moleculer.Service {
     if (!query) return multi ? [] : undefined;
 
     searchParams.set('query', JSON.stringify(query));
+    searchParams.set(
+      'fields',
+      ['id', 'cadastralId', 'name', 'municipality', 'municipalityCode'].join(','),
+    );
     const queryString = searchParams.toString();
 
     const url = `${targetUrl}?${queryString}`;
