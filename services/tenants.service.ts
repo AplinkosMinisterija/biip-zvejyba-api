@@ -97,6 +97,9 @@ export interface Tenant {
     create: {
       rest: null,
     },
+    update: {
+      rest: null,
+    },
     remove: {},
   },
 })
@@ -227,18 +230,16 @@ export default class TenantsService extends moleculer.Service {
       isInvestigator,
     });
 
-    const permission: any = await ctx.call('auth.permissions.findOne', {
-      group: tenant.authGroup,
+    const permission: any = await ctx.call('auth.permissions.list', {
+      query: {
+        group: tenant.authGroup,
+      },
     });
 
-    if (isInvestigator) {
-      await ctx.call('auth.permissions.update', {
-        id: permission.id,
-        accesses: isInvestigator ? ['INVESTIGATOR'] : [],
-      });
-    }
-
-    return tenant;
+    return await ctx.call('auth.permissions.update', {
+      id: permission?.rows[0]?.id,
+      accesses: isInvestigator ? ['INVESTIGATOR'] : [],
+    });
   }
 
   @Method
