@@ -1,11 +1,12 @@
 'use strict';
 
 import moleculer, { Context } from 'moleculer';
-import { Action, Method, Service } from 'moleculer-decorators';
+import { Action, Event, Method, Service } from 'moleculer-decorators';
 import {
   COMMON_DEFAULT_SCOPES,
   COMMON_FIELDS,
   COMMON_SCOPES,
+  EntityChangedParams,
   INNER_AUTH_GROUP_IDS,
   RestrictionType,
 } from '../types';
@@ -19,6 +20,7 @@ export interface Tenant {
   id: string;
   name: string;
   authGroup: string;
+  isInvestigator: boolean;
 }
 
 @Service({
@@ -27,6 +29,7 @@ export interface Tenant {
   mixins: [
     DbConnection({
       collection: 'tenants',
+      entityChangedOldEntity: true,
       createActions: {
         createMany: false,
       },
@@ -117,12 +120,6 @@ export default class TenantsService extends moleculer.Service {
         default: false,
         required: false,
       },
-      isInvestigator: {
-        type: 'boolean',
-        default: false,
-        required: false,
-      },
-
       firstName: 'string|optional',
       lastName: 'string|optional',
       email: 'string|optional',
@@ -142,7 +139,6 @@ export default class TenantsService extends moleculer.Service {
         ownerRequired?: boolean;
         firstName?: string;
         lastName?: string;
-        isInvestigator: boolean;
         email?: string;
         phone?: string;
         personalCode?: string;
@@ -157,7 +153,6 @@ export default class TenantsService extends moleculer.Service {
       companyEmail,
       companyAddress,
       ownerRequired,
-      isInvestigator,
       firstName,
       lastName,
       email,
@@ -165,10 +160,9 @@ export default class TenantsService extends moleculer.Service {
       personalCode,
     } = ctx.params;
 
-    // it will throw error if tenant aleady exists
+    // it will throw error if tenant already exists
     const authGroup: any = await ctx.call('auth.users.invite', {
       companyCode,
-      accesses: isInvestigator ? ['INVESTIGATOR'] : [],
     });
 
     const tenant: Tenant = await this.createEntity(ctx, {
@@ -178,7 +172,6 @@ export default class TenantsService extends moleculer.Service {
       name: companyName,
       address: companyAddress,
       code: companyCode,
-      isInvestigator,
     });
 
     if (ownerRequired) {
@@ -194,52 +187,6 @@ export default class TenantsService extends moleculer.Service {
     }
 
     return tenant;
-  }
-
-  @Action({
-    rest: 'PATCH /:id',
-    auth: RestrictionType.ADMIN,
-    params: {
-      id: { type: 'number', convert: true },
-      email: 'string|optional',
-      phone: 'string|optional',
-      isInvestigator: {
-        type: 'boolean',
-        default: false,
-        required: false,
-      },
-    },
-  })
-  async updateTenant(
-    ctx: Context<
-      {
-        isInvestigator: boolean;
-        email?: string;
-        phone?: string;
-        id?: number;
-      },
-      UserAuthMeta
-    >,
-  ) {
-    const { isInvestigator, email, phone, id } = ctx.params;
-
-    const tenant: Tenant = await this.updateEntity(ctx, {
-      id,
-      email,
-      phone,
-      isInvestigator,
-    });
-
-    const permission: any = await ctx.call('auth.permissions.list', {
-      query: {
-        group: tenant.authGroup,
-      },
-    });
-
-    return await ctx.call('auth.permissions.update', {
-      id: permission?.rows[0]?.id,
-      accesses: isInvestigator ? ['INVESTIGATOR'] : [],
-    });
   }
 
   @Method
@@ -261,6 +208,41 @@ export default class TenantsService extends moleculer.Service {
     });
 
     ctx.params.authGroup = authGroup.id;
+
+    return ctx;
+  }
+
+  @Event()
+  async 'tenants.created'(ctx: Context<{ data: Tenant }>) {
+    const tenant = ctx.params.data;
+    const { isInvestigator, authGroup } = tenant;
+
+    if (isInvestigator) {
+      await ctx.call('auth.permissions.modifyAccessForGroup', {
+        access: 'INVESTIGATOR',
+        action: 'assign',
+        group: authGroup,
+      });
+    }
+
+    return ctx;
+  }
+  @Event()
+  async 'tenants.updated'(ctx: Context<EntityChangedParams<Tenant>, UserAuthMeta>) {
+    const { oldData: prevTenant, data: tenant } = ctx.params;
+
+    const wasInvestigator = !!prevTenant.isInvestigator;
+    const isInvestigator = !!(tenant as Tenant).isInvestigator;
+
+    if (wasInvestigator === isInvestigator) return ctx;
+
+    const action = isInvestigator ? 'assign' : 'unassign';
+
+    await ctx.call('auth.permissions.modifyAccessForGroup', {
+      access: 'INVESTIGATOR',
+      action,
+      group: (tenant as Tenant).authGroup,
+    });
 
     return ctx;
   }
