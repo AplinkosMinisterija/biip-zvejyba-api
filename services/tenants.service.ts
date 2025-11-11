@@ -100,9 +100,7 @@ export interface Tenant {
     create: {
       rest: null,
     },
-    update: {
-      rest: null,
-    },
+    update: {},
     remove: {},
   },
 })
@@ -116,6 +114,11 @@ export default class TenantsService extends moleculer.Service {
       companyEmail: 'string',
       companyAddress: 'string',
       ownerRequired: {
+        type: 'boolean',
+        default: false,
+        required: false,
+      },
+      isInvestigator: {
         type: 'boolean',
         default: false,
         required: false,
@@ -141,6 +144,7 @@ export default class TenantsService extends moleculer.Service {
         lastName?: string;
         email?: string;
         phone?: string;
+        isInvestigator?: boolean;
         personalCode?: string;
       },
       UserAuthMeta
@@ -157,6 +161,7 @@ export default class TenantsService extends moleculer.Service {
       lastName,
       email,
       phone,
+      isInvestigator,
       personalCode,
     } = ctx.params;
 
@@ -172,6 +177,7 @@ export default class TenantsService extends moleculer.Service {
       name: companyName,
       address: companyAddress,
       code: companyCode,
+      isInvestigator,
     });
 
     if (ownerRequired) {
@@ -216,7 +222,6 @@ export default class TenantsService extends moleculer.Service {
   async 'tenants.created'(ctx: Context<{ data: Tenant }>) {
     const tenant = ctx.params.data;
     const { isInvestigator, authGroup } = tenant;
-
     if (isInvestigator) {
       await ctx.call('auth.permissions.modifyAccessForGroup', {
         access: 'INVESTIGATOR',
