@@ -338,6 +338,7 @@ export default class TenantUsersService extends moleculer.Service {
         email: user.email,
         phone: user.phone,
         role: tenantUser.role,
+        isInvestigator: tenantUser.tenant.isInvestigator,
         code: tenantUser.tenant.code,
       };
     });
