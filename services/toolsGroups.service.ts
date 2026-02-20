@@ -63,23 +63,20 @@ export type ToolsGroup<
         columnName: 'tools',
         default: () => [],
         async populate(ctx: Context, values: number[], entities: ToolsGroup[]) {
+          if (!values?.length || !entities?.length) return [];
+
           const tools: Tool[] = await ctx.call('tools.find', {
-            query: {
-              id: { $in: values },
-            },
+            query: { id: { $in: values } },
             populate: ['toolType'],
           });
 
-          return entities?.map((entity) => {
-            const t = entity.tools?.map((toolId) => {
-              const tool = tools.find((t) => t.id === toolId);
-              return tool;
-            });
-            if (t.length) {
-              return t;
-            }
-            return entity.tools;
-          });
+          const toolsMap = new Map(tools.map((t) => [t.id, t]));
+
+          return entities.map((entity) =>
+            entity.tools?.length
+              ? entity.tools.map((id) => toolsMap.get(id)).filter(Boolean)
+              : entity.tools,
+          );
         },
       },
       buildEvent: {
@@ -168,64 +165,165 @@ export type ToolsGroup<
 })
 export default class ToolsGroupsService extends moleculer.Service {
   @Action({
-    rest: 'POST /build',
+    rest: 'POST /connect/:id',
     auth: RestrictionType.USER,
     params: {
+      id: 'number|convert',
       tools: {
         type: 'array',
         items: 'number',
       },
-      coordinates: CoordinatesProp,
-      location: LocationProp,
     },
   })
-  async buildTools(
+  async connectTools(
     ctx: Context<{
       tools: number[];
-      coordinates: Coordinates;
-      location: Location;
+      id: number;
     }>,
   ) {
+    const group: ToolsGroup<'tools'> = await ctx.call('toolsGroups.resolve', {
+      id: ctx.params.id,
+      populate: ['tools'],
+    });
+    if (!group) {
+      throw new moleculer.Errors.ValidationError('Invalid group');
+    }
+
     if (!ctx.params.tools.length) {
       throw new moleculer.Errors.ValidationError('No tools');
     }
-    // fishing validation
-    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
-    if (!currentFishing) {
-      throw new moleculer.Errors.ValidationError('Fishing not started');
-    }
 
-    // Tools validation
+    const toolGroupToolType = group.tools[0].toolType;
+
     const tools: Tool<'toolsGroup' | 'toolType'>[] = await ctx.call('tools.find', {
       query: {
         id: { $in: ctx.params.tools },
       },
       populate: ['toolsGroup', 'toolType'],
     });
-    // if tools do not exist or do not belong to user/tenant
     if (tools.length && tools.length !== ctx.params.tools.length) {
       throw new moleculer.Errors.ValidationError('Tools do not exist');
     }
 
-    // if tools in the water
     const builtTools = tools.filter((tool) => tool.toolsGroup && !tool.toolsGroup.removeEvent);
 
     if (builtTools.length) {
       throw new moleculer.Errors.ValidationError('Tools is in use');
     }
-    // validate if multiple tools connected
-    if (ctx.params.tools.length > 1) {
-      //number of tool types
-      const uniqueToolTypes = tools.reduce((toolTypes, tool) => {
-        if (!toolTypes.includes(tool.toolType.id)) {
-          toolTypes.push(tool.toolType.id);
-        }
-        return toolTypes;
-      }, []);
-      if (uniqueToolTypes.length > 1) {
-        throw new moleculer.Errors.ValidationError('To many tool types');
+
+    for (const tool of tools) {
+      if (tool.toolType.id === toolGroupToolType) {
+        throw new moleculer.Errors.ValidationError('Too many tool types');
       }
     }
+
+    for (const tool of tools) {
+      this.removeEntity(ctx, {
+        id: tool.toolsGroup.id,
+      });
+    }
+
+    return await this.updateEntity(ctx, {
+      id: ctx.params.id,
+      tools: [...group.tools.map((tool) => tool.id), ...tools.map((tool) => tool.id)],
+    });
+  }
+
+  @Action({
+    rest: 'POST /disconnect/:id',
+    auth: RestrictionType.USER,
+    params: {
+      id: 'number|convert',
+      tools: {
+        type: 'array',
+        items: 'number',
+      },
+    },
+  })
+  async disconnectTools(
+    ctx: Context<{
+      tools: number[];
+      id: number;
+    }>,
+  ) {
+    const toolsIds = ctx.params.tools;
+    const group: ToolsGroup<'tools'> = await ctx.call('toolsGroups.resolve', {
+      id: ctx.params.id,
+      populate: ['tools'],
+    });
+    if (!group) {
+      throw new moleculer.Errors.ValidationError('Invalid group');
+    }
+
+    const toolGroupToolType = group.tools[0].toolType;
+
+    if (!ctx.params.tools.length) {
+      throw new moleculer.Errors.ValidationError('No tools');
+    }
+
+    const tools: Tool<'toolsGroup' | 'toolType'>[] = await ctx.call('tools.find', {
+      query: {
+        id: { $in: ctx.params.tools },
+      },
+      populate: ['toolsGroup', 'toolType'],
+    });
+    if (tools.length && tools.length !== ctx.params.tools.length) {
+      throw new moleculer.Errors.ValidationError('Tools do not exist');
+    }
+
+    const builtTools = tools.filter((tool) => tool.toolsGroup && !tool.toolsGroup.removeEvent);
+
+    if (builtTools.length) {
+      throw new moleculer.Errors.ValidationError('Tools is in use');
+    }
+
+    for (const tool of tools) {
+      if (tool.toolType.id === toolGroupToolType) {
+        throw new moleculer.Errors.ValidationError('Too many tool types');
+      }
+    }
+
+    await this.createEntity(ctx, {
+      id: ctx.params.id,
+      tools: toolsIds,
+    });
+
+    return await this.updateEntity(ctx, {
+      id: ctx.params.id,
+      tools: tools.filter((tool) => !toolsIds.includes(tool.id)).map((tool) => tool.id),
+    });
+  }
+
+  @Action({
+    rest: 'POST /build',
+    auth: RestrictionType.USER,
+    params: {
+      id: 'number|convert',
+      coordinates: CoordinatesProp,
+      location: LocationProp,
+    },
+  })
+  async buildTools(
+    ctx: Context<{
+      id: number;
+      coordinates: Coordinates;
+      location: Location;
+    }>,
+  ) {
+    const group: ToolsGroup<'tools'> = await ctx.call('toolsGroups.resolve', {
+      id: ctx.params.id,
+      populate: ['tools'],
+    });
+    if (!group) {
+      throw new moleculer.Errors.ValidationError('Invalid group');
+    }
+
+    // fishing validation
+    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
+    if (!currentFishing) {
+      throw new moleculer.Errors.ValidationError('Fishing not started');
+    }
+
     const geom = coordinatesToGeometry(ctx.params.coordinates);
 
     const buildEvent: ToolsGroupsEvent = await ctx.call('toolsGroupsEvents.create', {

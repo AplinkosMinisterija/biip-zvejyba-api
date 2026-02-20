@@ -245,4 +245,13 @@ export default class ToolTypesService extends moleculer.Service {
       }
     }
   }
+
+  @Method
+  async afterCreate(ctx: Context<any, UserAuthMeta>) {
+    const toolId = ctx.params.id;
+
+    await ctx.call('toolsGroups.create', {
+      tools: [toolId],
+    });
+  }
 }
