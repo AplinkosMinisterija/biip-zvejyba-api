@@ -218,9 +218,11 @@ export default class ToolsGroupsService extends moleculer.Service {
     }
 
     for (const tool of tools) {
-      this.removeEntity(ctx, {
-        id: tool.toolsGroup.id,
-      });
+      try {
+        this.removeEntity(ctx, {
+          id: tool.toolsGroup.id,
+        });
+      } catch (e) {}
     }
 
     return await this.updateEntity(ctx, {
@@ -255,7 +257,7 @@ export default class ToolsGroupsService extends moleculer.Service {
       throw new moleculer.Errors.ValidationError('Invalid group');
     }
 
-    const toolGroupToolType = group.tools[0].toolType;
+    const toolGroupId = group.id;
 
     if (!ctx.params.tools.length) {
       throw new moleculer.Errors.ValidationError('No tools');
@@ -271,15 +273,17 @@ export default class ToolsGroupsService extends moleculer.Service {
       throw new moleculer.Errors.ValidationError('Tools do not exist');
     }
 
-    const builtTools = tools.filter((tool) => tool.toolsGroup && !tool.toolsGroup.removeEvent);
+    const builtTools = tools.filter(
+      (tool) => tool.toolsGroup.buildEvent && !tool.toolsGroup.removeEvent,
+    );
 
     if (builtTools.length) {
-      throw new moleculer.Errors.ValidationError('Tools is in use');
+      throw new moleculer.Errors.ValidationError('Tools are in use');
     }
 
     for (const tool of tools) {
-      if (tool.toolType.id === toolGroupToolType) {
-        throw new moleculer.Errors.ValidationError('Too many tool types');
+      if (tool.toolsGroup.id !== toolGroupId) {
+        throw new moleculer.Errors.ValidationError('Tool belongs to another tool group');
       }
     }
 
@@ -290,7 +294,7 @@ export default class ToolsGroupsService extends moleculer.Service {
 
     return await this.updateEntity(ctx, {
       id: ctx.params.id,
-      tools: tools.filter((tool) => !toolsIds.includes(tool.id)).map((tool) => tool.id),
+      tools: group.tools.filter((tool) => !toolsIds.includes(tool.id)).map((tool) => tool.id),
     });
   }
 
