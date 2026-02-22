@@ -205,7 +205,9 @@ export default class ToolsGroupsService extends moleculer.Service {
       throw new moleculer.Errors.ValidationError('Tools do not exist');
     }
 
-    const builtTools = tools.filter((tool) => tool.toolsGroup && !tool.toolsGroup.removeEvent);
+    const builtTools = tools.filter(
+      (tool) => tool.toolsGroup.buildEvent && !tool.toolsGroup.removeEvent,
+    );
 
     if (builtTools.length) {
       throw new moleculer.Errors.ValidationError('Tools is in use');
@@ -338,9 +340,9 @@ export default class ToolsGroupsService extends moleculer.Service {
     });
 
     try {
-      return await this.createEntity(ctx, {
-        ...ctx.params,
-        buildEvent: buildEvent.id,
+      return await this.updateEntity(ctx, {
+        id: ctx.params.id,
+        removeEvent: buildEvent.id,
       });
     } catch (e) {
       await ctx.call('toolsGroupsEvents.remove', {
