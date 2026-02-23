@@ -154,14 +154,27 @@ async function validateData({ ctx, params, entity, value }: FieldHookCallback) {
         readonly: true,
         virtual: true,
         async populate(ctx: any, _values: any, tools: Tool[]) {
+          const user = ctx?.params?.query?.user;
+          const tenant = ctx?.params?.query?.tenant;
+
+          const query: any = {};
+
+          if (user) {
+            query.user = user;
+          }
+
+          if (tenant) {
+            query.tenant = tenant;
+          }
+
           return Promise.all(
             tools.map(async (tool: Tool) => {
               return await ctx.call('toolsGroups.findOne', {
                 query: {
-                  ...ctx.params.query,
+                  ...query,
                   $raw: `${tool.id} = ANY(tools)`,
-                  removeEvent: { $exists: false },
                 },
+                sort: ['updatedAt', 'createdAt'],
                 populate: ['buildEvent'],
               });
             }),
@@ -196,7 +209,7 @@ async function validateData({ ctx, params, entity, value }: FieldHookCallback) {
       ...COMMON_SCOPES,
     },
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
-    defaultPopulates: ['toolType'],
+    defaultPopulates: ['toolsGroup', 'toolType'],
   },
   hooks: {
     before: {
@@ -250,11 +263,15 @@ export default class ToolTypesService extends moleculer.Service {
   }
 
   @Method
-  async afterCreate(ctx: Context<any, UserAuthMeta>) {
-    const toolId = ctx.params.id;
+  async afterCreate(ctx: Context<any, UserAuthMeta>, entity: any) {
+    const toolId = entity?.id;
+    const userId = ctx.meta.user.id;
+    const tenantId = ctx.meta.profile;
 
     await ctx.call('toolsGroups.create', {
       tools: [toolId],
+      user: userId,
+      tenant: tenantId,
     });
   }
 }

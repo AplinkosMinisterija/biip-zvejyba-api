@@ -34,7 +34,7 @@ interface Fields extends CommonFields {
 }
 
 interface Populates extends CommonPopulates {
-  tools: Tool[];
+  tools: Tool<'toolType'>[];
   buildEvent: ToolsGroupsEvent;
   removeEvent: ToolsGroupsEvent;
   weightEvent: ToolsGroupsEvent;
@@ -193,7 +193,7 @@ export default class ToolsGroupsService extends moleculer.Service {
       throw new moleculer.Errors.ValidationError('No tools');
     }
 
-    const toolGroupToolType = group.tools[0].toolType;
+    const toolGroupToolType = group.tools[0].toolType.id;
 
     const tools: Tool<'toolsGroup' | 'toolType'>[] = await ctx.call('tools.find', {
       query: {
@@ -201,12 +201,13 @@ export default class ToolsGroupsService extends moleculer.Service {
       },
       populate: ['toolsGroup', 'toolType'],
     });
+
     if (tools.length && tools.length !== ctx.params.tools.length) {
       throw new moleculer.Errors.ValidationError('Tools do not exist');
     }
 
     const builtTools = tools.filter(
-      (tool) => tool.toolsGroup.buildEvent && !tool.toolsGroup.removeEvent,
+      (tool) => tool?.toolsGroup?.buildEvent && !tool?.toolsGroup?.removeEvent,
     );
 
     if (builtTools.length) {
@@ -214,7 +215,7 @@ export default class ToolsGroupsService extends moleculer.Service {
     }
 
     for (const tool of tools) {
-      if (tool.toolType.id === toolGroupToolType) {
+      if (tool.toolType.id !== toolGroupToolType) {
         throw new moleculer.Errors.ValidationError('Too many tool types');
       }
     }
@@ -245,11 +246,16 @@ export default class ToolsGroupsService extends moleculer.Service {
     },
   })
   async disconnectTools(
-    ctx: Context<{
-      tools: number[];
-      id: number;
-    }>,
+    ctx: Context<
+      {
+        tools: number[];
+        id: number;
+      },
+      UserAuthMeta
+    >,
   ) {
+    const userId = ctx.meta.user.id;
+    const tenantId = ctx.meta.profile;
     const toolsIds = ctx.params.tools;
     const group: ToolsGroup<'tools'> = await ctx.call('toolsGroups.resolve', {
       id: ctx.params.id,
@@ -290,8 +296,9 @@ export default class ToolsGroupsService extends moleculer.Service {
     }
 
     await this.createEntity(ctx, {
-      id: ctx.params.id,
       tools: toolsIds,
+      user: userId,
+      tenant: tenantId,
     });
 
     return await this.updateEntity(ctx, {
