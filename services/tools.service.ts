@@ -209,6 +209,9 @@ async function validateData({ ctx, params, entity, value }: FieldHookCallback) {
       get: ['beforeSelect'],
       all: ['beforeSelect'],
     },
+    after: {
+      create: ['afterCreate'],
+    },
   },
 })
 export default class ToolTypesService extends moleculer.Service {
