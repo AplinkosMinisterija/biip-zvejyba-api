@@ -369,12 +369,17 @@ export default class ToolsGroupsService extends moleculer.Service {
     },
   })
   async removeTools(
-    ctx: Context<{
-      id: number;
-      coordinates: Coordinates;
-      location: Location;
-    }>,
+    ctx: Context<
+      {
+        id: number;
+        coordinates: Coordinates;
+        location: Location;
+      },
+      UserAuthMeta
+    >,
   ) {
+    const userId = ctx.meta.user.id;
+    const tenantId = ctx.meta.profile;
     const group: ToolsGroup = await ctx.call('toolsGroups.resolve', {
       id: ctx.params.id,
     });
@@ -396,9 +401,15 @@ export default class ToolsGroupsService extends moleculer.Service {
       fishing: currentFishing.id,
     });
     try {
-      return await this.updateEntity(ctx, {
+      await this.updateEntity(ctx, {
         id: ctx.params.id,
         removeEvent: removeEvent.id,
+      });
+
+      return await this.createEntity(ctx, {
+        tools: group.tools,
+        user: userId,
+        tenant: tenantId,
       });
     } catch (e) {
       await ctx.call('toolsGroupsEvents.remove', {

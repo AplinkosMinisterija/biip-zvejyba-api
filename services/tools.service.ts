@@ -233,11 +233,11 @@ export default class ToolTypesService extends moleculer.Service {
     auth: RestrictionType.USER,
   })
   async availableTools(ctx: Context<any, UserAuthMeta>) {
-    const tools: Tool[] = await this.findEntities(ctx, {
+    const tools: Tool<'toolsGroup'>[] = await this.findEntities(ctx, {
       ...ctx.params,
       populate: ['toolsGroup', 'toolType'],
     });
-    return tools?.filter((tool) => !tool.toolsGroup);
+    return tools?.filter((tool) => !tool.toolsGroup.buildEvent);
   }
 
   @Method
