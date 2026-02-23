@@ -308,7 +308,7 @@ export default class ToolsGroupsService extends moleculer.Service {
   }
 
   @Action({
-    rest: 'POST /build',
+    rest: 'POST /build/:id',
     auth: RestrictionType.USER,
     params: {
       id: 'number|convert',
@@ -349,7 +349,7 @@ export default class ToolsGroupsService extends moleculer.Service {
     try {
       return await this.updateEntity(ctx, {
         id: ctx.params.id,
-        removeEvent: buildEvent.id,
+        buildEvent: buildEvent.id,
       });
     } catch (e) {
       await ctx.call('toolsGroupsEvents.remove', {
@@ -380,7 +380,7 @@ export default class ToolsGroupsService extends moleculer.Service {
   ) {
     const userId = ctx.meta.user.id;
     const tenantId = ctx.meta.profile;
-    const group: ToolsGroup = await ctx.call('toolsGroups.resolve', {
+    const group: ToolsGroup<'tools'> = await ctx.call('toolsGroups.resolve', {
       id: ctx.params.id,
     });
     if (!group) {
@@ -400,14 +400,15 @@ export default class ToolsGroupsService extends moleculer.Service {
       location: ctx.params.location,
       fishing: currentFishing.id,
     });
+
     try {
       await this.updateEntity(ctx, {
         id: ctx.params.id,
         removeEvent: removeEvent.id,
       });
 
-      return await this.createEntity(ctx, {
-        tools: group.tools,
+      await ctx.call('toolsGroups.create', {
+        tools: group.tools.map((tool) => tool.id),
         user: userId,
         tenant: tenantId,
       });
@@ -478,7 +479,7 @@ export default class ToolsGroupsService extends moleculer.Service {
     });
 
     return notRemovedToolsGroups.filter(
-      (toolGroup) => toolGroup.buildEvent.location.id === ctx.params.id,
+      (toolGroup) => toolGroup?.buildEvent?.location.id === ctx.params.id,
     );
   }
 
