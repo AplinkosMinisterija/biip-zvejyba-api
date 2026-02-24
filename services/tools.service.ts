@@ -174,7 +174,7 @@ async function validateData({ ctx, params, entity, value }: FieldHookCallback) {
                   ...query,
                   $raw: `${tool.id} = ANY(tools)`,
                 },
-                sort: ['updatedAt', 'createdAt'],
+                sort: ['-createdAt'],
                 populate: ['buildEvent'],
               });
             }),
