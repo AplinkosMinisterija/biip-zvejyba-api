@@ -99,12 +99,12 @@ async function validateData({ ctx, params, entity, value }: FieldHookCallback) {
     throwIfNotExist: true,
   });
 
-  if (!value?.eyeSize) throwValidationError('Invalid tool data - no eyeSize', params);
+  //if (!value?.eyeSize) throwValidationError('Invalid tool data - no eyeSize', params);
 
   if (toolType.type === ToolCategory.NET && !value?.netLength) {
     throwValidationError('Invalid tool data - no netLength', params);
   } else if (toolType.type !== ToolCategory.NET && !value?.eyeSize2) {
-    throwValidationError('Invalid tool data - no eyeSize2', params);
+    //  throwValidationError('Invalid tool data - no eyeSize2', params);
   }
 
   return value;
