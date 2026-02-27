@@ -22,6 +22,7 @@ import { Tenant } from './tenants.service';
 import { Tool } from './tools.service';
 import { ToolsGroupHistoryTypes, ToolsGroupsEvent } from './toolsGroupsEvents.service';
 import { User } from './users.service';
+import { WeightEvent } from './weightEvents.service';
 
 interface Fields extends CommonFields {
   id: number;
@@ -145,7 +146,7 @@ export type ToolsGroup<
       ...COMMON_SCOPES,
     },
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
-    defaultPopulates: ['tools'],
+    defaultPopulates: ['tools', 'buildEvent'],
   },
   hooks: {
     before: {
@@ -481,6 +482,79 @@ export default class ToolsGroupsService extends moleculer.Service {
     return notRemovedToolsGroups.filter(
       (toolGroup) => toolGroup?.buildEvent?.location.id === ctx.params.id,
     );
+  }
+
+  @Action({
+    rest: 'GET /notChecked',
+    params: {
+      toolsGroup: 'number|convert|optional',
+    },
+    auth: RestrictionType.USER,
+  })
+  async getNotCheckedToolsGroups(ctx: Context<{ toolsGroup?: number }>) {
+    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
+    if (!currentFishing) {
+      throw new moleculer.Errors.ValidationError('Fishing not started');
+    }
+
+    const weightEvents: WeightEvent<'toolsGroup'>[] = await ctx.call('weightEvents.find', {
+      query: { fishing: currentFishing.id },
+    });
+
+    const weightToolLocationStats = weightEvents.reduce<
+      Record<
+        string,
+        {
+          name: string;
+          count: number;
+        }
+      >
+    >((acc, curr) => {
+      const location = curr?.toolsGroup?.buildEvent?.location;
+
+      if (!location?.id) return acc;
+
+      const { id, name } = location;
+
+      if (!acc[id]) {
+        acc[id] = {
+          name: name ?? '',
+          count: 1,
+        };
+      } else {
+        acc[id].count += 1;
+      }
+
+      return acc;
+    }, {});
+    const notRemovedToolsGroups: ToolsGroup<'buildEvent'>[] = await ctx.call('toolsGroups.find', {
+      query: {
+        removeEvent: { $exists: false },
+      },
+      populate: ['buildEvent'],
+    });
+
+    const notRemovedToolsLocationCounts = notRemovedToolsGroups.reduce<Record<string, number>>(
+      (acc, curr) => {
+        const locationId = curr.buildEvent?.location?.id;
+
+        if (!locationId) return acc;
+
+        return {
+          ...acc,
+          [locationId]: (acc[locationId] ?? 0) + 1,
+        };
+      },
+      {},
+    );
+    const locations = Object.entries(weightToolLocationStats)
+      .filter(([id, stats]) => stats.count < (notRemovedToolsLocationCounts[id] ?? 0))
+      .map(([id, stats]) => ({
+        id,
+        name: stats.name,
+      }));
+
+    return locations;
   }
 
   @Action({
