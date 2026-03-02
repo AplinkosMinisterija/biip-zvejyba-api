@@ -38,7 +38,7 @@ interface Fields extends CommonFields {
 
 interface Populates extends CommonPopulates {
   toolType: ToolType;
-  toolsGroup: ToolsGroup;
+  toolsGroup: ToolsGroup<'buildEvent'>;
   fishing: Fishing;
   tenant: Tenant;
   user: User;
@@ -141,7 +141,7 @@ export type WeightEvent<
       ...COMMON_SCOPES,
     },
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
-    defaultPopulates: ['toolType', 'geom'],
+    defaultPopulates: ['toolsGroup', 'geom'],
   },
   hooks: {
     before: {
