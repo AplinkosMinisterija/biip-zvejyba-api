@@ -36,7 +36,7 @@ interface Fields extends CommonFields {
 
 interface Populates extends CommonPopulates {
   tools: Tool<'toolType'>[];
-  buildEvent: ToolsGroupsEvent;
+  buildEvent: ToolsGroupsEvent<'fishing'>;
   removeEvent: ToolsGroupsEvent;
   weightEvent: ToolsGroupsEvent;
   tenant: Tenant;
@@ -534,8 +534,9 @@ export default class ToolsGroupsService extends moleculer.Service {
       populate: ['buildEvent'],
     });
 
-    const notRemovedToolsLocationCounts = notRemovedToolsGroups.reduce<Record<string, number>>(
-      (acc, curr) => {
+    const notRemovedToolsLocationCounts = notRemovedToolsGroups
+      .filter((toolGroup) => toolGroup?.buildEvent?.fishing?.id !== currentFishing.id)
+      .reduce<Record<string, number>>((acc, curr) => {
         const locationId = curr.buildEvent?.location?.id;
 
         if (!locationId) return acc;
@@ -544,9 +545,7 @@ export default class ToolsGroupsService extends moleculer.Service {
           ...acc,
           [locationId]: (acc[locationId] ?? 0) + 1,
         };
-      },
-      {},
-    );
+      }, {});
     const locations = Object.entries(weightToolLocationStats)
       .filter(([id, stats]) => stats.count < (notRemovedToolsLocationCounts[id] ?? 0))
       .map(([id, stats]) => ({
