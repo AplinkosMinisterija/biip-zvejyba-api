@@ -17,8 +17,8 @@ import {
 import ProfileMixin from '../mixins/profile.mixin';
 import { coordinatesToGeometry, geomToWgs } from '../modules/geometry';
 import { UserAuthMeta } from './api.service';
-import { FishType } from './fishTypes.service';
 import { FishingEvent, FishingEventType } from './fishingEvents.service';
+import { FishType } from './fishTypes.service';
 import { Coordinates, CoordinatesProp, Location } from './location.service';
 import { Tenant } from './tenants.service';
 import { User } from './users.service';
@@ -375,6 +375,7 @@ export default class FishTypesService extends moleculer.Service {
     params: {
       coordinates: CoordinatesProp,
       data: 'object',
+      preliminaryData: 'object',
     },
   })
   async weighFish(
@@ -383,18 +384,40 @@ export default class FishTypesService extends moleculer.Service {
         coordinates: Coordinates;
         location: Location;
         data: { [key: FishType['id']]: number };
+        preliminaryData: { [key: FishType['id']]: number };
       },
       UserAuthMeta
     >,
   ) {
+    const { data, preliminaryData } = ctx.params;
+
+    const invalidKeys: FishType['id'][] = [];
+
+    for (const key in data) {
+      const finalValue = data[key];
+      const preliminaryValue = preliminaryData[key];
+
+      if (preliminaryValue === undefined || preliminaryValue === 0) continue;
+
+      const error = Math.abs(finalValue - preliminaryValue) / preliminaryValue;
+
+      if (error > 0.2) {
+        invalidKeys.push(key as any);
+      }
+    }
+
+    if (invalidKeys.length > 0) {
+      throw new moleculer.Errors.ValidationError('Weight difference greater than 20%');
+    }
+
     await ctx.call('weightEvents.createWeightEvent', {
       coordinates: ctx.params.coordinates,
       location: ctx.params.location,
-      data: ctx.params.data,
+      data,
     });
+
     return { success: true };
   }
-
   @Action({
     rest: 'GET /history/:id',
     params: {
