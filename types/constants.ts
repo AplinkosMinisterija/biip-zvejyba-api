@@ -66,7 +66,6 @@ export const COMMON_FIELDS = {
   updatedAt: {
     type: 'date',
     columnType: 'datetime',
-    hidden: 'byDefault',
     readonly: true,
     onUpdate: () => new Date(),
   },
