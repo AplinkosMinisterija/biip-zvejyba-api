@@ -19,49 +19,46 @@ import { UserAuthMeta } from './api.service';
 const Cron = require('@r2d2bzh/moleculer-cron');
 
 const data = [
-  { label: 'karšiai', priority: 26 },
-  { label: 'žiobriai', priority: 25 },
-  { label: 'kuojos', priority: 24 },
-  { label: 'sterkai', priority: 23 },
-  { label: 'ešeriai', priority: 22 },
-  { label: 'strintos', priority: 21 },
-  { label: 'perpelės', priority: 20 },
-  { label: 'karosai, auksiniai', priority: 19 },
-  { label: 'karosai, sidabriniai', priority: 18 },
-  { label: 'unguriai', priority: 17 },
-  { label: 'lydekos', priority: 16 },
-  { label: 'salačiai', priority: 15 },
-  { label: 'vėgėlės', priority: 14 },
-  { label: 'ožkos', priority: 13 },
-  { label: 'karpiai', priority: 12 },
-  { label: 'plakiai', priority: 11 },
-  { label: 'šamai', priority: 10 },
-  { label: 'nėgės', priority: 9 },
-  { label: 'pūgžliai', priority: 8 },
-  { label: 'lynai', priority: 7 },
-  { label: 'meknės', priority: 6 },
-  { label: 'plekšnės', priority: 5 },
-  { label: 'sykai', priority: 4 },
-  { label: 'strimelės', priority: 3 },
-  { label: 'plačiakačiai', priority: 2 },
-  { label: 'aukšlės', priority: 1 },
-  { label: 'seliavos', priority: 0 },
-  { label: 'sterkai', priority: 0 },
-  { label: 'vaivorykštiniai upėtakiai', priority: 0 },
-  { label: 'vėžiai, plačiažnypliai', priority: 0 },
-  { label: 'margieji plačiakačiai', priority: 0 },
-  { label: 'lašišos', priority: 0 },
-  { label: 'šlakiai', priority: 0 },
-  { label: 'margieji upėtakiai', priority: 0 },
-  { label: 'aštriašnipiai eršketai', priority: 0 },
-  { label: 'kiršliai', priority: 0 },
-  { label: 'ūsoriai', priority: 0 },
-  { label: 'skersnukiai', priority: 0 },
-  { label: 'plačiakakčiai', priority: 0 },
-  { label: 'margieji plačiakakčiai', priority: 0 },
-  { label: 'baltieji amūrai', priority: 0 },
+  { label: 'Karšis', priority: 999999999 },
+  { label: 'Sterkas', priority: 999999998 },
+  { label: 'Kuoja', priority: 999999997 },
+  { label: 'Ešerys', priority: 999999996 },
+  { label: 'Žiobris', priority: 999999995 },
+  { label: 'Perpelė', priority: 999999994 },
+  { label: 'Karosas, auksinis', priority: 999999993 },
+  { label: 'Karosas, sidabrinis', priority: 999999992 },
+  { label: 'Ožka', priority: 999999991 },
+  { label: 'Lydeka', priority: 999999990 },
+  { label: 'Ungurys', priority: 999999989 },
+  { label: 'Stinta', priority: 999999988 },
+  { label: 'Nėgė', priority: 999999987 },
+  { label: 'Karpis', priority: 999999986 },
+  { label: 'Vėgėlė', priority: 999999985 },
+  { label: 'Šamas', priority: 999999984 },
+  { label: 'Kiršlys', priority: 0 },
+  { label: 'Lašiša', priority: 0 },
+  { label: 'Lynas', priority: 0 },
+  { label: 'Margasis plačiakaktis', priority: 0 },
+  { label: 'Margasis upėtakis', priority: 0 },
+  { label: 'Meknė', priority: 0 },
+  { label: 'Plačiakaktis', priority: 0 },
+  { label: 'Plakis', priority: 0 },
+  { label: 'Plekšnė', priority: 0 },
+  { label: 'Pūgžlys', priority: 0 },
+  { label: 'Raudė', priority: 0 },
+  { label: 'Salačius', priority: 0 },
+  { label: 'Seliava', priority: 0 },
+  { label: 'Skersnukis', priority: 0 },
+  { label: 'Šlakis', priority: 0 },
+  { label: 'Strimelė', priority: 0 },
+  { label: 'Sykas', priority: 0 },
+  { label: 'Ūsorius', priority: 0 },
+  { label: 'Vaivorykštinis upėtakis', priority: 0 },
+  { label: 'Vėžys, plačiažnyplis', priority: 0 },
+  { label: 'Aukšlė', priority: 34 },
+  { label: 'Aštriašnipis eršketas', priority: 43 },
+  { label: 'Baltasis amūras', priority: 21 },
 ];
-
 interface Fields extends CommonFields {
   id: number;
   label: string;
@@ -139,7 +136,11 @@ export type FishType<
       async onTick() {
         // There is no data yet, so the sort would be inaccurate if sorted now.
         if (new Date() >= new Date('2025-01-01T00:00:00')) {
-          const fishTypes: FishType[] = await this.call('fishTypes.find');
+          const fishTypes: FishType[] = await this.call('fishTypes.find', {
+            query: {
+              priority: { $lt: 999999000 },
+            },
+          });
           for (const fishType of fishTypes) {
             const weightEventsCount: number = await this.call('weightEvents.count', {
               query: {
