@@ -35,7 +35,9 @@ interface Fields extends CommonFields {
   fishing: Fishing['id'];
 }
 
-interface Populates extends CommonPopulates {}
+interface Populates extends CommonPopulates {
+  fishing: Fishing;
+}
 
 export type ToolsGroupsEvent<
   P extends keyof Populates = never,
@@ -143,7 +145,7 @@ export type ToolsGroupsEvent<
       ...COMMON_SCOPES,
     },
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
-    defaultPopulates: ['geom'],
+    defaultPopulates: ['geom', 'fishing'],
   },
   actions: {
     create: {
