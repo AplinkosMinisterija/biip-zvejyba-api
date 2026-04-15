@@ -240,7 +240,7 @@ export default class ToolTypesService extends moleculer.Service {
         throw new moleculer.Errors.ValidationError('Cannot delete tool');
       }
       //validate if tool is in the water
-      if (tool.toolsGroup) {
+      if (!!tool.toolsGroup?.buildEvent) {
         throw new moleculer.Errors.ValidationError('Tools is in use');
       }
     }
