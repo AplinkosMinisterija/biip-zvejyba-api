@@ -86,6 +86,7 @@ export type Research<
     DbConnection(),
     PostgisMixin({
       srid: 3346,
+      geojson: { maxDecimalDigits: 2 },
     }),
 
     ProfileMixin,

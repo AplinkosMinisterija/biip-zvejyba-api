@@ -79,6 +79,7 @@ export type Fishing<
     DbConnection(),
     PostgisMixin({
       srid: 3346,
+      geojson: { maxDecimalDigits: 2 },
     }),
     ProfileMixin,
   ],
