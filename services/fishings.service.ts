@@ -70,6 +70,7 @@ interface Populates extends CommonPopulates {
   endEvent: FishingEvent;
   skipEvent: FishingEvent;
   weightEvents: GetFishByFishingResponse;
+  tenant: Tenant;
 }
 
 export type Fishing<
@@ -428,11 +429,10 @@ export default class FishTypesService extends moleculer.Service {
   })
   async exportCaughtFishes(ctx: Context<any, ResponseHeadersMeta>) {
     ctx.params.query = JSON.parse(ctx?.params?.query || {});
-    ctx.params.scope = JSON.parse(ctx?.params?.scope);
 
-    const fishings: Fishing<'weightEvents'>[] = await ctx.call('fishings.find', {
-      query: ctx?.params?.query,
-      populate: 'weightEvents',
+    const fishings: Fishing<'weightEvents' | 'tenant'>[] = await ctx.call('fishings.find', {
+      // query: ctx?.params?.query,
+      populate: 'weightEvents,tenant',
       sort: 'id',
     });
 
@@ -479,7 +479,7 @@ export default class FishTypesService extends moleculer.Service {
       > = {};
 
       Object.values(fishOnBoat).forEach((toolGroup) => {
-        const fishIds = Object.keys(toolGroup.data);
+        const fishIds = Object.keys(toolGroup.data).map(Number);
 
         const location = toolGroup.location.name;
         const tool = toolGroup.toolsGroup.tools[0].toolType.label;
@@ -516,12 +516,24 @@ export default class FishTypesService extends moleculer.Service {
           info[key]?.tools.join(', ') ?? '',
           fishData[key],
           fishOnShore.createdAt,
-          fishOnShore?.tenant ? fishOnShore.tenant.name : fishOnShore.createdBy.fullName,
+          currentFishing?.tenant
+            ? currentFishing.tenant.name
+            : `${fishOnShore.createdBy.firstName} ${fishOnShore.createdBy.lastName}`,
         ];
 
         rowIndex++;
       });
     }
+
+    caughtFishesSheet.columns = [
+      { width: 8 },
+      { width: 28 },
+      { width: 48 },
+      { width: 48 },
+      { width: 28 },
+      { width: 28 },
+      { width: 28 },
+    ];
 
     const buffer = await workbook.xlsx.writeBuffer();
 
