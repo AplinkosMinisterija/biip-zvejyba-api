@@ -36,9 +36,14 @@ interface Fields extends CommonFields {
   user: User['id'];
 }
 
+export interface GetFishByFishingResponse {
+  fishOnShore: WeightEvent<'toolsGroup' | 'createdBy' | 'tenant'> | null;
+  fishOnBoat: Record<number, WeightEvent<'toolsGroup'>>;
+}
+
 interface Populates extends CommonPopulates {
   toolType: ToolType;
-  toolsGroup: ToolsGroup<'buildEvent'>;
+  toolsGroup: ToolsGroup<'buildEvent' | 'tools'>;
   fishing: Fishing;
   tenant: Tenant;
   user: User;
@@ -199,7 +204,7 @@ export default class ToolTypesService extends moleculer.Service {
         fishing: ctx.params.fishingId,
       },
       sort: 'createdAt',
-      populate: ['toolsGroup', 'geom'],
+      populate: ['toolsGroup', 'geom', 'tenant', 'createdBy'],
     });
 
     return weights?.reduce(
