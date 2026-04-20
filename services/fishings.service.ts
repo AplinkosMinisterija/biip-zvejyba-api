@@ -1,5 +1,6 @@
 'use strict';
 
+import ExcelJS from 'exceljs';
 import moleculer, { Context } from 'moleculer';
 import { Action, Service } from 'moleculer-decorators';
 import PostgisMixin from 'moleculer-postgis';
@@ -10,6 +11,7 @@ import {
   COMMON_SCOPES,
   CommonFields,
   CommonPopulates,
+  ResponseHeadersMeta,
   RestrictionType,
   Table,
 } from '../types';
@@ -22,7 +24,7 @@ import { FishType } from './fishTypes.service';
 import { Coordinates, CoordinatesProp, Location } from './location.service';
 import { Tenant } from './tenants.service';
 import { User } from './users.service';
-import { WeightEvent } from './weightEvents.service';
+import { GetFishByFishingResponse, WeightEvent } from './weightEvents.service';
 
 export enum FishingType {
   ESTUARY = 'ESTUARY',
@@ -60,12 +62,15 @@ interface Fields extends CommonFields {
   type: FishingType;
   tenant: Tenant['id'];
   user: User['id'];
+  weightEvents: any;
 }
 
 interface Populates extends CommonPopulates {
   startEvent: FishingEvent;
   endEvent: FishingEvent;
   skipEvent: FishingEvent;
+  weightEvents: GetFishByFishingResponse;
+  tenant: Tenant;
 }
 
 export type Fishing<
@@ -418,6 +423,128 @@ export default class FishTypesService extends moleculer.Service {
 
     return { success: true };
   }
+
+  @Action({
+    rest: 'GET /exportCaughtFishes',
+  })
+  async exportCaughtFishes(ctx: Context<any, ResponseHeadersMeta>) {
+    ctx.params.query = JSON.parse(ctx?.params?.query || {});
+
+    const fishings: Fishing<'weightEvents' | 'tenant'>[] = await ctx.call('fishings.find', {
+      // query: ctx?.params?.query,
+      populate: 'weightEvents,tenant',
+      sort: 'id',
+    });
+
+    const fishTypes: FishType[] = await ctx.call('fishTypes.find');
+
+    const fishTypesMap = new Map(fishTypes.map((fish) => [fish.id, fish]));
+
+    const workbook = new ExcelJS.Workbook();
+    const caughtFishesSheet = workbook.addWorksheet('Sugautos žuvys');
+
+    caughtFishesSheet.views = [{ state: 'frozen', ySplit: 1 }];
+
+    caughtFishesSheet.getRow(1).values = [
+      'Eil. Nr.',
+      'Žuvų rūšis',
+      'Vandens telkiniai (viename išplaukime/žvejyboje)',
+      'Žvejybos įrankiai (viename išplaukime/žvejyboje)',
+      'Tikslus svoris, kg',
+      'Žuvų iškrovimo data',
+      'Įmonė/Fizinis asmuo',
+    ];
+
+    caughtFishesSheet.getRow(1).eachCell((c) => (c.font = { bold: true }));
+
+    let rowIndex = 2;
+
+    for (const currentFishing of fishings) {
+      const weightEvents = currentFishing?.weightEvents;
+
+      const fishOnShore = weightEvents?.fishOnShore;
+      const fishOnBoat = weightEvents?.fishOnBoat;
+
+      if (!fishOnShore || !fishOnBoat) {
+        continue;
+      }
+
+      const info: Record<
+        string,
+        {
+          fish: string;
+          locations: string[];
+          tools: string[];
+        }
+      > = {};
+
+      Object.values(fishOnBoat).forEach((toolGroup) => {
+        const fishIds = Object.keys(toolGroup.data).map(Number);
+
+        const location = toolGroup.location.name;
+        const tool = toolGroup.toolsGroup.tools[0].toolType.label;
+
+        fishIds.forEach((id) => {
+          const fish = fishTypesMap.get(id as any)?.label;
+
+          if (!info[id]) {
+            info[id] = {
+              fish: fish ?? '',
+              locations: [],
+              tools: [],
+            };
+          }
+
+          if (!info[id].locations.includes(location)) {
+            info[id].locations.push(location);
+          }
+
+          if (!info[id].tools.includes(tool)) {
+            info[id].tools.push(tool);
+          }
+        });
+      });
+
+      const fishData = fishOnShore.data;
+      const fishIds = Object.keys(fishData);
+
+      fishIds.forEach((key) => {
+        caughtFishesSheet.getRow(rowIndex).values = [
+          rowIndex - 1,
+          info[key]?.fish ?? '',
+          info[key]?.locations.join(', ') ?? '',
+          info[key]?.tools.join(', ') ?? '',
+          fishData[key],
+          fishOnShore.createdAt,
+          currentFishing?.tenant
+            ? currentFishing.tenant.name
+            : `${fishOnShore.createdBy.firstName} ${fishOnShore.createdBy.lastName}`,
+        ];
+
+        rowIndex++;
+      });
+    }
+
+    caughtFishesSheet.columns = [
+      { width: 8 },
+      { width: 28 },
+      { width: 48 },
+      { width: 48 },
+      { width: 28 },
+      { width: 28 },
+      { width: 28 },
+    ];
+
+    const buffer = await workbook.xlsx.writeBuffer();
+
+    ctx.meta.$responseHeaders = {
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': 'attachment; filename="mp_vienetai.xlsx"',
+    };
+
+    return buffer;
+  }
+
   @Action({
     rest: 'GET /history/:id',
     params: {

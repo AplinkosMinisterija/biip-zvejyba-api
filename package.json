@@ -60,6 +60,7 @@
   "dependencies": {
     "@moleculer/database": "github:ambrazasp/moleculerjs-database",
     "@r2d2bzh/moleculer-cron": "^0.1.4",
+    "exceljs": "^4.4.0",
     "@turf/centroid": "^7.2.0",
     "biip-auth-nodejs": "DadPatch/biip-auth-nodejs",
     "dotenv": "^16.0.3",
