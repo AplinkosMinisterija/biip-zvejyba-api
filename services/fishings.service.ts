@@ -317,7 +317,7 @@ export default class FishTypesService extends moleculer.Service {
     rest: 'POST /end',
     auth: RestrictionType.USER,
     params: {
-      // coordinates: CoordinatesProp,
+      coordinates: CoordinatesProp,
     },
   })
   async endFishing(
@@ -339,9 +339,9 @@ export default class FishTypesService extends moleculer.Service {
     if (fishWeightEvents.length > 0 && !finalFishEvent) {
       throw new moleculer.Errors.ValidationError('Fish must be weighted');
     }
-    //const geom = coordinatesToGeometry(ctx.params.coordinates);
+    const geom = coordinatesToGeometry(ctx.params.coordinates);
     const endEvent: FishingEvent = await ctx.call('fishingEvents.create', {
-      // geom,
+      geom,
       type: FishingEventType.END,
     });
     return this.updateEntity(ctx, { id: current.id, endEvent: endEvent.id });
