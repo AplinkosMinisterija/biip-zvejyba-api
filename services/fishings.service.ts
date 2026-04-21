@@ -89,7 +89,7 @@ export type Fishing<
   ],
   crons: [
     {
-      name: 'cleanCodes',
+      name: 'endFishings',
       cronTime: '0 0 * * *',
       timeZone: 'Europe/Vilnius',
 
