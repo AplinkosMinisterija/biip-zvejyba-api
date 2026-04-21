@@ -431,7 +431,7 @@ export default class FishTypesService extends moleculer.Service {
     ctx.params.query = JSON.parse(ctx?.params?.query || {});
 
     const fishings: Fishing<'weightEvents' | 'tenant'>[] = await ctx.call('fishings.find', {
-      // query: ctx?.params?.query,
+      query: ctx?.params?.query,
       populate: 'weightEvents,tenant',
       sort: 'id',
     });
