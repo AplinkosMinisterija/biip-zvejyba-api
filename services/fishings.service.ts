@@ -87,6 +87,17 @@ export type Fishing<
     }),
     ProfileMixin,
   ],
+  crons: [
+    {
+      name: 'endFishings',
+      cronTime: '0 0 * * *',
+      timeZone: 'Europe/Vilnius',
+
+      async onTick() {
+        await this.call('fishings.endFishings');
+      },
+    },
+  ],
   settings: {
     fields: {
       id: {
@@ -219,6 +230,31 @@ export type Fishing<
   },
 })
 export default class FishTypesService extends moleculer.Service {
+  @Action()
+  async endFishings(ctx: Context) {
+    const fishings: Fishing[] = await ctx.call('fishings.find', {
+      query: { endEvent: { $exists: false } },
+    });
+
+    const result = [];
+
+    for (const fishing of fishings) {
+      const endEvent: FishingEvent = await ctx.call('fishingEvents.create', {
+        geom: fishing.geom,
+        type: FishingEventType.END,
+      });
+
+      const updatedFishing = await ctx.call('fishings.update', {
+        id: fishing.id,
+        endEvent: endEvent.id,
+      });
+
+      result.push(updatedFishing);
+    }
+
+    return result;
+  }
+
   @Action({
     rest: 'POST /start',
     auth: RestrictionType.USER,
@@ -306,7 +342,7 @@ export default class FishTypesService extends moleculer.Service {
     const geom = coordinatesToGeometry(ctx.params.coordinates);
     const endEvent: FishingEvent = await ctx.call('fishingEvents.create', {
       geom,
-      type: FishingEventType.SKIP,
+      type: FishingEventType.END,
     });
     return this.updateEntity(ctx, { id: current.id, endEvent: endEvent.id });
   }
