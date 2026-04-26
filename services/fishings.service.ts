@@ -334,9 +334,15 @@ export default class FishTypesService extends moleculer.Service {
         fishing: current.id,
       },
     });
-    const finalFishEvent = fishWeightEvents.find((fishEvenet) => !fishEvenet.toolsGroup);
+    const finalFishEvent = fishWeightEvents.find((fishEvent) => !fishEvent.toolsGroup);
+    const hasPreliminaryFish = fishWeightEvents.some(
+      (fishEvent) =>
+        !!fishEvent.toolsGroup &&
+        !!fishEvent.data &&
+        Object.values(fishEvent.data).some((amount) => Number(amount) > 0),
+    );
 
-    if (fishWeightEvents.length > 0 && !finalFishEvent) {
+    if (hasPreliminaryFish && !finalFishEvent) {
       throw new moleculer.Errors.ValidationError('Fish must be weighted');
     }
     const geom = coordinatesToGeometry(ctx.params.coordinates);
