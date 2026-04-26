@@ -75,7 +75,7 @@
     "moleculer-decorators": "^1.3.0",
     "moleculer-knex-filters": "github:DadPatch/moleculer-knex-filters",
     "moleculer-minio": "github:dadpatch/moleculer-minio",
-    "moleculer-postgis": "^0.2.7",
+    "moleculer-postgis": "github:AplinkosMinisterija/moleculer-postgis#v0.4.0",
     "moleculer-sentry": "^2.0.0",
     "moleculer-web": "^0.10.5",
     "moment": "^2.29.4",
@@ -116,5 +116,8 @@
   },
   "eslintConfig": {
     "extends": "@aplinkosministerija/eslint-config-biip-api"
+  },
+  "resolutions": {
+    "moleculer-postgis": "github:AplinkosMinisterija/moleculer-postgis#v0.4.0"
   }
 }
