@@ -14,6 +14,7 @@ import { TenantUser, TenantUserRole } from './tenantUsers.service';
 
 import DbConnection, { PopulateHandlerFn } from '../mixins/database.mixin';
 import { UserAuthMeta } from './api.service';
+import { TENANTS_TO_IMPORT, TenantImportData } from './tenants.import-data';
 import { UserType } from './users.service';
 
 export interface Tenant {
@@ -236,7 +237,7 @@ export default class TenantsService extends moleculer.Service {
   async 'tenants.updated'(ctx: Context<EntityChangedParams<Tenant>, UserAuthMeta>) {
     const { oldData: prevTenant, data: tenant } = ctx.params;
 
-    const wasInvestigator = !!prevTenant.isInvestigator;
+    const wasInvestigator = !!prevTenant?.isInvestigator;
     const isInvestigator = !!(tenant as Tenant).isInvestigator;
 
     if (wasInvestigator === isInvestigator) return ctx;
@@ -292,5 +293,130 @@ export default class TenantsService extends moleculer.Service {
     return this.createEntity(ctx, ctx.params, {
       permissive: true,
     });
+  }
+
+  @Action({
+    rest: 'POST /importBatch',
+    auth: UserType.ADMIN,
+    params: {
+      tenants: {
+        type: 'array',
+        optional: true,
+        items: {
+          type: 'object',
+          props: {
+            code: 'string',
+            name: 'string',
+            email: 'string|optional',
+            phone: 'string|optional',
+          },
+        },
+      },
+      dryRun: {
+        type: 'boolean',
+        default: false,
+        convert: true,
+      },
+      authToken: 'string|optional',
+    },
+  })
+  async importBatch(
+    ctx: Context<
+      { tenants?: TenantImportData[]; dryRun: boolean; authToken?: string },
+      UserAuthMeta
+    >,
+  ) {
+    const items: TenantImportData[] = ctx.params.tenants?.length
+      ? ctx.params.tenants
+      : TENANTS_TO_IMPORT;
+
+    const authToken =
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MSwiZmlyc3ROYW1lIjoiU3VwZXIiLCJsYXN0TmFtZSI6IkFkbWluIiwiZW1haWwiOiJzdXBlcmFkbWluQGFtLmx0IiwicGhvbmUiOiIrMzcwNjAwMDAwMDAiLCJ0eXBlIjoiU1VQRVJfQURNSU4iLCJmdWxsTmFtZSI6IlN1cGVyIEFkbWluIiwiYXBwcyI6bnVsbCwibGFzdExvZ2dlZEluQXQiOiIyMDI2LTA0LTI0VDA3OjM3OjQzLjc2OFoiLCJjcmVhdGVkQnkiOm51bGwsImNyZWF0ZWRBdCI6IjIwMjItMDYtMjBUMDU6MjY6MzIuNDI5WiIsInVwZGF0ZWRCeSI6MSwidXBkYXRlZEF0IjoiMjAyNi0wNC0yNFQwNzozNzo0My43NjlaIiwiaW52aXRlZCI6ZmFsc2UsInN0cmF0ZWd5IjoiTE9DQUwiLCJzdHJhdGVneUlkIjoxLCJpYXQiOjE3NzcyNzg3NTAsImV4cCI6MTc3NzM2NTE1MH0.LB0uE_k0aGvByeC0rCVgkBXlIFU-QDtd3kDUjNoNvtk';
+
+    if (!ctx.params.dryRun && !authToken) {
+      throw new moleculer.Errors.MoleculerClientError(
+        'Missing auth token. Pass `authToken` param, call via REST with admin token, or set AUTH_ADMIN_TOKEN env var.',
+        401,
+        'MISSING_AUTH_TOKEN',
+      );
+    }
+
+    const inviteCallOpts = { meta: { authToken } };
+
+    const summary = {
+      total: items.length,
+      dryRun: ctx.params.dryRun,
+      created: [] as Array<{ code: string; name: string; id?: string }>,
+      skipped: [] as Array<{ code: string; name: string; reason: string }>,
+      errors: [] as Array<{ code: string; name: string; message: string }>,
+    };
+
+    for (const item of items) {
+      const code = item.code?.trim();
+      const name = item.name?.trim();
+      const email = item.email?.trim() || undefined;
+      const phone = item.phone?.trim() || undefined;
+
+      if (!code) {
+        summary.skipped.push({ code, name, reason: 'missing code' });
+        continue;
+      }
+
+      try {
+        const existing: Tenant = await ctx.call('tenants.findOne', {
+          query: { code },
+        });
+
+        if (existing) {
+          summary.skipped.push({ code, name, reason: 'already exists' });
+          continue;
+        }
+
+        if (ctx.params.dryRun) {
+          summary.created.push({ code, name });
+          continue;
+        }
+
+        const authGroup: any = await ctx.call(
+          'auth.users.invite',
+          {
+            companyCode: code,
+            throwErrors: false,
+            notify: [],
+          },
+          inviteCallOpts,
+        );
+
+        if (!authGroup?.id) {
+          summary.errors.push({
+            code,
+            name,
+            message: 'auth.users.invite returned no group id',
+          });
+          continue;
+        }
+
+        const tenant: Tenant = await this.createEntity(ctx, {
+          authGroup: authGroup.id,
+          email,
+          phone,
+          name,
+          code,
+        });
+
+        summary.created.push({ id: tenant.id, code, name });
+      } catch (err: any) {
+        summary.errors.push({
+          code,
+          name,
+          message: err?.message || 'Unknown error',
+        });
+      }
+    }
+
+    this.logger.info('tenants.importBatch summary', summary);
+
+    return 'ok';
+    return summary;
   }
 }

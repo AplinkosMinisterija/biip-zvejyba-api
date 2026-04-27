@@ -227,6 +227,21 @@ const brokerConfig: BrokerOptions = {
   // Register custom middlewares
   middlewares: [],
 
+  replCommands: [
+    {
+      command: 'tenants-import',
+      description: 'One-time import of tenants from services/tenants.import-data.ts',
+      alias: ['tenantsImport'],
+      options: [{ option: '--dry', description: 'Dry-run (no writes)' }],
+      action: (broker: ServiceBroker, args: any) =>
+        broker.call(
+          'tenants.importBatch',
+          { dryRun: !!args.options?.dry },
+          { meta: { authToken: process.env.AUTH_ADMIN_TOKEN } },
+        ),
+    },
+  ],
+
   /*
 	// Called after broker created.
 	created : (broker: ServiceBroker): void => {},
