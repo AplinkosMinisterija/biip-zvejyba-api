@@ -212,6 +212,7 @@ export default class LocationsService extends moleculer.Service {
           y: coordinates[1],
           id: item?.properties?.id,
           name: item?.properties?.name,
+          type: LocationType.ESTUARY,
           municipality,
         };
       }),
