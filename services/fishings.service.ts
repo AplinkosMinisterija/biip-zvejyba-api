@@ -320,10 +320,9 @@ export default class FishTypesService extends moleculer.Service {
       throw new moleculer.Errors.ValidationError('No tools in storage');
     }
 
-    if (ctx.params.type === FishingType.POLDERS) {
-      if (!ctx.params.polderId) {
-        throw new moleculer.Errors.ValidationError('polderId is required when fishing in polders');
-      }
+    // If polderId is supplied, verify the polder exists; we do not force
+    // POLDERS fishings to carry a polderId so older clients keep working.
+    if (ctx.params.polderId) {
       const polder: Polder = await ctx.call('polders.get', { id: ctx.params.polderId });
       if (!polder) {
         throw new moleculer.Errors.ValidationError('Polder not found');
