@@ -2,7 +2,12 @@
 
 import moleculer, { Context } from 'moleculer';
 import { Action, Event, Method, Service } from 'moleculer-decorators';
-import { EntityChangedParams, RestrictionType, throwUnauthorizedError } from '../types';
+import {
+  EntityChangedParams,
+  INNER_AUTH_GROUP_IDS,
+  RestrictionType,
+  throwUnauthorizedError,
+} from '../types';
 import { AuthGroupRole, TenantUser, TenantUserRole } from './tenantUsers.service';
 import { User, UserType } from './users.service';
 
@@ -103,7 +108,9 @@ export default class AuthService extends moleculer.Service {
     });
 
     if (!user) {
-      // Should not be a case. But sometimes it happens
+      // First-time login via E-vartai (auth side has `createUserOnEvartaiLogin`
+      // enabled, so the auth user already exists by this point — we just need
+      // the local mirror).
       user = await ctx.call('users.create', {
         authUser: authUser.id,
         firstName: authUser.firstName,
@@ -139,12 +146,20 @@ export default class AuthService extends moleculer.Service {
         continue;
       }
 
-      let tenant: Tenant = await ctx.call('tenants.findOne', {
+      // Skip non-company groups (FREELANCER, INVESTIGATOR) and any auth group
+      // that is not tied to a real company.
+      if (INNER_AUTH_GROUP_IDS.includes(authGroup.id) || !authGroup.companyCode) {
+        continue;
+      }
+
+      const tenant: Tenant = await ctx.call('tenants.findOne', {
         query: {
           authGroup: authGroup.id,
         },
       });
 
+      // Tenants are bulk-imported separately; if there is no match here the
+      // company simply isn't onboarded into Žvejyba yet — nothing to attach.
       if (!tenant) {
         continue;
       }
@@ -157,10 +172,7 @@ export default class AuthService extends moleculer.Service {
         phone: authGroup.companyPhone,
       });
 
-      // Update tenantUser role if changed in Auth module
-      // Should only be a case when NOT OWNER becomes an OWNER (after login as "juridinis asmuo")
-      // All other cases are done from our app and synced to Auth
-      let tenantUser: TenantUser = await ctx.call('tenantUsers.findOne', {
+      const tenantUser: TenantUser = await ctx.call('tenantUsers.findOne', {
         query: {
           tenant: tenant.id,
           user: user.id,
@@ -168,29 +180,46 @@ export default class AuthService extends moleculer.Service {
       });
 
       if (!tenantUser) {
-        // Again, should NOT be a case, but we cannot trust 3rd party
-        tenantUser = await ctx.call('tenantUsers.create', {
-          tenant: tenant.id,
-          user: user.id,
-          role: authGroup.role === AuthGroupRole.ADMIN ? TenantUserRole.OWNER : TenantUserRole.USER,
-        });
+        // First juridical-person login for this user/tenant pair — create the
+        // local tenantUser link. The `tenantUsers.beforeCreate` hook also
+        // re-asserts the auth-side group assignment, so we must propagate the
+        // freshly issued auth token via meta — the original login ctx is
+        // anonymous and would 401 the inner auth.users.assignToGroup call.
+        await ctx.call(
+          'tenantUsers.create',
+          {
+            tenant: tenant.id,
+            user: user.id,
+            role:
+              authGroup.role === AuthGroupRole.ADMIN ? TenantUserRole.OWNER : TenantUserRole.USER,
+          },
+          { meta },
+        );
       } else {
         if (authGroup.role === AuthGroupRole.ADMIN && tenantUser.role !== TenantUserRole.OWNER) {
           // After login with "juridinis asmuo" auth changes relation to ADMIN
           // So we have to change it to OWNER
-          await ctx.call('tenantUsers.update', {
-            id: tenantUser.id,
-            role: TenantUserRole.OWNER,
-          });
+          await ctx.call(
+            'tenantUsers.update',
+            {
+              id: tenantUser.id,
+              role: TenantUserRole.OWNER,
+            },
+            { meta },
+          );
         }
 
         if (authGroup.role === AuthGroupRole.USER && tenantUser.role === TenantUserRole.OWNER) {
           // Changing from OWNER to other roles SHOULD NOT happen without our app
           // But again, just in case
-          await ctx.call('tenantUsers.update', {
-            id: tenantUser.id,
-            role: TenantUserRole.USER,
-          });
+          await ctx.call(
+            'tenantUsers.update',
+            {
+              id: tenantUser.id,
+              role: TenantUserRole.USER,
+            },
+            { meta },
+          );
         }
       }
     }
