@@ -152,75 +152,79 @@ export default class AuthService extends moleculer.Service {
         continue;
       }
 
-      const tenant: Tenant = await ctx.call('tenants.findOne', {
-        query: {
-          authGroup: authGroup.id,
-        },
-      });
+      // A failure for one company group must not break the entire login —
+      // a successful response is more valuable than aborting because we could
+      // not sync one tenant relation. Surface the error in logs instead.
+      try {
+        const tenant: Tenant = await ctx.call('tenants.findOne', {
+          query: {
+            authGroup: authGroup.id,
+          },
+        });
 
-      // Tenants are bulk-imported separately; if there is no match here the
-      // company simply isn't onboarded into Žvejyba yet — nothing to attach.
-      if (!tenant) {
-        continue;
-      }
+        // Tenants are bulk-imported separately; if there is no match here the
+        // company simply isn't onboarded into Žvejyba yet — nothing to attach.
+        if (!tenant) {
+          this.logger.warn(
+            `afterUserLoggedIn: no Žvejyba tenant for authGroup id=${authGroup.id} (code=${authGroup.companyCode}); skipping attachment for user id=${user.id}`,
+          );
+          continue;
+        }
 
-      await ctx.call('tenants.update', {
-        id: tenant.id,
-        name: authGroup.name,
-        code: authGroup.companyCode,
-        email: authGroup.companyEmail,
-        phone: authGroup.companyPhone,
-      });
+        await ctx.call('tenants.update', {
+          id: tenant.id,
+          name: authGroup.name,
+          code: authGroup.companyCode,
+          email: authGroup.companyEmail,
+          phone: authGroup.companyPhone,
+        });
 
-      const tenantUser: TenantUser = await ctx.call('tenantUsers.findOne', {
-        query: {
-          tenant: tenant.id,
-          user: user.id,
-        },
-      });
+        const tenantUser: TenantUser = await ctx.call('tenantUsers.findOne', {
+          query: {
+            tenant: tenant.id,
+            user: user.id,
+          },
+        });
 
-      if (!tenantUser) {
-        // First juridical-person login for this user/tenant pair — create the
-        // local tenantUser link. The `tenantUsers.beforeCreate` hook also
-        // re-asserts the auth-side group assignment, so we must propagate the
-        // freshly issued auth token via meta — the original login ctx is
-        // anonymous and would 401 the inner auth.users.assignToGroup call.
-        await ctx.call(
-          'tenantUsers.create',
-          {
+        if (!tenantUser) {
+          // First juridical-person login for this user/tenant pair — create the
+          // local tenantUser link. `noAuthSync` tells `tenantUsers.beforeCreate`
+          // to skip its `auth.users.assignToGroup` call: the user is *already*
+          // in this auth group (that's why this authGroup is in the loop), and
+          // the login ctx is anonymous so the call would 401 anyway.
+          await ctx.call('tenantUsers.create', {
             tenant: tenant.id,
             user: user.id,
             role:
               authGroup.role === AuthGroupRole.ADMIN ? TenantUserRole.OWNER : TenantUserRole.USER,
-          },
-          { meta },
-        );
-      } else {
-        if (authGroup.role === AuthGroupRole.ADMIN && tenantUser.role !== TenantUserRole.OWNER) {
+            noAuthSync: true,
+          });
+        } else if (
+          authGroup.role === AuthGroupRole.ADMIN &&
+          tenantUser.role !== TenantUserRole.OWNER
+        ) {
           // After login with "juridinis asmuo" auth changes relation to ADMIN
           // So we have to change it to OWNER
-          await ctx.call(
-            'tenantUsers.update',
-            {
-              id: tenantUser.id,
-              role: TenantUserRole.OWNER,
-            },
-            { meta },
-          );
-        }
-
-        if (authGroup.role === AuthGroupRole.USER && tenantUser.role === TenantUserRole.OWNER) {
+          await ctx.call('tenantUsers.update', {
+            id: tenantUser.id,
+            role: TenantUserRole.OWNER,
+          });
+        } else if (
+          authGroup.role === AuthGroupRole.USER &&
+          tenantUser.role === TenantUserRole.OWNER
+        ) {
           // Changing from OWNER to other roles SHOULD NOT happen without our app
           // But again, just in case
-          await ctx.call(
-            'tenantUsers.update',
-            {
-              id: tenantUser.id,
-              role: TenantUserRole.USER,
-            },
-            { meta },
-          );
+          await ctx.call('tenantUsers.update', {
+            id: tenantUser.id,
+            role: TenantUserRole.USER,
+          });
         }
+      } catch (err) {
+        this.logger.error(
+          `afterUserLoggedIn: failed to sync user id=${user.id} with authGroup id=${authGroup.id} (code=${authGroup.companyCode}):`,
+          err,
+        );
       }
     }
 

@@ -358,7 +358,7 @@ export default class TenantUsersService extends moleculer.Service {
 
   @Method
   async beforeCreate(ctx: Context<any>) {
-    const { user, tenant } = ctx.params;
+    const { user, tenant, noAuthSync } = ctx.params;
 
     const tenantUsersCount = await ctx.call('tenantUsers.count', {
       query: {
@@ -370,6 +370,13 @@ export default class TenantUsersService extends moleculer.Service {
     if (tenantUsersCount) {
       throw new moleculer.Errors.MoleculerClientError('Already exists', 422, 'ALREADY_EXISTS');
     }
+
+    // `noAuthSync` is set by callers that already know the user is in the
+    // target auth group (e.g. afterUserLoggedIn — the user just came back from
+    // auth as a member of this group). Skipping the `auth.users.assignToGroup`
+    // call avoids an avoidable 401: that endpoint requires a Bearer token,
+    // and the original E-vartai login ctx is anonymous.
+    if (noAuthSync) return;
 
     const userEntity: User = await ctx.call('users.get', { id: user });
     const tenantEntity: Tenant = await ctx.call('tenants.get', { id: tenant });
