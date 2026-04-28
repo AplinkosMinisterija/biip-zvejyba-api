@@ -487,16 +487,13 @@ export default class ToolsGroupsService extends moleculer.Service {
     return notRemovedToolsGroups.filter((toolGroup) => {
       const loc: any = toolGroup?.buildEvent?.location;
       // Polder ids overlap with estuary bar ids (both small ints), so id alone
-      // is not enough to identify the bucket — we also compare the stored
-      // location.type against the caller's locationType.
+      // is not enough to identify the bucket. The `buildEvent.fishing.type`
+      // reliably reflects which kind of fishing the tool was built in (always
+      // populated, no migration needed) — use that as the source of truth.
       if (String(loc?.id) !== String(id)) return false;
       if (!locationType) return true;
-      if (locationType === LocationType.POLDERS) {
-        return loc?.type === LocationType.POLDERS;
-      }
-      // ESTUARY / INLAND_WATERS may have legacy records without `type` —
-      // accept those alongside the explicit type match.
-      return !loc?.type || loc.type === locationType;
+      const fishingType: any = (toolGroup?.buildEvent as any)?.fishing?.type;
+      return fishingType === locationType;
     });
   }
 
