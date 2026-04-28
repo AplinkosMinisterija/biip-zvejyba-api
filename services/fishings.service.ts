@@ -22,6 +22,7 @@ import { UserAuthMeta } from './api.service';
 import { FishingEvent, FishingEventType } from './fishingEvents.service';
 import { FishType } from './fishTypes.service';
 import { Coordinates, CoordinatesProp, Location } from './location.service';
+import { Polder } from './polders.service';
 import { Tenant } from './tenants.service';
 import { User } from './users.service';
 import { GetFishByFishingResponse, WeightEvent } from './weightEvents.service';
@@ -59,6 +60,7 @@ interface Fields extends CommonFields {
   skipEvent: FishingEvent['id'];
   geom: any;
   uetkCadastralId?: string;
+  polderId?: Polder['id'];
   type: FishingType;
   tenant: Tenant['id'];
   user: User['id'];
@@ -157,6 +159,11 @@ export type Fishing<
         },
       },
       uetkCadastralId: 'string',
+      polderId: {
+        type: 'number',
+        columnType: 'integer',
+        columnName: 'polderId',
+      },
       user: {
         type: 'number',
         columnType: 'integer',
@@ -188,11 +195,36 @@ export type Fishing<
           const cadastralIds = fishings
             .filter((fishing) => !!fishing.uetkCadastralId)
             .map((fishing: any) => fishing.uetkCadastralId);
-          const locations = await ctx.call('locations.uetkSearchByCadastralId', {
-            cadastralId: cadastralIds,
-          });
+          const locations = cadastralIds.length
+            ? await ctx.call('locations.uetkSearchByCadastralId', {
+                cadastralId: cadastralIds,
+              })
+            : [];
+
+          const polderIds = Array.from(
+            new Set(
+              fishings.filter((fishing) => !!fishing.polderId).map((fishing: any) => fishing.polderId),
+            ),
+          );
+          const polders: Polder[] = polderIds.length
+            ? await ctx.call('polders.find', { query: { id: { $in: polderIds } } })
+            : [];
+          const polderById = polders.reduce<Record<number, Polder>>((acc, p) => {
+            acc[p.id] = p;
+            return acc;
+          }, {});
 
           return fishings.map((fishing: any) => {
+            if (fishing.polderId) {
+              const polder = polderById[fishing.polderId];
+              if (!polder) return undefined;
+              return {
+                id: polder.id,
+                name: polder.name,
+                type: 'POLDERS',
+                area: polder.area,
+              };
+            }
             return locations.find((location: any) => location.id === fishing.uetkCadastralId);
           });
         },
@@ -261,11 +293,18 @@ export default class FishTypesService extends moleculer.Service {
     params: {
       type: 'string',
       coordinates: CoordinatesProp,
+      uetkCadastralId: 'string|optional',
+      polderId: 'number|integer|positive|optional|convert',
     },
   })
   async startFishing(
     ctx: Context<
-      { type: FishingType; coordinates: { x: number; y: number }; uetkCadastralId: string },
+      {
+        type: FishingType;
+        coordinates: { x: number; y: number };
+        uetkCadastralId?: string;
+        polderId?: number;
+      },
       UserAuthMeta
     >,
   ) {
@@ -280,6 +319,16 @@ export default class FishTypesService extends moleculer.Service {
     if (toolsCount < 1) {
       throw new moleculer.Errors.ValidationError('No tools in storage');
     }
+
+    // If polderId is supplied, verify the polder exists; we do not force
+    // POLDERS fishings to carry a polderId so older clients keep working.
+    if (ctx.params.polderId) {
+      const polder: Polder = await ctx.call('polders.get', { id: ctx.params.polderId });
+      if (!polder) {
+        throw new moleculer.Errors.ValidationError('Polder not found');
+      }
+    }
+
     const geom = coordinatesToGeometry(ctx.params.coordinates);
     const startEvent: FishingEvent = await ctx.call('fishingEvents.create', {
       geom,
@@ -300,6 +349,7 @@ export default class FishTypesService extends moleculer.Service {
       type: 'string',
       coordinates: CoordinatesProp,
       note: 'string',
+      polderId: 'number|integer|positive|optional|convert',
     },
   })
   async skipFishing(ctx: Context<any>) {

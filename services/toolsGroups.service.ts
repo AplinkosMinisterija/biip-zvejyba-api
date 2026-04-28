@@ -11,6 +11,7 @@ import {
   COMMON_SCOPES,
   CommonFields,
   CommonPopulates,
+  LocationType,
   RestrictionType,
   Table,
 } from '../types';
@@ -456,12 +457,14 @@ export default class ToolsGroupsService extends moleculer.Service {
     auth: RestrictionType.USER,
     params: {
       id: 'string',
+      locationType: { type: 'string', optional: true, enum: Object.values(LocationType) },
     },
   })
   async toolsGroupsByLocation(
     ctx: Context<
       {
         id: string;
+        locationType?: LocationType;
       },
       UserAuthMeta
     >,
@@ -479,9 +482,19 @@ export default class ToolsGroupsService extends moleculer.Service {
       populate: ['tools', 'buildEvent', 'weightEvent'],
     });
 
-    return notRemovedToolsGroups.filter(
-      (toolGroup) => toolGroup?.buildEvent?.location.id === ctx.params.id,
-    );
+    const { id, locationType } = ctx.params;
+
+    return notRemovedToolsGroups.filter((toolGroup) => {
+      const loc: any = toolGroup?.buildEvent?.location;
+      // Polder ids overlap with estuary bar ids (both small ints), so id alone
+      // is not enough to identify the bucket. The `buildEvent.fishing.type`
+      // reliably reflects which kind of fishing the tool was built in (always
+      // populated, no migration needed) — use that as the source of truth.
+      if (String(loc?.id) !== String(id)) return false;
+      if (!locationType) return true;
+      const fishingType: any = (toolGroup?.buildEvent as any)?.fishing?.type;
+      return fishingType === locationType;
+    });
   }
 
   @Action({

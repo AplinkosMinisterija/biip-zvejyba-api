@@ -26,6 +26,11 @@ export const LocationProp = {
   properties: {
     id: 'string',
     name: 'string',
+    // `type` is what lets `toolsGroupsByLocation` differentiate between a
+    // polder and an estuary bar that happen to share an id; without listing
+    // it here moleculer's validator (`strict: 'remove'`) silently drops it
+    // before the location lands in the JSONB column.
+    type: { type: 'string', optional: true },
     municipality: {
       type: 'object',
       properties: {
@@ -212,6 +217,7 @@ export default class LocationsService extends moleculer.Service {
           y: coordinates[1],
           id: item?.properties?.id,
           name: item?.properties?.name,
+          type: LocationType.ESTUARY,
           municipality,
         };
       }),
