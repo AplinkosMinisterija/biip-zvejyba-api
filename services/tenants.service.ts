@@ -108,7 +108,7 @@ export default class TenantsService extends moleculer.Service {
   @Action({
     rest: 'POST /invite',
     params: {
-      companyCode: 'string',
+      // companyCode: 'string',
       companyName: 'string',
       companyPhone: 'string',
       companyEmail: 'string',
