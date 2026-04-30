@@ -330,8 +330,7 @@ export default class TenantsService extends moleculer.Service {
       ? ctx.params.tenants
       : TENANTS_TO_IMPORT;
 
-    const authToken =
-      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MSwiZmlyc3ROYW1lIjoiU3VwZXIiLCJsYXN0TmFtZSI6IkFkbWluIiwiZW1haWwiOiJzdXBlcmFkbWluQGFtLmx0IiwicGhvbmUiOiIrMzcwNjAwMDAwMDAiLCJ0eXBlIjoiU1VQRVJfQURNSU4iLCJmdWxsTmFtZSI6IlN1cGVyIEFkbWluIiwiYXBwcyI6bnVsbCwibGFzdExvZ2dlZEluQXQiOiIyMDI2LTA0LTI0VDA3OjM3OjQzLjc2OFoiLCJjcmVhdGVkQnkiOm51bGwsImNyZWF0ZWRBdCI6IjIwMjItMDYtMjBUMDU6MjY6MzIuNDI5WiIsInVwZGF0ZWRCeSI6MSwidXBkYXRlZEF0IjoiMjAyNi0wNC0yNFQwNzozNzo0My43NjlaIiwiaW52aXRlZCI6ZmFsc2UsInN0cmF0ZWd5IjoiTE9DQUwiLCJzdHJhdGVneUlkIjoxLCJpYXQiOjE3NzcyNzg3NTAsImV4cCI6MTc3NzM2NTE1MH0.LB0uE_k0aGvByeC0rCVgkBXlIFU-QDtd3kDUjNoNvtk';
+    const authToken = '';
 
     if (!ctx.params.dryRun && !authToken) {
       throw new moleculer.Errors.MoleculerClientError(
