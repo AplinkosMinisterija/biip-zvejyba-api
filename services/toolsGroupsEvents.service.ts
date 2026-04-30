@@ -76,6 +76,7 @@ export type ToolsGroupsEvent<
         properties: {
           id: 'string',
           name: 'string',
+          type: { type: 'string', optional: true },
           municipality: {
             type: 'object',
             properties: {
