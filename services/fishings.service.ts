@@ -18,7 +18,7 @@ import {
 
 import ProfileMixin from '../mixins/profile.mixin';
 import { coordinatesToGeometry, geomToWgs } from '../modules/geometry';
-import { UserAuthMeta } from './api.service';
+import { AuthUserRole, UserAuthMeta } from './api.service';
 import { FishingEvent, FishingEventType } from './fishingEvents.service';
 import { FishType } from './fishTypes.service';
 import { Coordinates, CoordinatesProp, Location } from './location.service';
@@ -26,6 +26,8 @@ import { Polder } from './polders.service';
 import { Tenant } from './tenants.service';
 import { User } from './users.service';
 import { GetFishByFishingResponse, WeightEvent } from './weightEvents.service';
+
+const Cron = require('@r2d2bzh/moleculer-cron');
 
 export enum FishingType {
   ESTUARY = 'ESTUARY',
@@ -88,6 +90,7 @@ export type Fishing<
       srid: 3346,
     }),
     ProfileMixin,
+    Cron,
   ],
   crons: [
     {
@@ -271,15 +274,31 @@ export default class FishTypesService extends moleculer.Service {
     const result = [];
 
     for (const fishing of fishings) {
-      const endEvent: FishingEvent = await ctx.call('fishingEvents.create', {
-        geom: fishing.geom,
-        type: FishingEventType.END,
-      });
+      // Cron tick'as ateina be auth meta — perduodam fishing'o user/tenant,
+      // kad ProfileMixin.beforeCreate korektiškai užstamp'intų END event'ą.
+      const meta = {
+        user: { id: fishing.user } as User,
+        profile: fishing.tenant,
+        authUser: { type: AuthUserRole.USER },
+      };
 
-      const updatedFishing = await ctx.call('fishings.update', {
-        id: fishing.id,
-        endEvent: endEvent.id,
-      });
+      const endEvent: FishingEvent = await ctx.call(
+        'fishingEvents.create',
+        {
+          geom: fishing.geom,
+          type: FishingEventType.END,
+        },
+        { meta },
+      );
+
+      const updatedFishing = await ctx.call(
+        'fishings.update',
+        {
+          id: fishing.id,
+          endEvent: endEvent.id,
+        },
+        { meta },
+      );
 
       result.push(updatedFishing);
     }
