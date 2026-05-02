@@ -30,13 +30,19 @@ export default {
       return ctx;
     },
     beforeCreate(ctx: Context<any, UserAuthMeta>) {
+      // Vidiniai service-to-service call'ai (pvz., cron tick'as) gali kviesti
+      // be auth meta — tokiu atveju paliekam params nepakeistus, kad caller
+      // pats nuspręstų tenant/user reikšmes (žr. fishings.endFishings).
+      if (!ctx.meta?.authUser) {
+        return ctx;
+      }
       if (
         ![AuthUserRole.ADMIN, AuthUserRole.SUPER_ADMIN].some(
           (role) => role === ctx.meta.authUser.type,
         )
       ) {
         const profile = ctx.meta.profile;
-        const userId = ctx.meta.user.id;
+        const userId = ctx.meta.user?.id;
         ctx.params.tenant = profile || null;
         ctx.params.user = userId;
       }
