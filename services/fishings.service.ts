@@ -18,7 +18,7 @@ import {
 
 import ProfileMixin from '../mixins/profile.mixin';
 import { coordinatesToGeometry, geomToWgs } from '../modules/geometry';
-import { AuthUserRole, UserAuthMeta } from './api.service';
+import { UserAuthMeta } from './api.service';
 import { FishingEvent, FishingEventType } from './fishingEvents.service';
 import { FishType } from './fishTypes.service';
 import { Coordinates, CoordinatesProp, Location } from './location.service';
@@ -274,31 +274,22 @@ export default class FishTypesService extends moleculer.Service {
     const result = [];
 
     for (const fishing of fishings) {
-      // Cron tick'as ateina be auth meta — perduodam fishing'o user/tenant,
-      // kad ProfileMixin.beforeCreate korektiškai užstamp'intų END event'ą.
-      const meta = {
-        user: { id: fishing.user } as User,
-        profile: fishing.tenant,
-        authUser: { type: AuthUserRole.USER },
-      };
+      // Sistema (cron) — ne pats vartotojas — uždaro žvejybą. user_id
+      // ir created_by lieka NULL: audit trail neigia neegzistuojantį
+      // „vartotojas baigė 23:59:59" veiksmą; populate'as parodys
+      // Sistema actor'ą. tenant'as išlaikomas, kad event'as liktų to
+      // paties tenant'o scope'e.
+      const endEvent: FishingEvent = await ctx.call('fishingEvents.create', {
+        geom: fishing.geom,
+        type: FishingEventType.END,
+        tenant: fishing.tenant ?? null,
+        user: null,
+      });
 
-      const endEvent: FishingEvent = await ctx.call(
-        'fishingEvents.create',
-        {
-          geom: fishing.geom,
-          type: FishingEventType.END,
-        },
-        { meta },
-      );
-
-      const updatedFishing = await ctx.call(
-        'fishings.update',
-        {
-          id: fishing.id,
-          endEvent: endEvent.id,
-        },
-        { meta },
-      );
+      const updatedFishing = await ctx.call('fishings.update', {
+        id: fishing.id,
+        endEvent: endEvent.id,
+      });
 
       result.push(updatedFishing);
     }
