@@ -1,6 +1,6 @@
 'use strict';
 
-import moleculer from 'moleculer';
+import moleculer, { Context } from 'moleculer';
 import { Service } from 'moleculer-decorators';
 import PostgisMixin from 'moleculer-postgis';
 import DbConnection from '../mixins/database.mixin';
@@ -82,11 +82,21 @@ export type FishingEvent<
         type: 'number',
         columnType: 'integer',
         columnName: 'userId',
-        populate: {
-          action: 'users.resolve',
-          params: {
-            scope: false,
-          },
+        // NULL user_id reiškia, kad event'ą sukūrė sistema (pvz., midnight
+        // cron'as uždarinėjantis nepataikytas žvejybas) — populate grąžina
+        // sintetinį Sistema actor'ą, kad UI galėtų atskirti nuo realaus
+        // vartotojo be magic id reikšmės.
+        async populate(ctx: Context, values: Array<number | null>) {
+          const realIds = Array.from(new Set(values.filter((v): v is number => v != null)));
+          const users: User[] = realIds.length
+            ? await ctx.call('users.resolve', { id: realIds, scope: false })
+            : [];
+          const byId = new Map(users.map((u) => [u.id, u]));
+          return values.map((v) =>
+            v == null
+              ? { id: null, firstName: 'Sistema', lastName: '', isSystem: true }
+              : byId.get(v),
+          );
         },
       },
       ...COMMON_FIELDS,
