@@ -510,63 +510,34 @@ export default class ToolsGroupsService extends moleculer.Service {
       throw new moleculer.Errors.ValidationError('Fishing not started');
     }
 
+    const notRemovedToolsGroups: ToolsGroup<'buildEvent'>[] = await ctx.call('toolsGroups.find', {
+      query: { removeEvent: { $exists: false } },
+      populate: ['buildEvent'],
+    });
+
     const weightEvents: WeightEvent<'toolsGroup'>[] = await ctx.call('weightEvents.find', {
       query: { fishing: currentFishing.id },
     });
 
-    const weightToolLocationStats = weightEvents.reduce<
-      Record<
-        string,
-        {
-          name: string;
-          count: number;
-        }
-      >
-    >((acc, curr) => {
-      const location = curr?.toolsGroup?.buildEvent?.location;
+    const checkedToolsGroupIds = new Set(
+      weightEvents
+        .map((w) => w.toolsGroup?.id)
+        .filter((id): id is number => id != null),
+    );
 
-      if (!location?.id) return acc;
-
-      const { id, name } = location;
-
-      if (!acc[id]) {
-        acc[id] = {
-          name: name ?? '',
-          count: 1,
-        };
-      } else {
-        acc[id].count += 1;
+    const uncheckedLocations = new Map<string, string>();
+    for (const group of notRemovedToolsGroups) {
+      if (group.buildEvent?.fishing?.id === currentFishing.id) continue;
+      if (checkedToolsGroupIds.has(group.id)) continue;
+      const location = group.buildEvent?.location;
+      if (!location?.id) continue;
+      const key = String(location.id);
+      if (!uncheckedLocations.has(key)) {
+        uncheckedLocations.set(key, location.name ?? '');
       }
+    }
 
-      return acc;
-    }, {});
-    const notRemovedToolsGroups: ToolsGroup<'buildEvent'>[] = await ctx.call('toolsGroups.find', {
-      query: {
-        removeEvent: { $exists: false },
-      },
-      populate: ['buildEvent'],
-    });
-
-    const notRemovedToolsLocationCounts = notRemovedToolsGroups
-      .filter((toolGroup) => toolGroup?.buildEvent?.fishing?.id !== currentFishing.id)
-      .reduce<Record<string, number>>((acc, curr) => {
-        const locationId = curr.buildEvent?.location?.id;
-
-        if (!locationId) return acc;
-
-        return {
-          ...acc,
-          [locationId]: (acc[locationId] ?? 0) + 1,
-        };
-      }, {});
-    const locations = Object.entries(weightToolLocationStats)
-      .filter(([id, stats]) => stats.count < (notRemovedToolsLocationCounts[id] ?? 0))
-      .map(([id, stats]) => ({
-        id,
-        name: stats.name,
-      }));
-
-    return locations;
+    return Array.from(uncheckedLocations, ([id, name]) => ({ id, name }));
   }
 
   @Action({
