@@ -527,7 +527,9 @@ export default class ToolsGroupsService extends moleculer.Service {
 
     const uncheckedLocations = new Map<string, string>();
     for (const group of notRemovedToolsGroups) {
-      if (group.buildEvent?.fishing?.id === currentFishing.id) continue;
+      const buildFishing = group.buildEvent?.fishing;
+      if (buildFishing?.type !== currentFishing.type) continue;
+      if (buildFishing?.id === currentFishing.id) continue;
       if (checkedToolsGroupIds.has(group.id)) continue;
       const location = group.buildEvent?.location;
       if (!location?.id) continue;
