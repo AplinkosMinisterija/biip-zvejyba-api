@@ -525,21 +525,33 @@ export default class ToolsGroupsService extends moleculer.Service {
         .filter((id): id is number => id != null),
     );
 
-    const uncheckedLocations = new Map<string, string>();
+    const locationStats = new Map<
+      string,
+      { name: string; checked: number; unchecked: number }
+    >();
     for (const group of notRemovedToolsGroups) {
       const buildFishing = group.buildEvent?.fishing;
       if (buildFishing?.type !== currentFishing.type) continue;
       if (buildFishing?.id === currentFishing.id) continue;
-      if (checkedToolsGroupIds.has(group.id)) continue;
       const location = group.buildEvent?.location;
       if (!location?.id) continue;
       const key = String(location.id);
-      if (!uncheckedLocations.has(key)) {
-        uncheckedLocations.set(key, location.name ?? '');
+      const entry = locationStats.get(key) ?? {
+        name: location.name ?? '',
+        checked: 0,
+        unchecked: 0,
+      };
+      if (checkedToolsGroupIds.has(group.id)) {
+        entry.checked += 1;
+      } else {
+        entry.unchecked += 1;
       }
+      locationStats.set(key, entry);
     }
 
-    return Array.from(uncheckedLocations, ([id, name]) => ({ id, name }));
+    return Array.from(locationStats.entries())
+      .filter(([, stats]) => stats.checked > 0 && stats.unchecked > 0)
+      .map(([id, stats]) => ({ id, name: stats.name }));
   }
 
   @Action({
