@@ -206,7 +206,9 @@ export type Fishing<
 
           const polderIds = Array.from(
             new Set(
-              fishings.filter((fishing) => !!fishing.polderId).map((fishing: any) => fishing.polderId),
+              fishings
+                .filter((fishing) => !!fishing.polderId)
+                .map((fishing: any) => fishing.polderId),
             ),
           );
           const polders: Polder[] = polderIds.length
@@ -418,10 +420,6 @@ export default class FishTypesService extends moleculer.Service {
     auth: RestrictionType.USER,
   })
   async currentFishing(ctx: Context<any, UserAuthMeta>) {
-    // Aktyvi žvejyba yra individuali — to paties tenant'o nariai NEsidalina
-    // viena sesija. ProfileMixin.beforeSelect prideda tik tenant filtrą,
-    // todėl čia papildomai apribojame pagal user'į iš meta. List/find tyčia
-    // paliekama tenant platumo — bendradarbiai mato vieni kitų istoriją.
     const userQuery = ctx.meta?.user?.id ? { user: ctx.meta.user.id } : {};
     return await ctx.call('fishings.findOne', {
       query: {
