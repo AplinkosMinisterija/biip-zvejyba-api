@@ -2,7 +2,7 @@
 
 import ExcelJS from 'exceljs';
 import moleculer, { Context } from 'moleculer';
-import { Action, Service } from 'moleculer-decorators';
+import { Action, Method, Service } from 'moleculer-decorators';
 import PostgisMixin from 'moleculer-postgis';
 import DbConnection from '../mixins/database.mixin';
 import {
@@ -18,7 +18,7 @@ import {
 
 import ProfileMixin from '../mixins/profile.mixin';
 import { coordinatesToGeometry, geomToWgs } from '../modules/geometry';
-import { UserAuthMeta } from './api.service';
+import { AuthUserRole, UserAuthMeta } from './api.service';
 import { FishingEvent, FishingEventType } from './fishingEvents.service';
 import { FishType } from './fishTypes.service';
 import { Coordinates, CoordinatesProp, Location } from './location.service';
@@ -749,5 +749,36 @@ export default class FishTypesService extends moleculer.Service {
       user: fishing.user,
       history: events.sort((a, b) => a.date.getTime() - b.date.getTime()),
     };
+  }
+
+  // Fishings yra individualios — to paties tenant'o nariai NEsidalina aktyvia
+  // žvejyba. ProfileMixin numatytai filtruoja tik pagal tenant'ą, todėl be
+  // šio override'o `currentFishing` būtų grąžinusi bet kurio tenant'o nario
+  // atvirą sesiją (ir `endFishing` būtų uždaręs svetimą).
+  @Method
+  async beforeSelect(ctx: Context<any, UserAuthMeta>) {
+    if (ctx.meta) {
+      const isAdmin = [AuthUserRole.SUPER_ADMIN, AuthUserRole.ADMIN].some(
+        (r) => r === ctx.meta?.authUser?.type,
+      );
+      if (!isAdmin) {
+        const q = ctx.params.query;
+        if (ctx.meta.profile && ctx.meta?.user) {
+          ctx.params.query = {
+            tenant: ctx.meta.profile,
+            user: ctx.meta.user.id,
+            ...q,
+          };
+        } else if (!ctx.meta.profile && ctx.meta.user) {
+          ctx.params.query = {
+            user: ctx.meta.user.id,
+            tenant: { $exists: false },
+            ...q,
+          };
+        }
+      }
+    }
+    ctx.params.sort = ctx.params.sort || '-createdAt';
+    return ctx;
   }
 }
