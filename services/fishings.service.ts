@@ -206,7 +206,9 @@ export type Fishing<
 
           const polderIds = Array.from(
             new Set(
-              fishings.filter((fishing) => !!fishing.polderId).map((fishing: any) => fishing.polderId),
+              fishings
+                .filter((fishing) => !!fishing.polderId)
+                .map((fishing: any) => fishing.polderId),
             ),
           );
           const polders: Polder[] = polderIds.length
@@ -418,10 +420,11 @@ export default class FishTypesService extends moleculer.Service {
     auth: RestrictionType.USER,
   })
   async currentFishing(ctx: Context<any, UserAuthMeta>) {
-    //Users in the same tenant do not share fishing. Each person should start and finish his/her own fishing.
+    const userQuery = ctx.meta?.user?.id ? { user: ctx.meta.user.id } : {};
     return await ctx.call('fishings.findOne', {
       query: {
         ...ctx.params.query,
+        ...userQuery,
         startEvent: { $exists: true },
         endEvent: { $exists: false },
       },
