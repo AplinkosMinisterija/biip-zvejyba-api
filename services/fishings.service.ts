@@ -2,7 +2,7 @@
 
 import ExcelJS from 'exceljs';
 import moleculer, { Context } from 'moleculer';
-import { Action, Method, Service } from 'moleculer-decorators';
+import { Action, Service } from 'moleculer-decorators';
 import PostgisMixin from 'moleculer-postgis';
 import DbConnection from '../mixins/database.mixin';
 import {
@@ -18,7 +18,7 @@ import {
 
 import ProfileMixin from '../mixins/profile.mixin';
 import { coordinatesToGeometry, geomToWgs } from '../modules/geometry';
-import { AuthUserRole, UserAuthMeta } from './api.service';
+import { UserAuthMeta } from './api.service';
 import { FishingEvent, FishingEventType } from './fishingEvents.service';
 import { FishType } from './fishTypes.service';
 import { Coordinates, CoordinatesProp, Location } from './location.service';
@@ -418,10 +418,15 @@ export default class FishTypesService extends moleculer.Service {
     auth: RestrictionType.USER,
   })
   async currentFishing(ctx: Context<any, UserAuthMeta>) {
-    //Users in the same tenant do not share fishing. Each person should start and finish his/her own fishing.
+    // Aktyvi žvejyba yra individuali — to paties tenant'o nariai NEsidalina
+    // viena sesija. ProfileMixin.beforeSelect prideda tik tenant filtrą,
+    // todėl čia papildomai apribojame pagal user'į iš meta. List/find tyčia
+    // paliekama tenant platumo — bendradarbiai mato vieni kitų istoriją.
+    const userQuery = ctx.meta?.user?.id ? { user: ctx.meta.user.id } : {};
     return await ctx.call('fishings.findOne', {
       query: {
         ...ctx.params.query,
+        ...userQuery,
         startEvent: { $exists: true },
         endEvent: { $exists: false },
       },
@@ -749,36 +754,5 @@ export default class FishTypesService extends moleculer.Service {
       user: fishing.user,
       history: events.sort((a, b) => a.date.getTime() - b.date.getTime()),
     };
-  }
-
-  // Fishings yra individualios — to paties tenant'o nariai NEsidalina aktyvia
-  // žvejyba. ProfileMixin numatytai filtruoja tik pagal tenant'ą, todėl be
-  // šio override'o `currentFishing` būtų grąžinusi bet kurio tenant'o nario
-  // atvirą sesiją (ir `endFishing` būtų uždaręs svetimą).
-  @Method
-  async beforeSelect(ctx: Context<any, UserAuthMeta>) {
-    if (ctx.meta) {
-      const isAdmin = [AuthUserRole.SUPER_ADMIN, AuthUserRole.ADMIN].some(
-        (r) => r === ctx.meta?.authUser?.type,
-      );
-      if (!isAdmin) {
-        const q = ctx.params.query;
-        if (ctx.meta.profile && ctx.meta?.user) {
-          ctx.params.query = {
-            tenant: ctx.meta.profile,
-            user: ctx.meta.user.id,
-            ...q,
-          };
-        } else if (!ctx.meta.profile && ctx.meta.user) {
-          ctx.params.query = {
-            user: ctx.meta.user.id,
-            tenant: { $exists: false },
-            ...q,
-          };
-        }
-      }
-    }
-    ctx.params.sort = ctx.params.sort || '-createdAt';
-    return ctx;
   }
 }
