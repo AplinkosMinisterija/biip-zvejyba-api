@@ -164,13 +164,16 @@ export default class AuthService extends moleculer.Service {
         continue;
       }
 
-      await ctx.call('tenants.update', {
-        id: tenant.id,
-        name: authGroup.name,
-        code: authGroup.companyCode,
-        email: authGroup.companyEmail,
-        phone: authGroup.companyPhone,
-      });
+      // Only forward fields that E-vartai actually returned. Fizinis-asmuo
+      // logins on behalf of a company sometimes ship an empty `companyName`,
+      // which would otherwise wipe the locally imported tenant name.
+      const tenantUpdate: Record<string, any> = { id: tenant.id };
+      if (authGroup.name) tenantUpdate.name = authGroup.name;
+      if (authGroup.companyCode) tenantUpdate.code = authGroup.companyCode;
+      if (authGroup.companyEmail) tenantUpdate.email = authGroup.companyEmail;
+      if (authGroup.companyPhone) tenantUpdate.phone = authGroup.companyPhone;
+
+      await ctx.call('tenants.update', tenantUpdate);
 
       const tenantUser: TenantUser = await ctx.call('tenantUsers.findOne', {
         query: {
