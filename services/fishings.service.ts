@@ -555,19 +555,10 @@ export default class FishTypesService extends moleculer.Service {
       throw new moleculer.Errors.ValidationError('Weight difference greater than 20%');
     }
 
-    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
-    let locationManual = !!ctx.params.locationManual;
-    if (currentFishing?.type === FishingType.ESTUARY && ctx.params.location?.id) {
-      locationManual = await ctx.call('locations.isEstuaryLocationManual', {
-        locationId: String(ctx.params.location.id),
-        coordinates: ctx.params.coordinates,
-      });
-    }
-
     await ctx.call('weightEvents.createWeightEvent', {
       coordinates: ctx.params.coordinates,
       location: ctx.params.location,
-      locationManual,
+      locationManual: !!ctx.params.locationManual,
       data,
     });
 
