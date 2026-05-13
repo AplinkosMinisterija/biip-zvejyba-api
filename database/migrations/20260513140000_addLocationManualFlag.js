@@ -1,13 +1,14 @@
 /**
- * Žvejys gali pasirinkti įvykio lokaciją (Kuršių marių barą / polderio
- * vietą / vidaus vandens telkinį) GPS automatiškai arba rankiniu būdu,
- * jei nustatymas nepataikė. Šis flag'as `location_manual` skiriasi tarp
- * tų dviejų atvejų, kad admin pusėje galėtume parodyti šauktuko ikoną
- * (kol kas reikalavimas tik Kuršių marioms, bet kolumną pridedam viskam
- * kas turi `location` field'ą, kad nereikėtų vėliau papildyti).
+ * A fisher picks the event location (Kuršių marios bar / polder patch /
+ * inland water body) either via automatic GPS detection or via the
+ * manual picker when GPS missed. `location_manual` distinguishes those
+ * two paths so the admin UI can flag manual picks with a warning icon
+ * (current requirement is Kuršių marios only, but adding the column on
+ * every event type that carries `location` so we don't have to migrate
+ * again later).
  *
- * Default false — esamos eilutės laikomos automatiškai nustatytomis,
- * nes kitokios info istoriškai nėra.
+ * Default false — historical rows are treated as auto-detected because
+ * we have no other signal for them.
  *
  * @param { import("knex").Knex } knex
  * @returns { Promise<void> }

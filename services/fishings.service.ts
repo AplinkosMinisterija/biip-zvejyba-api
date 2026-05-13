@@ -197,9 +197,9 @@ export type Fishing<
         readonly: true,
         virtual: true,
         async populate(ctx: any, _values: any, fishings: Fishing[]) {
-          // True jei bent vienas šios žvejybos event'as (toolsGroup arba
-          // weight) turėjo location_manual=true. Admin pusėje pagal tai
-          // rodom šauktuko ikoną žurnalo eilutėje (Kuršių marių žvejyboms).
+          // True if at least one event of this fishing (toolsGroup or
+          // weight) had location_manual=true. Admin uses this to render
+          // the warning icon on the journal row (Kuršių marios fishings).
           if (!fishings.length) return [];
           const fishingIds = fishings.map((f) => f.id);
           const [tgRows, weRows]: [Array<{ fishingId: number }>, Array<{ fishingId: number }>] =
@@ -215,8 +215,8 @@ export type Fishing<
             ]);
           const flagged = new Set<number>();
           for (const r of [...tgRows, ...weRows]) {
-            // moleculer'is grąžina su nepulinčiu raw field name — pasiimam
-            // bet kurį `fishing`-vardo lauką, kuris yra apsupęs id'us.
+            // moleculer can return the raw column name unmapped; accept
+            // either the camelCase `fishing` or the snake_case fallback.
             const id = (r as any).fishing ?? (r as any).fishingId;
             if (id != null) flagged.add(Number(id));
           }
@@ -535,6 +535,26 @@ export default class FishTypesService extends moleculer.Service {
     >,
   ) {
     const { data, preliminaryData } = ctx.params;
+
+    // Every fish the fisher registered on the boat (preliminary) must
+    // also appear in the onshore payload — the value can be 0 kg (if all
+    // were released back to the water), but the key has to be present.
+    // Prevents accidentally dropping e.g. undersized fish from the final
+    // catch report.
+    const missingKeys: FishType['id'][] = [];
+    for (const key in preliminaryData) {
+      const finalValue = data[key];
+      if (finalValue === undefined || finalValue === null) {
+        missingKeys.push(key as any);
+      }
+    }
+    if (missingKeys.length > 0) {
+      throw new moleculer.Errors.ValidationError(
+        'Missing onshore weight for fish caught on boat',
+        'MISSING_ONSHORE_WEIGHT',
+        { missingFishTypeIds: missingKeys },
+      );
+    }
 
     const invalidKeys: FishType['id'][] = [];
 
