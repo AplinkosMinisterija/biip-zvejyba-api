@@ -163,6 +163,35 @@ collide** (polder id 1 vs bar 1). `toolsGroupsByLocation` filters by
 by stored `location.type` (legacy rows have it null). Don't change this
 without re-thinking the legacy fallback.
 
+### Virtual-field populate gotchas
+
+When a service uses `secure: true` on its primary key (every service in
+this repo does for `id`), references to those rows are encoded on the
+way out — including in nested `ctx.call('…events.find', {…})` results
+*if* you ask for them via `fields: [...]`. Two things follow:
+
+1. **Don't combine `fields: ['<reference>']` with `secure` parents in a
+   populate aggregator.** The returned field becomes the encoded string,
+   not the raw integer FK, so `Number(r.fishing)` is `NaN` and any
+   `Set<number>` lookup silently misses every row.
+2. **Prefer a raw SQL query (`this.adapter.knex` or `this.rawQuery`) for
+   "does any related row match?" aggregations** — Mongo-DSL through
+   moleculer-db, secure ID coding, ProfileMixin scopes, and JSONB
+   selectors layer on top of each other in ways that are essentially
+   unreviewable.
+3. **Always assert the deployed endpoint's response after wiring a
+   virtual field.** `tsc --noEmit` and `yarn build` only verify the
+   types — they don't catch ID encoding mismatches, missing populate
+   path entries, or scope filters that wipe the result. Hit the route
+   with `curl | jq` (or DevTools Network) and look at the field
+   *before* claiming the populate works.
+
+Real incident (PR #117 follow-up): `Fishing.hasManualLocation` was
+implemented with `fields: ['fishing']` in the aggregator → every fishing
+came back `false` even though the same events had `locationManual=true`
+in `getHistory`. The detail page rendered the warning correctly but the
+journal list never did. Switched to raw SQL.
+
 ## Patterns when adding code
 
 - New entity: copy a small service (e.g. `polders.service.ts`), wire its
@@ -199,6 +228,12 @@ appear without the `call` prefix (e.g. `mol $ tenants-import --dry`).
 
 ## Recent fix log (worth knowing)
 
+- **PR #117** — `location_manual` boolean on `tools_groups_events` /
+  `weight_events` plus virtual `Fishing.hasManualLocation`. First cut
+  used `ctx.call('…events.find', { fields: ['fishing'] })` for the
+  aggregation and silently miscounted because of the `secure: true` ID
+  encoding (see "Virtual-field populate gotchas"). Final version uses a
+  raw SQL `UNION` against both event tables.
 - **PR #105** — E-vartai juridical login: propagate `{ meta: authToken }`
   to `tenantUsers.create` so director auto-creation actually works.
 - **PR #106** — polders feature: new `polders` table + service, fishings

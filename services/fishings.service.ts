@@ -200,27 +200,20 @@ export type Fishing<
           // True if at least one event of this fishing (toolsGroup or
           // weight) had location_manual=true. Admin uses this to render
           // the warning icon on the journal row (Kuršių marios fishings).
+          //
+          // Delegate to a dedicated action so we can debug via REPL
+          // (`mol $ call fishings.getManualLocationFlags --fishingIds 321`)
+          // — the previous moleculer-db `find` + `fields: ['fishing']`
+          // approach silently dropped the FK because of `secure: true` ID
+          // encoding (see CLAUDE.md → "Virtual-field populate gotchas").
           if (!fishings.length) return [];
-          const fishingIds = fishings.map((f) => f.id);
-          const [tgRows, weRows]: [Array<{ fishingId: number }>, Array<{ fishingId: number }>] =
-            await Promise.all([
-              ctx.call('toolsGroupsEvents.find', {
-                query: { fishing: { $in: fishingIds }, locationManual: true },
-                fields: ['fishing'],
-              }),
-              ctx.call('weightEvents.find', {
-                query: { fishing: { $in: fishingIds }, locationManual: true },
-                fields: ['fishing'],
-              }),
-            ]);
-          const flagged = new Set<number>();
-          for (const r of [...tgRows, ...weRows]) {
-            // moleculer can return the raw column name unmapped; accept
-            // either the camelCase `fishing` or the snake_case fallback.
-            const id = (r as any).fishing ?? (r as any).fishingId;
-            if (id != null) flagged.add(Number(id));
-          }
-          return fishings.map((f) => flagged.has(Number(f.id)));
+          const ids = fishings.map((f) => Number(f.id)).filter(Number.isFinite);
+          if (!ids.length) return fishings.map(() => false);
+          const flagged: number[] = await ctx.call('fishings.getManualLocationFlags', {
+            fishingIds: ids,
+          });
+          const flaggedSet = new Set(flagged.map(Number));
+          return fishings.map((f) => flaggedSet.has(Number(f.id)));
         },
       },
       location: {
@@ -583,6 +576,35 @@ export default class FishTypesService extends moleculer.Service {
     });
 
     return { success: true };
+  }
+
+  // Internal helper for the `hasManualLocation` virtual field on Fishing.
+  // Returns the subset of `fishingIds` that have at least one event with
+  // `location_manual = true`. Raw SQL avoids the moleculer-db DSL + secure
+  // ID + ProfileMixin scope layering that silently miscounted the first
+  // version of this aggregation (see CLAUDE.md → "Virtual-field populate
+  // gotchas"). No `rest` — internal-only.
+  @Action({
+    params: {
+      fishingIds: { type: 'array', items: 'number|convert', min: 1 },
+    },
+  })
+  async getManualLocationFlags(ctx: Context<{ fishingIds: number[] }>): Promise<number[]> {
+    const ids = (ctx.params.fishingIds || []).map(Number).filter(Number.isFinite);
+    if (!ids.length) return [];
+    // `rawQuery` here doesn't support parameter binding (see
+    // `mixins/database.mixin.ts:161`), so we inline. Safe because every id
+    // already passed `Number.isFinite` — no string can sneak through.
+    const idList = ids.join(',');
+    const rows: Array<{ fishing_id: number }> = await this.rawQuery(
+      ctx,
+      `SELECT DISTINCT fishing_id FROM tools_groups_events
+         WHERE fishing_id IN (${idList}) AND location_manual = TRUE AND deleted_at IS NULL
+       UNION
+       SELECT DISTINCT fishing_id FROM weight_events
+         WHERE fishing_id IN (${idList}) AND location_manual = TRUE AND deleted_at IS NULL`,
+    );
+    return rows.map((r) => Number(r.fishing_id)).filter(Number.isFinite);
   }
 
   @Action({
