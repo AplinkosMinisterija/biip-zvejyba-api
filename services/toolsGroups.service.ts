@@ -1,7 +1,7 @@
 'use strict';
 
 import moleculer, { Context } from 'moleculer';
-import { Action, Service } from 'moleculer-decorators';
+import { Action, Method, Service } from 'moleculer-decorators';
 import DbConnection from '../mixins/database.mixin';
 import ProfileMixin from '../mixins/profile.mixin';
 import { coordinatesToGeometry } from '../modules/geometry';
@@ -316,6 +316,7 @@ export default class ToolsGroupsService extends moleculer.Service {
       id: 'number|convert',
       coordinates: CoordinatesProp,
       location: LocationProp,
+      locationManual: { type: 'boolean', optional: true, convert: true },
     },
   })
   async buildTools(
@@ -323,6 +324,7 @@ export default class ToolsGroupsService extends moleculer.Service {
       id: number;
       coordinates: Coordinates;
       location: Location;
+      locationManual?: boolean;
     }>,
   ) {
     const group: ToolsGroup<'tools'> = await ctx.call('toolsGroups.resolve', {
@@ -341,10 +343,19 @@ export default class ToolsGroupsService extends moleculer.Service {
 
     const geom = coordinatesToGeometry(ctx.params.coordinates);
 
+    const locationManual = await this.deriveLocationManual(
+      ctx,
+      currentFishing,
+      ctx.params.location,
+      ctx.params.coordinates,
+      ctx.params.locationManual,
+    );
+
     const buildEvent: ToolsGroupsEvent = await ctx.call('toolsGroupsEvents.create', {
       type: ToolsGroupHistoryTypes.BUILD_TOOLS,
       geom,
       location: ctx.params.location,
+      locationManual,
       fishing: currentFishing.id,
     });
 
@@ -368,6 +379,7 @@ export default class ToolsGroupsService extends moleculer.Service {
       id: 'number|convert',
       coordinates: CoordinatesProp,
       location: LocationProp,
+      locationManual: { type: 'boolean', optional: true, convert: true },
     },
   })
   async removeTools(
@@ -376,6 +388,7 @@ export default class ToolsGroupsService extends moleculer.Service {
         id: number;
         coordinates: Coordinates;
         location: Location;
+        locationManual?: boolean;
       },
       UserAuthMeta
     >,
@@ -396,10 +409,20 @@ export default class ToolsGroupsService extends moleculer.Service {
       throw new moleculer.Errors.ValidationError('Fishing not started');
     }
     const geom = coordinatesToGeometry(ctx.params.coordinates);
+
+    const locationManual = await this.deriveLocationManual(
+      ctx,
+      currentFishing,
+      ctx.params.location,
+      ctx.params.coordinates,
+      ctx.params.locationManual,
+    );
+
     const removeEvent: ToolsGroupsEvent = await ctx.call('toolsGroupsEvents.create', {
       type: ToolsGroupHistoryTypes.REMOVE_TOOLS,
       geom,
       location: ctx.params.location,
+      locationManual,
       fishing: currentFishing.id,
     });
 
@@ -429,6 +452,7 @@ export default class ToolsGroupsService extends moleculer.Service {
       id: 'number|convert',
       coordinates: CoordinatesProp,
       location: LocationProp,
+      locationManual: { type: 'boolean', optional: true, convert: true },
       data: 'object',
     },
   })
@@ -438,15 +462,26 @@ export default class ToolsGroupsService extends moleculer.Service {
         id: number;
         coordinates: Coordinates;
         location: Location;
+        locationManual?: boolean;
         data: { [key: FishType['id']]: number };
       },
       UserAuthMeta
     >,
   ) {
+    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
+    const locationManual = await this.deriveLocationManual(
+      ctx,
+      currentFishing,
+      ctx.params.location,
+      ctx.params.coordinates,
+      ctx.params.locationManual,
+    );
+
     await ctx.call('weightEvents.createWeightEvent', {
       toolsGroup: ctx.params.id,
       coordinates: ctx.params.coordinates,
       location: ctx.params.location,
+      locationManual,
       data: ctx.params.data,
     });
     return { success: true };
@@ -567,5 +602,36 @@ export default class ToolsGroupsService extends moleculer.Service {
         WHERE location IS NOT NULL AND (location->>'name') NOT ILIKE '%baras%';`,
     );
     return Number(locations[0]?.location_count);
+  }
+
+  @Method
+  async deriveLocationManual(
+    ctx: Context,
+    fishing: Fishing | null,
+    location: Location | undefined,
+    coordinates: Coordinates | undefined,
+    clientHint?: boolean,
+  ): Promise<boolean> {
+    // Sprendimas yra autoritetinis serveryje:
+    // - ESTUARY (Kuršių marios) — patikrinam ar `coordinates` sutampa su
+    //   pasirinkto baro centroidu. Klientas-mobile manual atveju siunčia
+    //   bar centroid kaip event coords, GPS atveju — faktines telefono
+    //   koordinates baro poligone. Centroid'o tikslus sutapimas = manual.
+    // - Kitiems žvejybos tipams (POLDERS, INLAND_WATERS) — kol kas
+    //   pasitikim klientu (admin reikalavimas tik Kuršių marioms).
+    if (
+      fishing?.type === ('ESTUARY' as any) &&
+      location?.id &&
+      coordinates &&
+      typeof coordinates.x === 'number' &&
+      typeof coordinates.y === 'number'
+    ) {
+      const detected: boolean = await ctx.call('locations.isEstuaryLocationManual', {
+        locationId: String(location.id),
+        coordinates,
+      });
+      return detected;
+    }
+    return !!clientHint;
   }
 }

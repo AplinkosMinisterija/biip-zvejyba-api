@@ -178,6 +178,44 @@ export default class LocationsService extends moleculer.Service {
     };
   }
 
+  /**
+   * Server-side derivacija ar Kuršių marių event'as buvo užregistruotas su
+   * rankiniu būdu pasirinkta lokacija (bar'u). Klientas-mobile manual atveju
+   * siunčia coordinates = bar centroid (iš `getFishingSections`), o GPS atveju —
+   * faktines telefono koordinates baro poligone. Lyginam su centroid'u (su
+   * tolerancija ~5 m) ir grąžinam true jei tiksliai sutampa.
+   *
+   * Tikslas: net jei klientas išjungia / suklastoja `locationManual` flag'ą,
+   * server'is gali nepriklausomai pamatyti, kad event'as registruotas su bar
+   * centroid'u, ne faktine GPS pozicija.
+   */
+  @Action({
+    params: {
+      locationId: 'string',
+      coordinates: CoordinatesProp,
+    },
+  })
+  async isEstuaryLocationManual(
+    ctx: Context<{ locationId: string; coordinates: Coordinates }>,
+  ): Promise<boolean> {
+    if (!ctx.params.locationId || !ctx.params.coordinates) return false;
+    try {
+      const sections: Array<{ id: string; x: number; y: number }> = await ctx.call(
+        'locations.getFishingSections',
+      );
+      const bar = sections?.find((s) => String(s.id) === String(ctx.params.locationId));
+      if (!bar || typeof bar.x !== 'number' || typeof bar.y !== 'number') return false;
+      const dx = bar.x - ctx.params.coordinates.x;
+      const dy = bar.y - ctx.params.coordinates.y;
+      const distanceMeters = Math.sqrt(dx * dx + dy * dy); // LKS-94 (EPSG:3346) units are meters
+      return distanceMeters < 5;
+    } catch {
+      // Jei QGIS nepasiekiamas, nepriimam sprendimo — leidžiam client'o flag'ui
+      // įtaką (caller'is sprendžia kaip elgtis su `false` rezultatu).
+      return false;
+    }
+  }
+
   @Action({
     rest: 'GET /fishing_sections',
     cache: {

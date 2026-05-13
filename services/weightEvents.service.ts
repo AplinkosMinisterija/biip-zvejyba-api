@@ -30,6 +30,7 @@ interface Fields extends CommonFields {
   date: string;
   geom: any;
   location: Location;
+  locationManual: boolean;
   fishing: Fishing['id'];
   toolsGroup: ToolsGroup['id'];
   tenant: Tenant['id'];
@@ -117,6 +118,10 @@ export type WeightEvent<
       location: {
         ...LocationProp,
         required: false,
+      },
+      locationManual: {
+        type: 'boolean',
+        default: false,
       },
       tenant: {
         type: 'number',
@@ -236,6 +241,7 @@ export default class ToolTypesService extends moleculer.Service {
         ...LocationProp,
         optional: true,
       },
+      locationManual: { type: 'boolean', optional: true, convert: true },
       data: 'object',
     },
   })
@@ -245,6 +251,7 @@ export default class ToolTypesService extends moleculer.Service {
       coordinates: Coordinates;
       data: { [key: FishType['id']]: number };
       location?: Location;
+      locationManual?: boolean;
     }>,
   ) {
     return this.createEntity(ctx, { ...ctx.params });

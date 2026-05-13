@@ -31,6 +31,7 @@ interface Fields extends CommonFields {
       name: string;
     };
   };
+  locationManual: boolean;
   data: any;
   fishing: Fishing['id'];
 }
@@ -85,6 +86,10 @@ export type ToolsGroupsEvent<
             },
           },
         },
+      },
+      locationManual: {
+        type: 'boolean',
+        default: false,
       },
       data: 'any', // Type is not clear yet
       fishing: {

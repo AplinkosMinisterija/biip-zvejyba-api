@@ -52,6 +52,7 @@ type Event = {
   geom: any;
   coordinates?: Coordinates;
   location?: any;
+  locationManual?: boolean;
   data?: any;
 };
 
@@ -67,6 +68,7 @@ interface Fields extends CommonFields {
   tenant: Tenant['id'];
   user: User['id'];
   weightEvents: any;
+  hasManualLocation: boolean;
 }
 
 interface Populates extends CommonPopulates {
@@ -188,6 +190,37 @@ export type Fishing<
               return ctx.call('weightEvents.getFishByFishing', { fishingId: fishing.id });
             }),
           );
+        },
+      },
+      hasManualLocation: {
+        type: 'boolean',
+        readonly: true,
+        virtual: true,
+        async populate(ctx: any, _values: any, fishings: Fishing[]) {
+          // True jei bent vienas šios žvejybos event'as (toolsGroup arba
+          // weight) turėjo location_manual=true. Admin pusėje pagal tai
+          // rodom šauktuko ikoną žurnalo eilutėje (Kuršių marių žvejyboms).
+          if (!fishings.length) return [];
+          const fishingIds = fishings.map((f) => f.id);
+          const [tgRows, weRows]: [Array<{ fishingId: number }>, Array<{ fishingId: number }>] =
+            await Promise.all([
+              ctx.call('toolsGroupsEvents.find', {
+                query: { fishing: { $in: fishingIds }, locationManual: true },
+                fields: ['fishing'],
+              }),
+              ctx.call('weightEvents.find', {
+                query: { fishing: { $in: fishingIds }, locationManual: true },
+                fields: ['fishing'],
+              }),
+            ]);
+          const flagged = new Set<number>();
+          for (const r of [...tgRows, ...weRows]) {
+            // moleculer'is grąžina su nepulinčiu raw field name — pasiimam
+            // bet kurį `fishing`-vardo lauką, kuris yra apsupęs id'us.
+            const id = (r as any).fishing ?? (r as any).fishingId;
+            if (id != null) flagged.add(Number(id));
+          }
+          return fishings.map((f) => flagged.has(Number(f.id)));
         },
       },
       location: {
@@ -484,6 +517,7 @@ export default class FishTypesService extends moleculer.Service {
     auth: RestrictionType.USER,
     params: {
       coordinates: CoordinatesProp,
+      locationManual: { type: 'boolean', optional: true, convert: true },
       data: 'object',
       preliminaryData: 'object',
     },
@@ -493,6 +527,7 @@ export default class FishTypesService extends moleculer.Service {
       {
         coordinates: Coordinates;
         location: Location;
+        locationManual?: boolean;
         data: { [key: FishType['id']]: number };
         preliminaryData: { [key: FishType['id']]: number };
       },
@@ -520,9 +555,19 @@ export default class FishTypesService extends moleculer.Service {
       throw new moleculer.Errors.ValidationError('Weight difference greater than 20%');
     }
 
+    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
+    let locationManual = !!ctx.params.locationManual;
+    if (currentFishing?.type === FishingType.ESTUARY && ctx.params.location?.id) {
+      locationManual = await ctx.call('locations.isEstuaryLocationManual', {
+        locationId: String(ctx.params.location.id),
+        coordinates: ctx.params.coordinates,
+      });
+    }
+
     await ctx.call('weightEvents.createWeightEvent', {
       coordinates: ctx.params.coordinates,
       location: ctx.params.location,
+      locationManual,
       data,
     });
 
@@ -708,6 +753,7 @@ export default class FishTypesService extends moleculer.Service {
         geom: t.geom,
         coordinates,
         location: t.location,
+        locationManual: !!t.locationManual,
         date: t.createdAt,
         data: t.toolsGroup,
       });
@@ -729,6 +775,7 @@ export default class FishTypesService extends moleculer.Service {
         geom: w.geom,
         coordinates,
         location: w.location,
+        locationManual: !!w.locationManual,
         date: w.createdAt,
         data: { fish: w.data, toolsGroup: w.toolsGroup },
       });
@@ -740,6 +787,7 @@ export default class FishTypesService extends moleculer.Service {
         type: EventType.WEIGHT_ON_SHORE,
         geom: fishingWeights.fishOnShore.geom,
         coordinates,
+        locationManual: !!fishingWeights.fishOnShore.locationManual,
         date: fishingWeights.fishOnShore.createdAt,
         data: fishingWeights.fishOnShore.data,
       });
