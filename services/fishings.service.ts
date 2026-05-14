@@ -592,17 +592,14 @@ export default class FishTypesService extends moleculer.Service {
   async getManualLocationFlags(ctx: Context<{ fishingIds: number[] }>): Promise<number[]> {
     const ids = (ctx.params.fishingIds || []).map(Number).filter(Number.isFinite);
     if (!ids.length) return [];
-    // `rawQuery` here doesn't support parameter binding (see
-    // `mixins/database.mixin.ts:161`), so we inline. Safe because every id
-    // already passed `Number.isFinite` — no string can sneak through.
-    const idList = ids.join(',');
     const rows: Array<{ fishing_id: number }> = await this.rawQuery(
       ctx,
       `SELECT DISTINCT fishing_id FROM tools_groups_events
-         WHERE fishing_id IN (${idList}) AND location_manual = TRUE AND deleted_at IS NULL
+         WHERE fishing_id = ANY(?) AND location_manual = TRUE AND deleted_at IS NULL
        UNION
        SELECT DISTINCT fishing_id FROM weight_events
-         WHERE fishing_id IN (${idList}) AND location_manual = TRUE AND deleted_at IS NULL`,
+         WHERE fishing_id = ANY(?) AND location_manual = TRUE AND deleted_at IS NULL`,
+      [ids, ids],
     );
     return rows.map((r) => Number(r.fishing_id)).filter(Number.isFinite);
   }

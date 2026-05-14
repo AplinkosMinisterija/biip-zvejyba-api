@@ -158,10 +158,14 @@ export default function (opts: any = {}) {
 
         return ids.filter((id) => queryIds.indexOf(id) >= 0);
       },
-      async rawQuery(ctx: Context, sql: string) {
-        const adapter = await this.getAdapter(ctx);
+      async rawQuery(
+        ctx: Context,
+        sql: string,
+        bindings?: readonly any[],
+      ): Promise<any[]> {
+        const adapter = await (this as any).getAdapter(ctx);
         const knex = adapter.client;
-        const result = await knex.raw(sql);
+        const result = await knex.raw(sql, (bindings ?? []) as any[]);
         return result.rows;
       },
     },
