@@ -316,6 +316,7 @@ export default class ToolsGroupsService extends moleculer.Service {
       id: 'number|convert',
       coordinates: CoordinatesProp,
       location: LocationProp,
+      locationManual: { type: 'boolean', optional: true, convert: true },
     },
   })
   async buildTools(
@@ -323,6 +324,7 @@ export default class ToolsGroupsService extends moleculer.Service {
       id: number;
       coordinates: Coordinates;
       location: Location;
+      locationManual?: boolean;
     }>,
   ) {
     const group: ToolsGroup<'tools'> = await ctx.call('toolsGroups.resolve', {
@@ -345,6 +347,7 @@ export default class ToolsGroupsService extends moleculer.Service {
       type: ToolsGroupHistoryTypes.BUILD_TOOLS,
       geom,
       location: ctx.params.location,
+      locationManual: !!ctx.params.locationManual,
       fishing: currentFishing.id,
     });
 
@@ -368,6 +371,7 @@ export default class ToolsGroupsService extends moleculer.Service {
       id: 'number|convert',
       coordinates: CoordinatesProp,
       location: LocationProp,
+      locationManual: { type: 'boolean', optional: true, convert: true },
     },
   })
   async removeTools(
@@ -376,6 +380,7 @@ export default class ToolsGroupsService extends moleculer.Service {
         id: number;
         coordinates: Coordinates;
         location: Location;
+        locationManual?: boolean;
       },
       UserAuthMeta
     >,
@@ -400,6 +405,7 @@ export default class ToolsGroupsService extends moleculer.Service {
       type: ToolsGroupHistoryTypes.REMOVE_TOOLS,
       geom,
       location: ctx.params.location,
+      locationManual: !!ctx.params.locationManual,
       fishing: currentFishing.id,
     });
 
@@ -429,6 +435,7 @@ export default class ToolsGroupsService extends moleculer.Service {
       id: 'number|convert',
       coordinates: CoordinatesProp,
       location: LocationProp,
+      locationManual: { type: 'boolean', optional: true, convert: true },
       data: 'object',
     },
   })
@@ -438,6 +445,7 @@ export default class ToolsGroupsService extends moleculer.Service {
         id: number;
         coordinates: Coordinates;
         location: Location;
+        locationManual?: boolean;
         data: { [key: FishType['id']]: number };
       },
       UserAuthMeta
@@ -447,6 +455,7 @@ export default class ToolsGroupsService extends moleculer.Service {
       toolsGroup: ctx.params.id,
       coordinates: ctx.params.coordinates,
       location: ctx.params.location,
+      locationManual: !!ctx.params.locationManual,
       data: ctx.params.data,
     });
     return { success: true };

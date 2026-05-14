@@ -52,6 +52,7 @@ type Event = {
   geom: any;
   coordinates?: Coordinates;
   location?: any;
+  locationManual?: boolean;
   data?: any;
 };
 
@@ -67,6 +68,7 @@ interface Fields extends CommonFields {
   tenant: Tenant['id'];
   user: User['id'];
   weightEvents: any;
+  hasManualLocation: boolean;
 }
 
 interface Populates extends CommonPopulates {
@@ -188,6 +190,30 @@ export type Fishing<
               return ctx.call('weightEvents.getFishByFishing', { fishingId: fishing.id });
             }),
           );
+        },
+      },
+      hasManualLocation: {
+        type: 'boolean',
+        readonly: true,
+        virtual: true,
+        async populate(ctx: any, _values: any, fishings: Fishing[]) {
+          // True if at least one event of this fishing (toolsGroup or
+          // weight) had location_manual=true. Admin uses this to render
+          // the warning icon on the journal row (Kuršių marios fishings).
+          //
+          // Delegate to a dedicated action so we can debug via REPL
+          // (`mol $ call fishings.getManualLocationFlags --fishingIds 321`)
+          // — the previous moleculer-db `find` + `fields: ['fishing']`
+          // approach silently dropped the FK because of `secure: true` ID
+          // encoding (see CLAUDE.md → "Virtual-field populate gotchas").
+          if (!fishings.length) return [];
+          const ids = fishings.map((f) => Number(f.id)).filter(Number.isFinite);
+          if (!ids.length) return fishings.map(() => false);
+          const flagged: number[] = await ctx.call('fishings.getManualLocationFlags', {
+            fishingIds: ids,
+          });
+          const flaggedSet = new Set(flagged.map(Number));
+          return fishings.map((f) => flaggedSet.has(Number(f.id)));
         },
       },
       location: {
@@ -484,6 +510,7 @@ export default class FishTypesService extends moleculer.Service {
     auth: RestrictionType.USER,
     params: {
       coordinates: CoordinatesProp,
+      locationManual: { type: 'boolean', optional: true, convert: true },
       data: 'object',
       preliminaryData: 'object',
     },
@@ -493,6 +520,7 @@ export default class FishTypesService extends moleculer.Service {
       {
         coordinates: Coordinates;
         location: Location;
+        locationManual?: boolean;
         data: { [key: FishType['id']]: number };
         preliminaryData: { [key: FishType['id']]: number };
       },
@@ -500,6 +528,26 @@ export default class FishTypesService extends moleculer.Service {
     >,
   ) {
     const { data, preliminaryData } = ctx.params;
+
+    // Every fish the fisher registered on the boat (preliminary) must
+    // also appear in the onshore payload — the value can be 0 kg (if all
+    // were released back to the water), but the key has to be present.
+    // Prevents accidentally dropping e.g. undersized fish from the final
+    // catch report.
+    const missingKeys: FishType['id'][] = [];
+    for (const key in preliminaryData) {
+      const finalValue = data[key];
+      if (finalValue === undefined || finalValue === null) {
+        missingKeys.push(key as any);
+      }
+    }
+    if (missingKeys.length > 0) {
+      throw new moleculer.Errors.ValidationError(
+        'Missing onshore weight for fish caught on boat',
+        'MISSING_ONSHORE_WEIGHT',
+        { missingFishTypeIds: missingKeys },
+      );
+    }
 
     const invalidKeys: FishType['id'][] = [];
 
@@ -523,10 +571,37 @@ export default class FishTypesService extends moleculer.Service {
     await ctx.call('weightEvents.createWeightEvent', {
       coordinates: ctx.params.coordinates,
       location: ctx.params.location,
+      locationManual: !!ctx.params.locationManual,
       data,
     });
 
     return { success: true };
+  }
+
+  // Internal helper for the `hasManualLocation` virtual field on Fishing.
+  // Returns the subset of `fishingIds` that have at least one event with
+  // `location_manual = true`. Raw SQL avoids the moleculer-db DSL + secure
+  // ID + ProfileMixin scope layering that silently miscounted the first
+  // version of this aggregation (see CLAUDE.md → "Virtual-field populate
+  // gotchas"). No `rest` — internal-only.
+  @Action({
+    params: {
+      fishingIds: { type: 'array', items: 'number|convert', min: 1 },
+    },
+  })
+  async getManualLocationFlags(ctx: Context<{ fishingIds: number[] }>): Promise<number[]> {
+    const ids = (ctx.params.fishingIds || []).map(Number).filter(Number.isFinite);
+    if (!ids.length) return [];
+    const rows: Array<{ fishing_id: number }> = await this.rawQuery(
+      ctx,
+      `SELECT DISTINCT fishing_id FROM tools_groups_events
+         WHERE fishing_id = ANY(?) AND location_manual = TRUE AND deleted_at IS NULL
+       UNION
+       SELECT DISTINCT fishing_id FROM weight_events
+         WHERE fishing_id = ANY(?) AND location_manual = TRUE AND deleted_at IS NULL`,
+      [ids, ids],
+    );
+    return rows.map((r) => Number(r.fishing_id)).filter(Number.isFinite);
   }
 
   @Action({
@@ -708,6 +783,7 @@ export default class FishTypesService extends moleculer.Service {
         geom: t.geom,
         coordinates,
         location: t.location,
+        locationManual: !!t.locationManual,
         date: t.createdAt,
         data: t.toolsGroup,
       });
@@ -729,6 +805,7 @@ export default class FishTypesService extends moleculer.Service {
         geom: w.geom,
         coordinates,
         location: w.location,
+        locationManual: !!w.locationManual,
         date: w.createdAt,
         data: { fish: w.data, toolsGroup: w.toolsGroup },
       });
@@ -740,6 +817,7 @@ export default class FishTypesService extends moleculer.Service {
         type: EventType.WEIGHT_ON_SHORE,
         geom: fishingWeights.fishOnShore.geom,
         coordinates,
+        locationManual: !!fishingWeights.fishOnShore.locationManual,
         date: fishingWeights.fishOnShore.createdAt,
         data: fishingWeights.fishOnShore.data,
       });
