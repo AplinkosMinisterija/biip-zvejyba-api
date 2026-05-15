@@ -57,9 +57,12 @@ export function coordinatesToGeometry(coordinates: { x: number; y: number }) {
   };
 }
 
-export function geomToWgs(geom: GeomFeatureCollection) {
-  const lks = geom.features[0].geometry.coordinates as CoordinatesPoint;
+export function geomToWgs(geom: GeomFeatureCollection): { lat: number; lng: number } | null {
+  const lks = geom?.features?.[0]?.geometry?.coordinates as CoordinatesPoint | undefined;
+  if (!lks || lks.length < 2) return null;
   const transform = transformation('3346', 'EPSG:4326');
-  const coordinates = { x: lks[0], y: lks[1] };
-  return transform.forward(coordinates);
+  // proj4 returns `{ x: lng, y: lat }` for EPSG:4326 — expose lat/lng
+  // explicitly so consumers don't have to remember which axis is which.
+  const wgs = transform.forward({ x: lks[0], y: lks[1] });
+  return { lat: wgs.y, lng: wgs.x };
 }

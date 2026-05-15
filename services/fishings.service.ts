@@ -50,7 +50,7 @@ type Event = {
   type: EventType;
   date: Date;
   geom: any;
-  coordinates?: Coordinates;
+  coordinates?: { lat: number; lng: number } | null;
   location?: any;
   locationManual?: boolean;
   data?: any;
