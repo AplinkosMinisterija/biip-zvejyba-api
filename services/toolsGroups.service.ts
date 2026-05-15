@@ -1,7 +1,7 @@
 'use strict';
 
 import moleculer, { Context } from 'moleculer';
-import { Action, Service } from 'moleculer-decorators';
+import { Action, Method, Service } from 'moleculer-decorators';
 import DbConnection from '../mixins/database.mixin';
 import ProfileMixin from '../mixins/profile.mixin';
 import { coordinatesToGeometry } from '../modules/geometry';
@@ -400,6 +400,16 @@ export default class ToolsGroupsService extends moleculer.Service {
     if (!currentFishing) {
       throw new moleculer.Errors.ValidationError('Fishing not started');
     }
+
+    // Guard: don't let the user return the last unchecked tool of a type
+    // when sibling tools of the same type were only marked "Patikrinta"
+    // (empty `data: {}` weight event) and no fish has been recorded
+    // anywhere for this type. The "Patikrinta" shortcut is only meant for
+    // duplicates of an already-weighed catch — if every sibling event is
+    // empty, the catch was never logged. Forces the user to weigh fish
+    // before all evidence of this tool type disappears.
+    await this.assertSiblingsHaveFishLogged(ctx, group, currentFishing.id);
+
     const geom = coordinatesToGeometry(ctx.params.coordinates);
     const removeEvent: ToolsGroupsEvent = await ctx.call('toolsGroupsEvents.create', {
       type: ToolsGroupHistoryTypes.REMOVE_TOOLS,
@@ -570,11 +580,75 @@ export default class ToolsGroupsService extends moleculer.Service {
     const locations = await this.rawQuery(
       ctx,
       `SELECT COUNT(DISTINCT (location->>'id')::text) +
-        CASE WHEN EXISTS ( SELECT 1 FROM tools_groups_events WHERE location IS NOT NULL AND (location->>'name') ILIKE '%baras%') 
+        CASE WHEN EXISTS ( SELECT 1 FROM tools_groups_events WHERE location IS NOT NULL AND (location->>'name') ILIKE '%baras%')
         THEN 1 ELSE 0 END AS location_count
         FROM tools_groups_events
         WHERE location IS NOT NULL AND (location->>'name') NOT ILIKE '%baras%';`,
     );
     return Number(locations[0]?.location_count);
+  }
+
+  @Method
+  async assertSiblingsHaveFishLogged(
+    ctx: Context,
+    group: ToolsGroup<'tools'>,
+    fishingId: number,
+  ) {
+    const toolTypeId = (group.tools?.[0] as Tool<'toolType'> | undefined)?.toolType?.id;
+    if (!toolTypeId) return;
+
+    const ownWeights: WeightEvent[] = await ctx.call('weightEvents.find', {
+      query: { fishing: fishingId, toolsGroup: group.id },
+      limit: 1,
+    });
+    if (ownWeights.length > 0) return; // self already has a weight event — let it through
+
+    // Aggregate per-tool-type in the current fishing. Raw SQL because tools
+    // are stored as an integer[] on tools_groups and the moleculer-db DSL
+    // can't express ANY(tools) joins. See CLAUDE.md → "Virtual-field
+    // populate gotchas" for why we don't run this through populate.
+    const rows: Array<{
+      built_count: string;
+      checked_count: string;
+      with_fish_count: string;
+    }> = await this.rawQuery(
+      ctx,
+      `SELECT
+         COUNT(DISTINCT tg.id) AS built_count,
+         COUNT(DISTINCT we.tools_group_id) AS checked_count,
+         COUNT(DISTINCT CASE
+           WHEN we.data IS NOT NULL AND we.data::text <> '{}'
+           THEN we.tools_group_id
+         END) AS with_fish_count
+       FROM tools_groups tg
+       JOIN tools_groups_events build ON tg.build_event_id = build.id
+       LEFT JOIN weight_events we
+         ON we.tools_group_id = tg.id
+         AND we.fishing_id = build.fishing_id
+         AND we.deleted_at IS NULL
+       WHERE tg.deleted_at IS NULL
+         AND tg.remove_event_id IS NULL
+         AND build.fishing_id = ?
+         AND EXISTS (
+           SELECT 1 FROM tools t
+           WHERE t.id = ANY(tg.tools) AND t.tool_type_id = ?
+         )`,
+      [fishingId, toolTypeId],
+    );
+
+    const stats = rows?.[0];
+    if (!stats) return;
+    const built = Number(stats.built_count) || 0;
+    const checked = Number(stats.checked_count) || 0;
+    const withFish = Number(stats.with_fish_count) || 0;
+    const unchecked = built - checked;
+
+    // We're the last unchecked of this type AND siblings only have empty
+    // "patikrinta" events → returning now would lose the catch.
+    if (unchecked === 1 && checked > 0 && withFish === 0) {
+      throw new moleculer.Errors.ValidationError(
+        'Negalima grąžinti įrankio į sandėlį, kol nepasvertos žuvys: kiti to paties tipo įrankiai pažymėti kaip patikrinti, bet žuvies svoris dar neįrašytas.',
+      );
+    }
   }
 }
