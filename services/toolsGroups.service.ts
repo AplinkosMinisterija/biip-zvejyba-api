@@ -528,20 +528,28 @@ export default class ToolsGroupsService extends moleculer.Service {
       query: { fishing: currentFishing.id },
     });
 
-    const checkedToolsGroupIds = new Set(
-      weightEvents
-        .map((w) => w.toolsGroup?.id)
-        .filter((id): id is number => id != null),
-    );
+    // Map<toolsGroup.id, hasAnyFishLogged> — a "Patikrinta" press writes a
+    // weight_event with `data: {}`, so we need to look at the payload to
+    // tell apart "checked-with-fish" from "checked-empty".
+    const weightByGroup = new Map<number, boolean>();
+    for (const w of weightEvents) {
+      const groupId = w.toolsGroup?.id;
+      if (groupId == null) continue;
+      const hasFish = !!w.data && Object.keys(w.data).length > 0;
+      weightByGroup.set(groupId, weightByGroup.get(groupId) || hasFish);
+    }
 
     const locationStats = new Map<
       string,
-      { name: string; checked: number; unchecked: number }
+      { name: string; checked: number; unchecked: number; withFish: number }
     >();
     for (const group of notRemovedToolsGroups) {
       const buildFishing = group.buildEvent?.fishing;
+      // Different fishing type → not our concern (e.g. ESTUARY vs INLAND).
+      // Previously also skipped the current fishing entirely, but the user
+      // needs to be warned when they cross over to a new bar leaving an
+      // earlier bar of the same trip half-finished.
       if (buildFishing?.type !== currentFishing.type) continue;
-      if (buildFishing?.id === currentFishing.id) continue;
       const location = group.buildEvent?.location;
       if (!location?.id) continue;
       const key = String(location.id);
@@ -549,9 +557,11 @@ export default class ToolsGroupsService extends moleculer.Service {
         name: location.name ?? '',
         checked: 0,
         unchecked: 0,
+        withFish: 0,
       };
-      if (checkedToolsGroupIds.has(group.id)) {
+      if (weightByGroup.has(group.id)) {
         entry.checked += 1;
+        if (weightByGroup.get(group.id)) entry.withFish += 1;
       } else {
         entry.unchecked += 1;
       }
@@ -559,7 +569,14 @@ export default class ToolsGroupsService extends moleculer.Service {
     }
 
     return Array.from(locationStats.entries())
-      .filter(([, stats]) => stats.checked > 0 && stats.unchecked > 0)
+      .filter(([, stats]) => {
+        // Surface bars that are still "in progress": either some tools are
+        // unchecked, or every checked one is an empty Patikrinta (no fish
+        // logged yet). Fully-weighed bars with no leftover tools fall out.
+        if (stats.unchecked > 0 && stats.checked > 0) return true;
+        if (stats.checked > 0 && stats.withFish === 0) return true;
+        return false;
+      })
       .map(([id, stats]) => ({ id, name: stats.name }));
   }
 
@@ -570,11 +587,12 @@ export default class ToolsGroupsService extends moleculer.Service {
     const locations = await this.rawQuery(
       ctx,
       `SELECT COUNT(DISTINCT (location->>'id')::text) +
-        CASE WHEN EXISTS ( SELECT 1 FROM tools_groups_events WHERE location IS NOT NULL AND (location->>'name') ILIKE '%baras%') 
+        CASE WHEN EXISTS ( SELECT 1 FROM tools_groups_events WHERE location IS NOT NULL AND (location->>'name') ILIKE '%baras%')
         THEN 1 ELSE 0 END AS location_count
         FROM tools_groups_events
         WHERE location IS NOT NULL AND (location->>'name') NOT ILIKE '%baras%';`,
     );
     return Number(locations[0]?.location_count);
   }
+
 }
