@@ -1,7 +1,7 @@
 'use strict';
 
 import moleculer, { Context } from 'moleculer';
-import { Action, Method, Service } from 'moleculer-decorators';
+import { Action, Service } from 'moleculer-decorators';
 import DbConnection from '../mixins/database.mixin';
 import ProfileMixin from '../mixins/profile.mixin';
 import { coordinatesToGeometry } from '../modules/geometry';
@@ -400,16 +400,6 @@ export default class ToolsGroupsService extends moleculer.Service {
     if (!currentFishing) {
       throw new moleculer.Errors.ValidationError('Fishing not started');
     }
-
-    // Guard: don't let the user return the last unchecked tool of a type
-    // when sibling tools of the same type were only marked "Patikrinta"
-    // (empty `data: {}` weight event) and no fish has been recorded
-    // anywhere for this type. The "Patikrinta" shortcut is only meant for
-    // duplicates of an already-weighed catch — if every sibling event is
-    // empty, the catch was never logged. Forces the user to weigh fish
-    // before all evidence of this tool type disappears.
-    await this.assertSiblingsHaveFishLogged(ctx, group, currentFishing);
-
     const geom = coordinatesToGeometry(ctx.params.coordinates);
     const removeEvent: ToolsGroupsEvent = await ctx.call('toolsGroupsEvents.create', {
       type: ToolsGroupHistoryTypes.REMOVE_TOOLS,
@@ -538,20 +528,28 @@ export default class ToolsGroupsService extends moleculer.Service {
       query: { fishing: currentFishing.id },
     });
 
-    const checkedToolsGroupIds = new Set(
-      weightEvents
-        .map((w) => w.toolsGroup?.id)
-        .filter((id): id is number => id != null),
-    );
+    // Map<toolsGroup.id, hasAnyFishLogged> — a "Patikrinta" press writes a
+    // weight_event with `data: {}`, so we need to look at the payload to
+    // tell apart "checked-with-fish" from "checked-empty".
+    const weightByGroup = new Map<number, boolean>();
+    for (const w of weightEvents) {
+      const groupId = w.toolsGroup?.id;
+      if (groupId == null) continue;
+      const hasFish = !!w.data && Object.keys(w.data).length > 0;
+      weightByGroup.set(groupId, weightByGroup.get(groupId) || hasFish);
+    }
 
     const locationStats = new Map<
       string,
-      { name: string; checked: number; unchecked: number }
+      { name: string; checked: number; unchecked: number; withFish: number }
     >();
     for (const group of notRemovedToolsGroups) {
       const buildFishing = group.buildEvent?.fishing;
+      // Different fishing type → not our concern (e.g. ESTUARY vs INLAND).
+      // Previously also skipped the current fishing entirely, but the user
+      // needs to be warned when they cross over to a new bar leaving an
+      // earlier bar of the same trip half-finished.
       if (buildFishing?.type !== currentFishing.type) continue;
-      if (buildFishing?.id === currentFishing.id) continue;
       const location = group.buildEvent?.location;
       if (!location?.id) continue;
       const key = String(location.id);
@@ -559,9 +557,11 @@ export default class ToolsGroupsService extends moleculer.Service {
         name: location.name ?? '',
         checked: 0,
         unchecked: 0,
+        withFish: 0,
       };
-      if (checkedToolsGroupIds.has(group.id)) {
+      if (weightByGroup.has(group.id)) {
         entry.checked += 1;
+        if (weightByGroup.get(group.id)) entry.withFish += 1;
       } else {
         entry.unchecked += 1;
       }
@@ -569,7 +569,14 @@ export default class ToolsGroupsService extends moleculer.Service {
     }
 
     return Array.from(locationStats.entries())
-      .filter(([, stats]) => stats.checked > 0 && stats.unchecked > 0)
+      .filter(([, stats]) => {
+        // Surface bars that are still "in progress": either some tools are
+        // unchecked, or every checked one is an empty Patikrinta (no fish
+        // logged yet). Fully-weighed bars with no leftover tools fall out.
+        if (stats.unchecked > 0 && stats.checked > 0) return true;
+        if (stats.checked > 0 && stats.withFish === 0) return true;
+        return false;
+      })
       .map(([id, stats]) => ({ id, name: stats.name }));
   }
 
@@ -588,57 +595,4 @@ export default class ToolsGroupsService extends moleculer.Service {
     return Number(locations[0]?.location_count);
   }
 
-  @Method
-  async assertSiblingsHaveFishLogged(
-    ctx: Context,
-    group: ToolsGroup<'tools'>,
-    currentFishing: Fishing,
-  ) {
-    const toolTypeId = (group.tools?.[0] as Tool<'toolType'> | undefined)?.toolType?.id;
-    if (!toolTypeId) return;
-
-    // Same shape as `getNotCheckedToolsGroups` — find returns user-scoped
-    // groups, IDs come back encoded so comparisons match `currentFishing.id`
-    // without us having to think about `secure: true` decoding.
-    const activeGroups: ToolsGroup<'tools' | 'buildEvent'>[] = await ctx.call(
-      'toolsGroups.find',
-      {
-        query: { removeEvent: { $exists: false } },
-        populate: ['tools', 'buildEvent'],
-      },
-    );
-
-    const siblings = activeGroups.filter((g) => {
-      const sameFishing = g.buildEvent?.fishing?.id === currentFishing.id;
-      const sameType = (g.tools as Tool<'toolType'>[] | undefined)?.some(
-        (t) => t?.toolType?.id === toolTypeId,
-      );
-      return sameFishing && sameType;
-    });
-
-    if (!siblings.length) return;
-
-    const siblingIds = siblings.map((g) => g.id);
-    const sibWeights: WeightEvent[] = await ctx.call('weightEvents.find', {
-      query: { fishing: currentFishing.id, toolsGroup: { $in: siblingIds } },
-    });
-
-    const checkedGroupIds = new Set(
-      sibWeights.map((w) => w.toolsGroup).filter((id) => id != null),
-    );
-    if (checkedGroupIds.has(group.id)) return; // self already weighed/checked — allow
-
-    const anyWithFish = sibWeights.some(
-      (w) => w.data && Object.keys(w.data).length > 0,
-    );
-    const unchecked = siblings.length - checkedGroupIds.size;
-
-    // We're the last unchecked of this type AND siblings only have empty
-    // "patikrinta" events → returning now would lose the catch.
-    if (unchecked === 1 && checkedGroupIds.size > 0 && !anyWithFish) {
-      throw new moleculer.Errors.ValidationError(
-        'Negalima grąžinti įrankio į sandėlį, kol nepasvertos žuvys: kiti to paties tipo įrankiai pažymėti kaip patikrinti, bet žuvies svoris dar neįrašytas.',
-      );
-    }
-  }
 }
