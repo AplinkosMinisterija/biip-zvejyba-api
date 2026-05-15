@@ -408,7 +408,7 @@ export default class ToolsGroupsService extends moleculer.Service {
     // duplicates of an already-weighed catch — if every sibling event is
     // empty, the catch was never logged. Forces the user to weigh fish
     // before all evidence of this tool type disappears.
-    await this.assertSiblingsHaveFishLogged(ctx, group, currentFishing.id);
+    await this.assertSiblingsHaveFishLogged(ctx, group, currentFishing);
 
     const geom = coordinatesToGeometry(ctx.params.coordinates);
     const removeEvent: ToolsGroupsEvent = await ctx.call('toolsGroupsEvents.create', {
@@ -592,60 +592,50 @@ export default class ToolsGroupsService extends moleculer.Service {
   async assertSiblingsHaveFishLogged(
     ctx: Context,
     group: ToolsGroup<'tools'>,
-    fishingId: number,
+    currentFishing: Fishing,
   ) {
     const toolTypeId = (group.tools?.[0] as Tool<'toolType'> | undefined)?.toolType?.id;
     if (!toolTypeId) return;
 
-    const ownWeights: WeightEvent[] = await ctx.call('weightEvents.find', {
-      query: { fishing: fishingId, toolsGroup: group.id },
-      limit: 1,
-    });
-    if (ownWeights.length > 0) return; // self already has a weight event — let it through
-
-    // Aggregate per-tool-type in the current fishing. Raw SQL because tools
-    // are stored as an integer[] on tools_groups and the moleculer-db DSL
-    // can't express ANY(tools) joins. See CLAUDE.md → "Virtual-field
-    // populate gotchas" for why we don't run this through populate.
-    const rows: Array<{
-      built_count: string;
-      checked_count: string;
-      with_fish_count: string;
-    }> = await this.rawQuery(
-      ctx,
-      `SELECT
-         COUNT(DISTINCT tg.id) AS built_count,
-         COUNT(DISTINCT we.tools_group_id) AS checked_count,
-         COUNT(DISTINCT CASE
-           WHEN we.data IS NOT NULL AND we.data::text <> '{}'
-           THEN we.tools_group_id
-         END) AS with_fish_count
-       FROM tools_groups tg
-       JOIN tools_groups_events build ON tg.build_event_id = build.id
-       LEFT JOIN weight_events we
-         ON we.tools_group_id = tg.id
-         AND we.fishing_id = build.fishing_id
-         AND we.deleted_at IS NULL
-       WHERE tg.deleted_at IS NULL
-         AND tg.remove_event_id IS NULL
-         AND build.fishing_id = ?
-         AND EXISTS (
-           SELECT 1 FROM tools t
-           WHERE t.id = ANY(tg.tools) AND t.tool_type_id = ?
-         )`,
-      [fishingId, toolTypeId],
+    // Same shape as `getNotCheckedToolsGroups` — find returns user-scoped
+    // groups, IDs come back encoded so comparisons match `currentFishing.id`
+    // without us having to think about `secure: true` decoding.
+    const activeGroups: ToolsGroup<'tools' | 'buildEvent'>[] = await ctx.call(
+      'toolsGroups.find',
+      {
+        query: { removeEvent: { $exists: false } },
+        populate: ['tools', 'buildEvent'],
+      },
     );
 
-    const stats = rows?.[0];
-    if (!stats) return;
-    const built = Number(stats.built_count) || 0;
-    const checked = Number(stats.checked_count) || 0;
-    const withFish = Number(stats.with_fish_count) || 0;
-    const unchecked = built - checked;
+    const siblings = activeGroups.filter((g) => {
+      const sameFishing = g.buildEvent?.fishing?.id === currentFishing.id;
+      const sameType = (g.tools as Tool<'toolType'>[] | undefined)?.some(
+        (t) => t?.toolType?.id === toolTypeId,
+      );
+      return sameFishing && sameType;
+    });
+
+    if (!siblings.length) return;
+
+    const siblingIds = siblings.map((g) => g.id);
+    const sibWeights: WeightEvent[] = await ctx.call('weightEvents.find', {
+      query: { fishing: currentFishing.id, toolsGroup: { $in: siblingIds } },
+    });
+
+    const checkedGroupIds = new Set(
+      sibWeights.map((w) => w.toolsGroup).filter((id) => id != null),
+    );
+    if (checkedGroupIds.has(group.id)) return; // self already weighed/checked — allow
+
+    const anyWithFish = sibWeights.some(
+      (w) => w.data && Object.keys(w.data).length > 0,
+    );
+    const unchecked = siblings.length - checkedGroupIds.size;
 
     // We're the last unchecked of this type AND siblings only have empty
     // "patikrinta" events → returning now would lose the catch.
-    if (unchecked === 1 && checked > 0 && withFish === 0) {
+    if (unchecked === 1 && checkedGroupIds.size > 0 && !anyWithFish) {
       throw new moleculer.Errors.ValidationError(
         'Negalima grąžinti įrankio į sandėlį, kol nepasvertos žuvys: kiti to paties tipo įrankiai pažymėti kaip patikrinti, bet žuvies svoris dar neįrašytas.',
       );
