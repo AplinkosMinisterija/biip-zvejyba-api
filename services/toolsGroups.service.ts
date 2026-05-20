@@ -1,7 +1,7 @@
 'use strict';
 
 import moleculer, { Context } from 'moleculer';
-import { Action, Service } from 'moleculer-decorators';
+import { Action, Method, Service } from 'moleculer-decorators';
 import DbConnection from '../mixins/database.mixin';
 import ProfileMixin from '../mixins/profile.mixin';
 import { coordinatesToGeometry } from '../modules/geometry';
@@ -400,6 +400,14 @@ export default class ToolsGroupsService extends moleculer.Service {
     if (!currentFishing) {
       throw new moleculer.Errors.ValidationError('Fishing not started');
     }
+
+    // Refuse to return the last unchecked tool of a type when every sibling
+    // of the same type only got an empty "Patikrinta" event (weight_event
+    // with `data: {}`). Otherwise the catch is silently lost: the
+    // `notChecked` popup warns the user but they can click past it; the
+    // hard error forces them to weigh fish on at least one tool first.
+    await this.assertSiblingsHaveFishLogged(ctx, group, currentFishing);
+
     const geom = coordinatesToGeometry(ctx.params.coordinates);
     const removeEvent: ToolsGroupsEvent = await ctx.call('toolsGroupsEvents.create', {
       type: ToolsGroupHistoryTypes.REMOVE_TOOLS,
@@ -595,4 +603,62 @@ export default class ToolsGroupsService extends moleculer.Service {
     return Number(locations[0]?.location_count);
   }
 
+  @Method
+  async assertSiblingsHaveFishLogged(
+    ctx: Context,
+    group: ToolsGroup<'tools'>,
+    currentFishing: Fishing,
+  ) {
+    const toolTypeId = (group.tools?.[0] as Tool<'toolType'> | undefined)?.toolType?.id;
+    const ownLocationId = (group as ToolsGroup<'tools' | 'buildEvent'>).buildEvent?.location?.id;
+    if (!toolTypeId || ownLocationId == null) return;
+
+    // Same shape as `getNotCheckedToolsGroups` — `find` returns user-scoped
+    // groups, IDs come back encoded so comparisons match `currentFishing.id`
+    // without us having to think about `secure: true` decoding.
+    const activeGroups: ToolsGroup<'tools' | 'buildEvent'>[] = await ctx.call(
+      'toolsGroups.find',
+      {
+        query: { removeEvent: { $exists: false } },
+        populate: ['tools', 'buildEvent'],
+      },
+    );
+
+    // Scope siblings by fishing + bar/location + tool type. Each bar is a
+    // self-contained checking session — a net weighed with fish in bar 2
+    // doesn't account for an empty "Patikrinta" sibling in bar 1.
+    const siblings = activeGroups.filter((g) => {
+      const sameFishing = g.buildEvent?.fishing?.id === currentFishing.id;
+      const sameLocation = String(g.buildEvent?.location?.id ?? '') === String(ownLocationId);
+      const sameType = (g.tools as Tool<'toolType'>[] | undefined)?.some(
+        (t) => t?.toolType?.id === toolTypeId,
+      );
+      return sameFishing && sameLocation && sameType;
+    });
+
+    if (!siblings.length) return;
+
+    const siblingIds = siblings.map((g) => g.id);
+    const sibWeights: WeightEvent[] = await ctx.call('weightEvents.find', {
+      query: { fishing: currentFishing.id, toolsGroup: { $in: siblingIds } },
+    });
+
+    const checkedGroupIds = new Set(
+      sibWeights.map((w) => w.toolsGroup).filter((id) => id != null),
+    );
+    if (checkedGroupIds.has(group.id)) return; // self already weighed/checked — allow
+
+    const anyWithFish = sibWeights.some(
+      (w) => w.data && Object.keys(w.data).length > 0,
+    );
+    const unchecked = siblings.length - checkedGroupIds.size;
+
+    // We're the last unchecked of this type AND siblings only have empty
+    // "Patikrinta" events → returning now would lose the catch.
+    if (unchecked === 1 && checkedGroupIds.size > 0 && !anyWithFish) {
+      throw new moleculer.Errors.ValidationError(
+        'Negalima grąžinti įrankio į sandėlį, kol nepasvertos žuvys: kiti to paties tipo įrankiai pažymėti kaip patikrinti, bet žuvies svoris dar neįrašytas.',
+      );
+    }
+  }
 }
