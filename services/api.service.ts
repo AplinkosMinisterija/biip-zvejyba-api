@@ -7,29 +7,6 @@ import ApiGateway from 'moleculer-web';
 import { RequestMessage, RestrictionType } from '../types';
 import { User } from './users.service';
 
-// Comma-separated allowlist, e.g.
-// `CORS_ALLOWED_ORIGINS=https://zvejyba.biip.lt,https://www.zvejyba.biip.lt`.
-// When unset, we fall back to a safe default:
-//   - production → known biip.lt fishing-app origins
-//   - anything else → `*` so dev/curl/vite/mobile sim keeps working
-// This lets the security fix land without a same-PR biip-infra change,
-// and the env can be set later to override the default in case the
-// FE origin moves.
-const DEFAULT_PROD_ORIGINS = [
-  'https://zvejyba.biip.lt',
-  'https://staging-zvejyba.biip.lt',
-];
-function resolveCorsOrigin(): string | string[] {
-  const raw = (process.env.CORS_ALLOWED_ORIGINS || '').trim();
-  if (raw) {
-    return raw
-      .split(',')
-      .map((o) => o.trim())
-      .filter(Boolean);
-  }
-  return process.env.NODE_ENV === 'production' ? DEFAULT_PROD_ORIGINS : '*';
-}
-
 export interface UserAuthMeta {
   user: User;
   app: any;
@@ -52,11 +29,14 @@ export enum AuthUserRole {
     port: process.env.PORT || 3000,
     path: '/zvejyba',
 
-    // Global CORS settings for all routes. Driven by CORS_ALLOWED_ORIGINS
-    // env (comma-separated) so prod can lock to known FE origins;
-    // dev/non-prod keeps `*` for ease of curl/vite/mobile testing.
+    // Global CORS settings for all routes. Stays `*` intentionally —
+    // this API serves an unknown set of third-party clients, so a
+    // closed allowlist would break consumers we don't have an inventory
+    // of. Bearer-token auth (not cookies) means the browser doesn't
+    // auto-send credentials cross-origin, which limits the blast
+    // radius of `*`.
     cors: {
-      origin: resolveCorsOrigin(),
+      origin: '*',
       methods: ['GET', 'OPTIONS', 'POST', 'PUT', 'DELETE'],
       allowedHeaders: '*',
       maxAge: 3600,
