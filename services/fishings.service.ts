@@ -506,46 +506,21 @@ export default class FishTypesService extends moleculer.Service {
     }
   }
 
-  // Lightweight read-only twin of the `endFishing` validations so the
-  // mobile UI can keep the "Baigti žvejybą" button visible but disabled
-  // (with a reason) instead of letting the user submit just to see a
-  // server-side error toast.
-  @Action({
-    rest: 'GET /canFinish',
-    auth: RestrictionType.USER,
-  })
-  async canFinish(
-    ctx: Context<any, UserAuthMeta>,
-  ): Promise<{ canFinish: boolean; reason?: string }> {
-    const current: Fishing = await ctx.call('fishings.currentFishing');
-    if (!current) return { canFinish: false, reason: 'Žvejyba neprasidėjusi' };
-
-    const fishWeightEvents: WeightEvent[] = await ctx.call('weightEvents.find', {
-      query: { fishing: current.id },
+  // Boolean twin of `assertEveryToolTypeHasFishLogged` — used by
+  // `getPreliminaryFishWeight` to ship a `hasUncompletedTools` flag back
+  // to the mobile FE so it can disable "Baigti žvejybą" up-front
+  // without a dedicated extra endpoint.
+  @Method
+  async fishingHasUncompletedTools(ctx: Context, fishing: Fishing): Promise<boolean> {
+    const weights: WeightEvent[] = await ctx.call('weightEvents.find', {
+      query: { fishing: fishing.id },
     });
-
-    const finalFishEvent = fishWeightEvents.find((w) => !w.toolsGroup);
-    const hasPreliminaryFish = fishWeightEvents.some(
-      (w) =>
-        !!w.toolsGroup &&
-        !!w.data &&
-        Object.values(w.data).some((amount) => Number(amount) > 0),
-    );
-    if (hasPreliminaryFish && !finalFishEvent) {
-      return {
-        canFinish: false,
-        reason:
-          'Trūksta žuvies iškrovimo: yra įrašytų preliminarių svorių, bet svėrimas krante dar neatliktas.',
-      };
-    }
-
     try {
-      await this.assertEveryToolTypeHasFishLogged(ctx, current, fishWeightEvents);
-    } catch (e: any) {
-      return { canFinish: false, reason: e?.message };
+      await this.assertEveryToolTypeHasFishLogged(ctx, fishing, weights);
+      return false;
+    } catch {
+      return true;
     }
-
-    return { canFinish: true };
   }
 
   @Action({
@@ -609,7 +584,18 @@ export default class FishTypesService extends moleculer.Service {
       },
       { toolsGroups: [], fishWeights: {} },
     );
-    return { total: totalWeightEvent?.data, preliminary: data.fishWeights };
+
+    // Fishing-wide flag — skip when scoped to a single tools group (the
+    // per-tool weigh page doesn't need it).
+    const hasUncompletedTools = toolsGroup
+      ? false
+      : await this.fishingHasUncompletedTools(ctx, currentFishing);
+
+    return {
+      total: totalWeightEvent?.data,
+      preliminary: data.fishWeights,
+      hasUncompletedTools,
+    };
   }
 
   @Action({
