@@ -2,7 +2,7 @@
 
 import ExcelJS from 'exceljs';
 import moleculer, { Context } from 'moleculer';
-import { Action, Service } from 'moleculer-decorators';
+import { Action, Method, Service } from 'moleculer-decorators';
 import PostgisMixin from 'moleculer-postgis';
 import DbConnection from '../mixins/database.mixin';
 import {
@@ -24,6 +24,8 @@ import { FishType } from './fishTypes.service';
 import { Coordinates, CoordinatesProp, Location } from './location.service';
 import { Polder } from './polders.service';
 import { Tenant } from './tenants.service';
+import { Tool } from './tools.service';
+import { ToolsGroup } from './toolsGroups.service';
 import { User } from './users.service';
 import { GetFishByFishingResponse, WeightEvent } from './weightEvents.service';
 
@@ -433,12 +435,75 @@ export default class FishTypesService extends moleculer.Service {
     if (hasPreliminaryFish && !finalFishEvent) {
       throw new moleculer.Errors.ValidationError('Fish must be weighted');
     }
+
+    // Field report: angler builds nets, hits "Patikrinta" on each without
+    // recording fish, then ends fishing — no catch ever logged. The
+    // `assertSiblingsHaveFishLogged` guard on `removeTools` only catches
+    // the per-bar / per-type return path; nothing stopped the end-fishing
+    // shortcut. Mirror the same logic across the whole fishing here.
+    await this.assertEveryToolTypeHasFishLogged(ctx, current, fishWeightEvents);
+
     const geom = coordinatesToGeometry(ctx.params.coordinates);
     const endEvent: FishingEvent = await ctx.call('fishingEvents.create', {
       geom,
       type: FishingEventType.END,
     });
     return this.updateEntity(ctx, { id: current.id, endEvent: endEvent.id });
+  }
+
+  // Refuse end-of-fishing when any tool type in the current fishing has a
+  // weight event recorded but no fish payload anywhere across siblings of
+  // that type — the "Patikrinta" shortcut otherwise lets the user wipe an
+  // empty catch from the journal silently. Same shape as
+  // `toolsGroups.assertSiblingsHaveFishLogged`, just scoped per type
+  // across the whole fishing instead of the per-bar last-unchecked case.
+  @Method
+  async assertEveryToolTypeHasFishLogged(
+    ctx: Context,
+    fishing: Fishing,
+    fishWeightEvents: WeightEvent[],
+  ) {
+    const activeGroups: ToolsGroup<'tools' | 'buildEvent'>[] = await ctx.call(
+      'toolsGroups.find',
+      {
+        query: { removeEvent: { $exists: false } },
+        populate: ['tools', 'buildEvent'],
+      },
+    );
+    const inFishing = activeGroups.filter(
+      (g) => g.buildEvent?.fishing?.id === fishing.id,
+    );
+    if (!inFishing.length) return;
+
+    type TypeBucket = { hasChecked: boolean; hasFish: boolean };
+    const byType = new Map<number, TypeBucket>();
+
+    for (const g of inFishing) {
+      const tt = (g.tools as Tool<'toolType'>[] | undefined)?.[0]?.toolType?.id;
+      if (tt == null) continue;
+      if (!byType.has(tt)) byType.set(tt, { hasChecked: false, hasFish: false });
+    }
+
+    for (const w of fishWeightEvents) {
+      if (w.toolsGroup == null) continue; // shore weigh row, not per-tool
+      const grp = inFishing.find((g) => g.id === w.toolsGroup);
+      if (!grp) continue;
+      const tt = (grp.tools as Tool<'toolType'>[] | undefined)?.[0]?.toolType?.id;
+      if (tt == null) continue;
+      const bucket = byType.get(tt) ?? { hasChecked: false, hasFish: false };
+      bucket.hasChecked = true;
+      if (w.data && Object.keys(w.data).length > 0) bucket.hasFish = true;
+      byType.set(tt, bucket);
+    }
+
+    const offending = Array.from(byType.values()).some(
+      (s) => s.hasChecked && !s.hasFish,
+    );
+    if (offending) {
+      throw new moleculer.Errors.ValidationError(
+        'Negalima baigti žvejybos: yra įrankių, pažymėtų kaip patikrinti, bet žuvies svoris dar neįrašytas. Pirmiausia įrašykite žuvis arba grąžinkite įrankius į sandėlį.',
+      );
+    }
   }
 
   @Action({
