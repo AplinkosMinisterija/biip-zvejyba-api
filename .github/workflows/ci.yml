@@ -6,6 +6,58 @@ on:
   pull_request:
 
 jobs:
+  validate:
+    name: Validate node application
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # PostGIS is required — the app stores geometry in EPSG:3346 (LKS94).
+        image: postgis/postgis:14-master
+        ports: ['5644:5432']
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: zvejyba
+          TZ: 'Etc/GMT'
+          PGTZ: 'Etc/GMT'
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 30
+
+      redis:
+        image: redis:7
+        ports: ['5691:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: package.json
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --immutable --immutable-cache --check-cache
+
+      - name: Build
+        run: yarn build
+
+      - name: Test
+        run: yarn test
+        env:
+          DB_CONNECTION: postgresql://postgres:postgres@localhost:5644/zvejyba
+          REDIS_CONNECTION: redis://localhost:5691
+
   validate-docker-build:
     name: Validate if docker image builds
     uses: AplinkosMinisterija/reusable-workflows/.github/workflows/docker-build-push.yml@main
