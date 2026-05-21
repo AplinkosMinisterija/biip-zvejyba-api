@@ -322,14 +322,27 @@ export default class ToolTypesService extends moleculer.Service {
       path: '/uetk/statistics',
     },
     params: {
+      // Accept either an ISO date string OR an explicit {from, to} window —
+      // never an arbitrary Mongo-style operator object. The previous
+      // signature ran `JSON.parse(date)` on caller input and used the
+      // result as `query.createdAt`, which let an unauthenticated caller
+      // smuggle `{"$ne":null}` / `{"$gt":"…"}` and scrape the full
+      // weight_events dataset by cadastralId. See /cso audit Finding #7.
       date: [
         {
           type: 'string',
           optional: true,
+          // ISO-8601 prefix is enough — Postgres parses the rest.
+          pattern: '^\\d{4}-\\d{2}-\\d{2}',
         },
         {
           type: 'object',
           optional: true,
+          strict: 'remove',
+          props: {
+            from: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}', optional: true },
+            to: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}', optional: true },
+          },
         },
       ],
       fish: {
@@ -340,17 +353,21 @@ export default class ToolTypesService extends moleculer.Service {
     },
     auth: RestrictionType.PUBLIC,
   })
-  async getStatisticsForUETK(ctx: Context<{ date: any; fish: number }>) {
+  async getStatisticsForUETK(
+    ctx: Context<{ date: string | { from?: string; to?: string }; fish: number }>,
+  ) {
     const { fish: fishId, date } = ctx.params;
     const query: any = {
       toolsGroup: { $exists: false },
     };
 
-    if (date) {
+    if (typeof date === 'string') {
       query.createdAt = date;
-      try {
-        query.createdAt = JSON.parse(date);
-      } catch (err) {}
+    } else if (date && typeof date === 'object') {
+      const range: Record<string, string> = {};
+      if (date.from) range.$gte = date.from;
+      if (date.to) range.$lte = date.to;
+      if (Object.keys(range).length > 0) query.createdAt = range;
     }
     const events: WeightEvent<'fishing'>[] = await ctx.call('weightEvents.find', {
       query,

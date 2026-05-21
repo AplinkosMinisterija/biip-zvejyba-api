@@ -1,10 +1,34 @@
 'use strict';
 
+import helmet from 'helmet';
 import moleculer, { Context } from 'moleculer';
 import { Action, Method, Service } from 'moleculer-decorators';
 import ApiGateway from 'moleculer-web';
 import { RequestMessage, RestrictionType } from '../types';
 import { User } from './users.service';
+
+// Comma-separated allowlist, e.g.
+// `CORS_ALLOWED_ORIGINS=https://zvejyba.biip.lt,https://www.zvejyba.biip.lt`.
+// When unset, we fall back to a safe default:
+//   - production → known biip.lt fishing-app origins
+//   - anything else → `*` so dev/curl/vite/mobile sim keeps working
+// This lets the security fix land without a same-PR biip-infra change,
+// and the env can be set later to override the default in case the
+// FE origin moves.
+const DEFAULT_PROD_ORIGINS = [
+  'https://zvejyba.biip.lt',
+  'https://staging-zvejyba.biip.lt',
+];
+function resolveCorsOrigin(): string | string[] {
+  const raw = (process.env.CORS_ALLOWED_ORIGINS || '').trim();
+  if (raw) {
+    return raw
+      .split(',')
+      .map((o) => o.trim())
+      .filter(Boolean);
+  }
+  return process.env.NODE_ENV === 'production' ? DEFAULT_PROD_ORIGINS : '*';
+}
 
 export interface UserAuthMeta {
   user: User;
@@ -24,20 +48,17 @@ export enum AuthUserRole {
   name: 'api',
   mixins: [ApiGateway],
   // More info about settings: https://moleculer.services/docs/0.14/moleculer-web.html
-  // TODO: helmet
   settings: {
     port: process.env.PORT || 3000,
     path: '/zvejyba',
 
-    // Global CORS settings for all routes
+    // Global CORS settings for all routes. Driven by CORS_ALLOWED_ORIGINS
+    // env (comma-separated) so prod can lock to known FE origins;
+    // dev/non-prod keeps `*` for ease of curl/vite/mobile testing.
     cors: {
-      // Configures the Access-Control-Allow-Origin CORS header.
-      origin: '*',
-      // Configures the Access-Control-Allow-Methods CORS header.
+      origin: resolveCorsOrigin(),
       methods: ['GET', 'OPTIONS', 'POST', 'PUT', 'DELETE'],
-      // Configures the Access-Control-Allow-Headers CORS header.
       allowedHeaders: '*',
-      // Configures the Access-Control-Max-Age CORS header.
       maxAge: 3600,
     },
 
@@ -49,8 +70,12 @@ export enum AuthUserRole {
           '**',
         ],
 
-        // Route-level Express middlewares. More info: https://moleculer.services/docs/0.14/moleculer-web.html#Middlewares
-        use: [],
+        // Route-level Express middlewares. Helmet adds standard security
+        // headers (X-Content-Type-Options, Referrer-Policy, HSTS in prod,
+        // etc.). CSP is intentionally disabled — this is a JSON API, not
+        // an HTML surface, and a wrong CSP here breaks the `minio.getFile`
+        // file proxy / xlsx export response without protecting anything.
+        use: [helmet({ contentSecurityPolicy: false })],
 
         // Enable/disable parameter merging method. More info: https://moleculer.services/docs/0.14/moleculer-web.html#Disable-merging
         mergeParams: true,
