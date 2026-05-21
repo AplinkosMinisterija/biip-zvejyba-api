@@ -73,3 +73,5 @@ dist/
 
 # Remove generated files
 generated-sources
+# Playwright MCP local snapshots
+.playwright-mcp/
