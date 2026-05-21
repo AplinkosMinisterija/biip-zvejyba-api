@@ -506,6 +506,48 @@ export default class FishTypesService extends moleculer.Service {
     }
   }
 
+  // Lightweight read-only twin of the `endFishing` validations so the
+  // mobile UI can keep the "Baigti žvejybą" button visible but disabled
+  // (with a reason) instead of letting the user submit just to see a
+  // server-side error toast.
+  @Action({
+    rest: 'GET /canFinish',
+    auth: RestrictionType.USER,
+  })
+  async canFinish(
+    ctx: Context<any, UserAuthMeta>,
+  ): Promise<{ canFinish: boolean; reason?: string }> {
+    const current: Fishing = await ctx.call('fishings.currentFishing');
+    if (!current) return { canFinish: false, reason: 'Žvejyba neprasidėjusi' };
+
+    const fishWeightEvents: WeightEvent[] = await ctx.call('weightEvents.find', {
+      query: { fishing: current.id },
+    });
+
+    const finalFishEvent = fishWeightEvents.find((w) => !w.toolsGroup);
+    const hasPreliminaryFish = fishWeightEvents.some(
+      (w) =>
+        !!w.toolsGroup &&
+        !!w.data &&
+        Object.values(w.data).some((amount) => Number(amount) > 0),
+    );
+    if (hasPreliminaryFish && !finalFishEvent) {
+      return {
+        canFinish: false,
+        reason:
+          'Trūksta žuvies iškrovimo: yra įrašytų preliminarių svorių, bet svėrimas krante dar neatliktas.',
+      };
+    }
+
+    try {
+      await this.assertEveryToolTypeHasFishLogged(ctx, current, fishWeightEvents);
+    } catch (e: any) {
+      return { canFinish: false, reason: e?.message };
+    }
+
+    return { canFinish: true };
+  }
+
   @Action({
     rest: 'GET /current',
     auth: RestrictionType.USER,
