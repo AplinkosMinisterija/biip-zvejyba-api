@@ -475,13 +475,24 @@ export default class FishTypesService extends moleculer.Service {
     );
     if (!inFishing.length) return;
 
-    type TypeBucket = { hasChecked: boolean; hasFish: boolean };
-    const byType = new Map<number, TypeBucket>();
+    // Scope per (tool type, location) — same granularity as the FE
+    // `computeBuiltToolsGuards` helper (zvejyba-web/src/utils/functions.ts),
+    // which is called per FishingTools page (i.e. per location). A net
+    // weighed with fish in bar 2 must not absolve an empty Patikrinta
+    // sibling in bar 1.
+    type Bucket = { hasChecked: boolean; hasFish: boolean };
+    const byTypeLocation = new Map<string, Bucket>();
+    const keyFor = (toolTypeId: number | undefined, locationId: unknown) =>
+      toolTypeId != null && locationId != null
+        ? `${toolTypeId}::${String(locationId)}`
+        : null;
 
     for (const g of inFishing) {
       const tt = (g.tools as Tool<'toolType'>[] | undefined)?.[0]?.toolType?.id;
-      if (tt == null) continue;
-      if (!byType.has(tt)) byType.set(tt, { hasChecked: false, hasFish: false });
+      const loc = g.buildEvent?.location?.id;
+      const key = keyFor(tt, loc);
+      if (!key) continue;
+      if (!byTypeLocation.has(key)) byTypeLocation.set(key, { hasChecked: false, hasFish: false });
     }
 
     for (const w of fishWeightEvents) {
@@ -489,14 +500,16 @@ export default class FishTypesService extends moleculer.Service {
       const grp = inFishing.find((g) => g.id === w.toolsGroup);
       if (!grp) continue;
       const tt = (grp.tools as Tool<'toolType'>[] | undefined)?.[0]?.toolType?.id;
-      if (tt == null) continue;
-      const bucket = byType.get(tt) ?? { hasChecked: false, hasFish: false };
+      const loc = grp.buildEvent?.location?.id;
+      const key = keyFor(tt, loc);
+      if (!key) continue;
+      const bucket = byTypeLocation.get(key) ?? { hasChecked: false, hasFish: false };
       bucket.hasChecked = true;
       if (w.data && Object.keys(w.data).length > 0) bucket.hasFish = true;
-      byType.set(tt, bucket);
+      byTypeLocation.set(key, bucket);
     }
 
-    const offending = Array.from(byType.values()).some(
+    const offending = Array.from(byTypeLocation.values()).some(
       (s) => s.hasChecked && !s.hasFish,
     );
     if (offending) {
