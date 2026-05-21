@@ -17,6 +17,21 @@ import DbConnection, { PopulateHandlerFn } from '../mixins/database.mixin';
 import { isInGroup } from '../utils';
 import { AuthUserRole, UserAuthMeta } from './api.service';
 
+// Strip security-sensitive keys from user-supplied query before merging
+// with our enforced tenant scope. Mirrors `sanitizeUserQuery` in
+// profile.mixin.ts — caller-controlled `$raw` is especially dangerous
+// because moleculer-knex-filters executes it as raw SQL.
+const TENANT_SCOPE_FORBIDDEN_KEYS = ['$raw', 'tenants'] as const;
+function sanitizeQueryForTenantScope(query: any) {
+  if (!query || typeof query !== 'object') return {};
+  const clean: Record<string, any> = {};
+  for (const key of Object.keys(query)) {
+    if ((TENANT_SCOPE_FORBIDDEN_KEYS as readonly string[]).includes(key)) continue;
+    clean[key] = query[key];
+  }
+  return clean;
+}
+
 export enum UserRole {
   ADMIN = 'ROLE_ADMIN',
   USER = 'ROLE_USER',
@@ -172,12 +187,16 @@ export default class UsersService extends moleculer.Service {
       });
     }
     if (ctx.meta.user && ctx.meta.profile) {
+      // Security $raw clause must be spread LAST so a user-supplied
+      // `query.$raw` cannot replace the tenant scope and read users
+      // outside their tenant.
+      const userQuery = sanitizeQueryForTenantScope(ctx.params.query);
       ctx.params.query = {
+        ...userQuery,
         $raw: {
           condition: `?? \\? ?`,
           bindings: ['tenants', Number(ctx.meta.profile)],
         },
-        ...ctx.params.query,
       };
     } else if (
       !ctx.meta.user &&
@@ -203,9 +222,10 @@ export default class UsersService extends moleculer.Service {
               bindings: ['tenants', ctx.params.filter.tenantId],
             };
           }
+          const adminQuery = sanitizeQueryForTenantScope(ctx.params.query);
           ctx.params.query = {
+            ...adminQuery,
             $raw,
-            ...ctx.params.query,
           };
           delete ctx.params.filter.tenantId;
           delete ctx.params.filter.role;
@@ -298,9 +318,10 @@ export default class UsersService extends moleculer.Service {
       };
     }
 
+    const byTenantQuery = sanitizeQueryForTenantScope(params.query);
     params.query = {
+      ...byTenantQuery,
       $raw,
-      ...params.query,
     };
 
     const rows = await this.findEntities(ctx, params);
@@ -336,9 +357,10 @@ export default class UsersService extends moleculer.Service {
         bindings: ['tenants', ...ids],
       };
 
+      const listQuery = sanitizeQueryForTenantScope(params.query);
       params.query = {
+        ...listQuery,
         $raw,
-        ...params.query,
       };
     }
 
@@ -408,17 +430,22 @@ export default class UsersService extends moleculer.Service {
     const adapter = await this.getAdapter(ctx);
     const table = adapter.getTable();
 
+    // Use parameterized bindings, not string interpolation. Today both
+    // values are validated (enum role, numeric tenant FK), but interpolating
+    // into raw SQL is a time-bomb — anyone wiring a `permissive: true`
+    // path on `tenantUsers.create/update` would turn this into SQL
+    // injection through the `role` string.
     switch (type) {
       case 'create':
       case 'update':
       case 'replace':
-        $set.tenants = table.client.raw(
-          `tenants || '{"${tenantUser.tenant}":"${tenantUser.role}"}'::jsonb`,
-        );
+        $set.tenants = table.client.raw(`tenants || ?::jsonb`, [
+          JSON.stringify({ [String(tenantUser.tenant)]: tenantUser.role }),
+        ]);
         break;
 
       case 'remove':
-        $set.tenants = table.client.raw(`tenants - '${tenantUser.tenant}'`);
+        $set.tenants = table.client.raw(`tenants - ?`, [String(tenantUser.tenant)]);
         break;
     }
 
