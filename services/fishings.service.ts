@@ -418,7 +418,7 @@ export default class FishTypesService extends moleculer.Service {
       throw new moleculer.Errors.ValidationError('Fishing not started');
     }
     //validate if fishing has unweighted fish
-    const fishWeightEvents: WeightEvent[] = await ctx.call('weightEvents.find', {
+    const fishWeightEvents: WeightEvent<'toolsGroup'>[] = await ctx.call('weightEvents.find', {
       query: {
         fishing: current.id,
       },
@@ -462,7 +462,7 @@ export default class FishTypesService extends moleculer.Service {
   async assertEveryToolTypeHasFishLogged(
     ctx: Context,
     fishing: Fishing,
-    fishWeightEvents: WeightEvent[],
+    fishWeightEvents: WeightEvent<'toolsGroup'>[],
   ) {
     // Ignore Patikrinta events on tools that were later returned — the
     // angler explicitly took the inventory back and that's not the case
@@ -477,8 +477,12 @@ export default class FishTypesService extends moleculer.Service {
         .map((g) => g.id),
     );
 
+    // `weightEvents` defaultPopulates includes `toolsGroup`, so `w.toolsGroup`
+    // is the populated ToolsGroup object — match by `.id` (encoded string),
+    // not by the field itself. Compare CLAUDE.md "Virtual-field populate
+    // gotchas" and the working `getNotCheckedToolsGroups` lookup.
     const hasCheckedActiveTool = fishWeightEvents.some(
-      (w) => w.toolsGroup != null && activeInFishingIds.has(w.toolsGroup),
+      (w) => w.toolsGroup?.id != null && activeInFishingIds.has(w.toolsGroup.id),
     );
     if (!hasCheckedActiveTool) return;
 
@@ -498,7 +502,7 @@ export default class FishTypesService extends moleculer.Service {
   // without a dedicated extra endpoint.
   @Method
   async fishingHasUncompletedTools(ctx: Context, fishing: Fishing): Promise<boolean> {
-    const weights: WeightEvent[] = await ctx.call('weightEvents.find', {
+    const weights: WeightEvent<'toolsGroup'>[] = await ctx.call('weightEvents.find', {
       query: { fishing: fishing.id },
     });
     try {
