@@ -24,7 +24,6 @@ import { FishType } from './fishTypes.service';
 import { Coordinates, CoordinatesProp, Location } from './location.service';
 import { Polder } from './polders.service';
 import { Tenant } from './tenants.service';
-import { ToolsGroup } from './toolsGroups.service';
 import { User } from './users.service';
 import { GetFishByFishingResponse, WeightEvent } from './weightEvents.service';
 
@@ -451,41 +450,19 @@ export default class FishTypesService extends moleculer.Service {
     return this.updateEntity(ctx, { id: current.id, endEvent: endEvent.id });
   }
 
-  // Refuse end-of-fishing when there's at least one "Patikrinta" event on
-  // an active tool in this fishing but no fish was ever weighed anywhere —
-  // the "Patikrinta" shortcut otherwise lets the user wipe an empty catch
-  // from the journal silently. Scoped fishing-wide, not per (tool type,
-  // location): a single fish payload anywhere in the fishing unblocks
-  // Baigti. The per-bar last-unchecked guard in
-  // `toolsGroups.assertSiblingsHaveFishLogged` still prevents stranding
-  // the catch on individual returns.
+  // Refuse end-of-fishing when this fishing has any weight event but no
+  // fish payload anywhere. The "Patikrinta" shortcut creates an empty
+  // weight event so anglers don't accidentally close out the journal
+  // having logged "checked" but never recording catch. Returned tools'
+  // events still count — see the related PR for the rationale (return
+  // is not a sanctioned escape hatch out of the report).
   @Method
   async assertEveryToolTypeHasFishLogged(
-    ctx: Context,
-    fishing: Fishing,
+    _ctx: Context,
+    _fishing: Fishing,
     fishWeightEvents: WeightEvent<'toolsGroup'>[],
   ) {
-    // Ignore Patikrinta events on tools that were later returned — the
-    // angler explicitly took the inventory back and that's not the case
-    // we want to block.
-    const activeGroups: ToolsGroup<'buildEvent'>[] = await ctx.call('toolsGroups.find', {
-      query: { removeEvent: { $exists: false } },
-      populate: ['buildEvent'],
-    });
-    const activeInFishingIds = new Set(
-      activeGroups
-        .filter((g) => g.buildEvent?.fishing?.id === fishing.id)
-        .map((g) => g.id),
-    );
-
-    // `weightEvents` defaultPopulates includes `toolsGroup`, so `w.toolsGroup`
-    // is the populated ToolsGroup object — match by `.id` (encoded string),
-    // not by the field itself. Compare CLAUDE.md "Virtual-field populate
-    // gotchas" and the working `getNotCheckedToolsGroups` lookup.
-    const hasCheckedActiveTool = fishWeightEvents.some(
-      (w) => w.toolsGroup?.id != null && activeInFishingIds.has(w.toolsGroup.id),
-    );
-    if (!hasCheckedActiveTool) return;
+    if (!fishWeightEvents.length) return;
 
     const hasAnyFishLogged = fishWeightEvents.some(
       (w) => w.data && Object.keys(w.data).length > 0,
