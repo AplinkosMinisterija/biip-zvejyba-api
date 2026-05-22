@@ -24,7 +24,6 @@ import { FishType } from './fishTypes.service';
 import { Coordinates, CoordinatesProp, Location } from './location.service';
 import { Polder } from './polders.service';
 import { Tenant } from './tenants.service';
-import { Tool } from './tools.service';
 import { ToolsGroup } from './toolsGroups.service';
 import { User } from './users.service';
 import { GetFishByFishingResponse, WeightEvent } from './weightEvents.service';
@@ -452,68 +451,42 @@ export default class FishTypesService extends moleculer.Service {
     return this.updateEntity(ctx, { id: current.id, endEvent: endEvent.id });
   }
 
-  // Refuse end-of-fishing when any tool type in the current fishing has a
-  // weight event recorded but no fish payload anywhere across siblings of
-  // that type — the "Patikrinta" shortcut otherwise lets the user wipe an
-  // empty catch from the journal silently. Same shape as
-  // `toolsGroups.assertSiblingsHaveFishLogged`, just scoped per type
-  // across the whole fishing instead of the per-bar last-unchecked case.
+  // Refuse end-of-fishing when there's at least one "Patikrinta" event on
+  // an active tool in this fishing but no fish was ever weighed anywhere —
+  // the "Patikrinta" shortcut otherwise lets the user wipe an empty catch
+  // from the journal silently. Scoped fishing-wide, not per (tool type,
+  // location): a single fish payload anywhere in the fishing unblocks
+  // Baigti. The per-bar last-unchecked guard in
+  // `toolsGroups.assertSiblingsHaveFishLogged` still prevents stranding
+  // the catch on individual returns.
   @Method
   async assertEveryToolTypeHasFishLogged(
     ctx: Context,
     fishing: Fishing,
     fishWeightEvents: WeightEvent[],
   ) {
-    const activeGroups: ToolsGroup<'tools' | 'buildEvent'>[] = await ctx.call(
-      'toolsGroups.find',
-      {
-        query: { removeEvent: { $exists: false } },
-        populate: ['tools', 'buildEvent'],
-      },
+    // Ignore Patikrinta events on tools that were later returned — the
+    // angler explicitly took the inventory back and that's not the case
+    // we want to block.
+    const activeGroups: ToolsGroup<'buildEvent'>[] = await ctx.call('toolsGroups.find', {
+      query: { removeEvent: { $exists: false } },
+      populate: ['buildEvent'],
+    });
+    const activeInFishingIds = new Set(
+      activeGroups
+        .filter((g) => g.buildEvent?.fishing?.id === fishing.id)
+        .map((g) => g.id),
     );
-    const inFishing = activeGroups.filter(
-      (g) => g.buildEvent?.fishing?.id === fishing.id,
+
+    const hasCheckedActiveTool = fishWeightEvents.some(
+      (w) => w.toolsGroup != null && activeInFishingIds.has(w.toolsGroup),
     );
-    if (!inFishing.length) return;
+    if (!hasCheckedActiveTool) return;
 
-    // Scope per (tool type, location) — same granularity as the FE
-    // `computeBuiltToolsGuards` helper (zvejyba-web/src/utils/functions.ts),
-    // which is called per FishingTools page (i.e. per location). A net
-    // weighed with fish in bar 2 must not absolve an empty Patikrinta
-    // sibling in bar 1.
-    type Bucket = { hasChecked: boolean; hasFish: boolean };
-    const byTypeLocation = new Map<string, Bucket>();
-    const keyFor = (toolTypeId: number | undefined, locationId: unknown) =>
-      toolTypeId != null && locationId != null
-        ? `${toolTypeId}::${String(locationId)}`
-        : null;
-
-    for (const g of inFishing) {
-      const tt = (g.tools as Tool<'toolType'>[] | undefined)?.[0]?.toolType?.id;
-      const loc = g.buildEvent?.location?.id;
-      const key = keyFor(tt, loc);
-      if (!key) continue;
-      if (!byTypeLocation.has(key)) byTypeLocation.set(key, { hasChecked: false, hasFish: false });
-    }
-
-    for (const w of fishWeightEvents) {
-      if (w.toolsGroup == null) continue; // shore weigh row, not per-tool
-      const grp = inFishing.find((g) => g.id === w.toolsGroup);
-      if (!grp) continue;
-      const tt = (grp.tools as Tool<'toolType'>[] | undefined)?.[0]?.toolType?.id;
-      const loc = grp.buildEvent?.location?.id;
-      const key = keyFor(tt, loc);
-      if (!key) continue;
-      const bucket = byTypeLocation.get(key) ?? { hasChecked: false, hasFish: false };
-      bucket.hasChecked = true;
-      if (w.data && Object.keys(w.data).length > 0) bucket.hasFish = true;
-      byTypeLocation.set(key, bucket);
-    }
-
-    const offending = Array.from(byTypeLocation.values()).some(
-      (s) => s.hasChecked && !s.hasFish,
+    const hasAnyFishLogged = fishWeightEvents.some(
+      (w) => w.data && Object.keys(w.data).length > 0,
     );
-    if (offending) {
+    if (!hasAnyFishLogged) {
       throw new moleculer.Errors.ValidationError(
         'Negalima baigti žvejybos: yra įrankių, pažymėtų kaip patikrinti, bet žuvies svoris dar neįrašytas. Pirmiausia įrašykite žuvis arba grąžinkite įrankius į sandėlį.',
       );
