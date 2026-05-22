@@ -244,6 +244,47 @@ appear without the `call` prefix (e.g. `mol $ tenants-import --dry`).
 - **import-tenants** branch — kept locally; one-shot `tenants.importBatch`
   action with seed data of 39 companies.
 
+## Known risks
+
+### GPS coordinates are *not* certified legal evidence
+
+The mobile FE relies on `navigator.geolocation` (W3C). The browser
+delegates to the OS, which fuses (1) the device GNSS chip, (2) WiFi
+MAC triangulation, and (3) cell-tower lookup. None of these are
+certified to forensic-grade accuracy.
+
+Field reports (fishing 297, 298, 301) showed events clustered tens of
+kilometers away from the picked Kuršių marios bar — the phone was
+genuinely there (at the angler's home / dock); the position field is
+honest but lying about where the fishing happened. A separate failure
+mode is the desktop / WiFi case where the ISP gateway IP triangulation
+biases everywhere within a city to one block.
+
+Mitigations already in code:
+
+- `biip-zvejyba-web` `GeolocationProvider` rejects fixes with
+  `position.coords.accuracy > 100 m` — drops the cell / WiFi shortcut
+  and waits for a real GPS fix. (PR #148)
+- `tools_groups_events` / `weight_events` carry `location_manual: true`
+  for user-typed WGS coords; admin journal warns on those rows.
+
+What's still missing for legal-evidence use:
+
+- We do not persist `position.coords.accuracy` alongside `geom` — the
+  admin journal cannot show a confidence circle.
+- No geofence check that the event coord is plausibly inside the
+  picked bar / polder / water body polygon — angler can still record
+  a "Patikrinta" from home.
+- A truly attested location requires a native mobile app with
+  hardware-backed GPS attestation (Android 13+ Play Integrity, iOS
+  15+ Core Location integrity check) or an external certified GPS
+  receiver. The browser stack does not provide that.
+
+For now treat the journal as **operational evidence** (good faith
+record of what the user reported) rather than **forensic evidence**
+(prosecutable proof of presence). When legal cases come up, this
+limitation should be on the table early.
+
 ## Conventions
 
 - Conventional Commits (`feat:`, `fix:`, `chore:`); merges through PRs,
