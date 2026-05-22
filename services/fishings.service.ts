@@ -24,7 +24,6 @@ import { FishType } from './fishTypes.service';
 import { Coordinates, CoordinatesProp, Location } from './location.service';
 import { Polder } from './polders.service';
 import { Tenant } from './tenants.service';
-import { ToolsGroup } from './toolsGroups.service';
 import { User } from './users.service';
 import { GetFishByFishingResponse, WeightEvent } from './weightEvents.service';
 
@@ -460,32 +459,16 @@ export default class FishTypesService extends moleculer.Service {
   // the catch on individual returns.
   @Method
   async assertEveryToolTypeHasFishLogged(
-    ctx: Context,
-    fishing: Fishing,
+    _ctx: Context,
+    _fishing: Fishing,
     fishWeightEvents: WeightEvent<'toolsGroup'>[],
   ) {
-    // Ignore Patikrinta events on tools that were later returned — the
-    // angler explicitly took the inventory back and that's not the case
-    // we want to block.
-    const activeGroups: ToolsGroup<'buildEvent'>[] = await ctx.call('toolsGroups.find', {
-      query: { removeEvent: { $exists: false } },
-      populate: ['buildEvent'],
-    });
-    const activeInFishingIds = new Set(
-      activeGroups
-        .filter((g) => g.buildEvent?.fishing?.id === fishing.id)
-        .map((g) => g.id),
-    );
+    // If the angler hasn't pressed Patikrinta or weighed anything yet,
+    // there's nothing to validate against.
+    if (!fishWeightEvents.length) return;
 
-    // `weightEvents` defaultPopulates includes `toolsGroup`, so `w.toolsGroup`
-    // is the populated ToolsGroup object — match by `.id` (encoded string),
-    // not by the field itself. Compare CLAUDE.md "Virtual-field populate
-    // gotchas" and the working `getNotCheckedToolsGroups` lookup.
-    const hasCheckedActiveTool = fishWeightEvents.some(
-      (w) => w.toolsGroup?.id != null && activeInFishingIds.has(w.toolsGroup.id),
-    );
-    if (!hasCheckedActiveTool) return;
-
+    // Any weight event with a non-empty `data` payload counts as fish
+    // logged (per-tool boat weigh, shore weigh, Patikrinta-with-fish).
     const hasAnyFishLogged = fishWeightEvents.some(
       (w) => w.data && Object.keys(w.data).length > 0,
     );
