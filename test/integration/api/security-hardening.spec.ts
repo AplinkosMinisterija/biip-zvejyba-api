@@ -339,11 +339,22 @@ describe('A7 — users.updateMyProfile only writes email/phone', () => {
   });
 });
 
-describe('M4 — tenants.remove is SUPER_ADMIN-only', () => {
-  it('plain ADMIN cannot DELETE /tenants/:id', async () => {
+describe('M4 — tenants.remove stays ADMIN-tier (operational requirement)', () => {
+  // Earlier draft locked this to SUPER_ADMIN; reverted on user feedback —
+  // ROLE_ADMIN operators in biip-admin-web routinely manage tenant
+  // lifecycle (onboarding, suspension, removal). Assert here that a
+  // regular ADMIN auth user CAN still delete, while a USER cannot.
+  it('plain ADMIN CAN DELETE /tenants/:id', async () => {
     const res = await request(apiService.server)
       .delete(`/zvejyba/api/tenants/${apiHelper.tenantB.tenant.id}`)
       .set(apiHelper.getHeaders(apiHelper.adminA.token));
+    expect(res.status).toBe(200);
+  });
+
+  it('USER role cannot DELETE /tenants/:id', async () => {
+    const res = await request(apiService.server)
+      .delete(`/zvejyba/api/tenants/${apiHelper.tenantA.tenant.id}`)
+      .set(apiHelper.getHeaders(apiHelper.ownerA.token, apiHelper.tenantA.tenant.id));
     expect([401, 403]).toContain(res.status);
   });
 });
@@ -366,8 +377,11 @@ describe('H11 — tools.toolsGroup populate uses parameterized $raw', () => {
 
 describe('A8 — partial UNIQUE indices prevent active-row duplicates', () => {
   it('tenant_users (tenant_id, user_id) cannot duplicate', async () => {
+    // Use tenantA — tenantB was just removed by the M4 ADMIN-delete test
+    // above (specs share a broker instance, jest runs describe blocks in
+    // file order). tenantA is the OWNER's home tenant and stays put.
     const fresh = await apiHelper.makeTenantMember(
-      apiHelper.tenantB,
+      apiHelper.tenantA,
       'USER' as any,
     );
     // Try to add the same user again to the same tenant.
@@ -375,7 +389,7 @@ describe('A8 — partial UNIQUE indices prevent active-row duplicates', () => {
       broker.call(
         'tenantUsers.create',
         {
-          tenant: apiHelper.tenantB.tenant.id,
+          tenant: apiHelper.tenantA.tenant.id,
           user: fresh.user.id,
           role: 'USER',
         },

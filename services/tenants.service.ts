@@ -108,11 +108,13 @@ export interface Tenant {
       rest: null,
     },
     update: {},
-    // Tenant deletion is destructive and cascades through tenantUsers,
-    // fishings, weight events, etc. Restrict to SUPER_ADMIN so junior
-    // platform admins can't accidentally soft-delete a paying company
-    // (audit security #M4).
-    remove: { auth: RestrictionType.SUPER_ADMIN },
+    // `tenants.remove` stays at the service-level `auth: ADMIN`.
+    // An earlier hardening pass (PR #129, M4) escalated this to
+    // SUPER_ADMIN, but routine tenant lifecycle (onboarding,
+    // suspension, removal) is admin's daily job through biip-admin-web.
+    // SUPER_ADMIN tier is reserved for platform-level operations
+    // (impersonation, deep auth tools).
+    remove: {},
   },
 })
 export default class TenantsService extends moleculer.Service {
