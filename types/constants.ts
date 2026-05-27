@@ -6,7 +6,11 @@ export enum RestrictionType {
   // DEFAULT = USER or ADMIN
   DEFAULT = 'DEFAULT',
   USER = 'USER',
+  // ADMIN accepts both AuthUserRole.ADMIN and AuthUserRole.SUPER_ADMIN.
   ADMIN = 'ADMIN',
+  // SUPER_ADMIN is the tighter gate — only the platform-level super admin
+  // can hit actions tagged with this (e.g. cross-tenant impersonation).
+  SUPER_ADMIN = 'SUPER_ADMIN',
   PUBLIC = 'PUBLIC',
   INVESTIGATOR = 'INVESTIGATOR',
 }

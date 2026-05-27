@@ -16,7 +16,6 @@ import ApiGateway from 'moleculer-web';
 import DbConnection, { PopulateHandlerFn } from '../mixins/database.mixin';
 import { isInGroup } from '../utils';
 import { AuthUserRole, UserAuthMeta } from './api.service';
-import { throwNoRightsError } from '../types';
 
 // Strip security-sensitive keys from user-supplied query before merging
 // with our enforced tenant scope. Mirrors `sanitizeUserQuery` in
@@ -273,6 +272,12 @@ export default class UsersService extends moleculer.Service {
 
   @Action({
     rest: 'POST /:id/impersonate',
+    // SUPER_ADMIN only — `auth: ADMIN` would accept any ROLE_ADMIN, who
+    // could then mint a session for any target user (including other
+    // admins or company OWNERs). See security audit #C7. The dedicated
+    // `RestrictionType.SUPER_ADMIN` tier is enforced by
+    // `api.service.ts authorize()`.
+    auth: RestrictionType.SUPER_ADMIN,
     params: {
       id: {
         type: 'number',
@@ -281,16 +286,6 @@ export default class UsersService extends moleculer.Service {
     },
   })
   async impersonate(ctx: Context<{ id: number }, UserAuthMeta>) {
-    // SUPER_ADMIN only. `auth: ADMIN` falls back to the service-level
-    // restriction, which permits any ROLE_ADMIN to mint a session for
-    // any target user — including other admins or company OWNERs (see
-    // security audit #C7). Tighten here, in the action body, because
-    // moleculer-web's authorize() treats ADMIN and SUPER_ADMIN as
-    // interchangeable for `RestrictionType.ADMIN`.
-    if (ctx.meta?.authUser?.type !== AuthUserRole.SUPER_ADMIN) {
-      throwNoRightsError('Only SUPER_ADMIN may impersonate.');
-    }
-
     const { id } = ctx.params;
     const user: User = await ctx.call('users.resolve', { id });
 

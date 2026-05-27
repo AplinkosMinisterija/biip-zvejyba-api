@@ -200,6 +200,15 @@ export default class ApiService extends moleculer.Service {
       });
     }
 
+    if (
+      restrictionType === RestrictionType.SUPER_ADMIN &&
+      authUser.type !== AuthUserRole.SUPER_ADMIN
+    ) {
+      throw new ApiGateway.Errors.UnAuthorizedError('NO_RIGHTS', {
+        error: 'Unauthorized',
+      });
+    }
+
     if (restrictionType === RestrictionType.USER && authUser.type !== AuthUserRole.USER) {
       throw new ApiGateway.Errors.UnAuthorizedError('NO_RIGHTS', {
         error: 'Unauthorized',
