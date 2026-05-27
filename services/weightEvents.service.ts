@@ -128,6 +128,8 @@ export type WeightEvent<
         type: 'number',
         columnType: 'integer',
         columnName: 'tenantId',
+        // Locked post-create — see security audit #H2.
+        immutable: true,
         populate: {
           action: 'tenants.resolve',
           params: {
@@ -139,6 +141,7 @@ export type WeightEvent<
         type: 'number',
         columnType: 'integer',
         columnName: 'userId',
+        immutable: true,
         populate: {
           action: 'users.resolve',
           params: {

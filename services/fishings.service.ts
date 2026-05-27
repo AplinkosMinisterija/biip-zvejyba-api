@@ -157,6 +157,11 @@ export type Fishing<
         type: 'number',
         columnType: 'integer',
         columnName: 'tenantId',
+        // Stamped at creation by ProfileMixin.beforeCreate from the
+        // caller's profile. Locking `update` prevents an ADMIN from
+        // re-parenting a fishing into another company via
+        // `PATCH /fishings/:id` (see security audit #H2).
+        immutable: true,
         populate: {
           action: 'tenants.resolve',
           params: {
@@ -174,6 +179,8 @@ export type Fishing<
         type: 'number',
         columnType: 'integer',
         columnName: 'userId',
+        // Same reason as `tenant` above — author is fixed at create.
+        immutable: true,
         populate: {
           action: 'users.resolve',
           params: {
@@ -294,7 +301,18 @@ export type Fishing<
   },
 })
 export default class FishTypesService extends moleculer.Service {
-  @Action()
+  // Internal cron action — must NOT be reachable over HTTP. `rest: null`
+  // alone is insufficient because the gateway's `mappingPolicy: 'all'`
+  // still lets `POST /api/fishings/endFishings` reach the action via the
+  // generic <service>/<action> fallback URL. `visibility: 'protected'`
+  // hides the action from the gateway entirely while keeping internal
+  // `ctx.call('fishings.endFishings')` working for the cron. Without
+  // this, any authenticated USER could mass-close every open fishing
+  // in the system (see security audit #C4).
+  @Action({
+    rest: null as any,
+    visibility: 'protected',
+  })
   async endFishings(ctx: Context) {
     const fishings: Fishing[] = await ctx.call('fishings.find', {
       query: { endEvent: { $exists: false } },

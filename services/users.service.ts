@@ -16,6 +16,7 @@ import ApiGateway from 'moleculer-web';
 import DbConnection, { PopulateHandlerFn } from '../mixins/database.mixin';
 import { isInGroup } from '../utils';
 import { AuthUserRole, UserAuthMeta } from './api.service';
+import { throwNoRightsError } from '../types';
 
 // Strip security-sensitive keys from user-supplied query before merging
 // with our enforced tenant scope. Mirrors `sanitizeUserQuery` in
@@ -176,6 +177,16 @@ export interface User {
     all: {
       auth: RestrictionType.DEFAULT,
     },
+
+    // moleculer-web's `mappingPolicy: 'all'` auto-publishes every default
+    // @moleculer/database action — including `resolve`, which fetches by
+    // primary key without going through the `filterTenant` hook (hooks
+    // only cover count/list/find/get/all). That meant a USER calling
+    // `POST /api/users/resolve {id: <other-tenant-userId>}` got the full
+    // record (see security audit #H1). Drop visibility to `protected` so
+    // internal `ctx.call('users.resolve', ...)` keeps working but HTTP
+    // can't reach it.
+    resolve: { visibility: 'protected' },
   },
 })
 export default class UsersService extends moleculer.Service {
@@ -270,16 +281,34 @@ export default class UsersService extends moleculer.Service {
     },
   })
   async impersonate(ctx: Context<{ id: number }, UserAuthMeta>) {
-    const { id } = ctx.params;
+    // SUPER_ADMIN only. `auth: ADMIN` falls back to the service-level
+    // restriction, which permits any ROLE_ADMIN to mint a session for
+    // any target user — including other admins or company OWNERs (see
+    // security audit #C7). Tighten here, in the action body, because
+    // moleculer-web's authorize() treats ADMIN and SUPER_ADMIN as
+    // interchangeable for `RestrictionType.ADMIN`.
+    if (ctx.meta?.authUser?.type !== AuthUserRole.SUPER_ADMIN) {
+      throwNoRightsError('Only SUPER_ADMIN may impersonate.');
+    }
 
+    const { id } = ctx.params;
     const user: User = await ctx.call('users.resolve', { id });
+
+    this.logger.warn(
+      `[impersonate] SUPER_ADMIN authUserId=${ctx.meta.authUser.id} impersonating userId=${id} authUserId=${user?.authUser}`,
+    );
 
     return ctx.call('auth.users.impersonate', { id: user.authUser });
   }
 
   @Action({
     rest: 'GET /byTenant/:tenant',
-    auth: RestrictionType.DEFAULT,
+    // ADMIN-only: this endpoint rewrites the tenant scope `$raw` from the
+    // URL param, bypassing `filterTenant`. Allowing USER role here let any
+    // member of any tenant enumerate users of any other tenant (see
+    // security audit #C2). Cross-tenant USER queries belong to
+    // `tenantUsers.list`, which is ProfileMixin-scoped.
+    auth: RestrictionType.ADMIN,
     params: {
       tenant: {
         type: 'number',
@@ -331,7 +360,11 @@ export default class UsersService extends moleculer.Service {
   }
 
   @Action({
-    auth: RestrictionType.DEFAULT,
+    // ADMIN-only: same reason as `byTenant` above — when `tenants[]` is
+    // supplied the action wipes the `filterTenant`-installed `$raw` clause
+    // and replaces it with a user-controlled tenant list, allowing
+    // cross-tenant enumeration.
+    auth: RestrictionType.ADMIN,
     params: {
       tenants: {
         type: 'array',

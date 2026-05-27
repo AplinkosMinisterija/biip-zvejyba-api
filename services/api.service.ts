@@ -150,7 +150,28 @@ export default class ApiService extends moleculer.Service {
     ctx.meta.authUser = authUser;
     ctx.meta.authToken = token;
     ctx.meta.user = user;
-    ctx.meta.profile = req.headers['x-profile'];
+
+    // Validate `x-profile` (tenant id) membership at the gateway. Without
+    // this, any USER could set the header to an arbitrary tenant id and
+    // ProfileMixin would silently scope every read/write to that tenant.
+    // Only USER-type callers (those with a local `user` mirror + `tenants`
+    // map) are checked — ADMIN/SUPER_ADMIN have no per-tenant scope.
+    // Freelancer mode sends no `x-profile` header at all (FE skips it when
+    // `isNaN(profileId)`), so missing/empty header is the freelancer path.
+    const profileHeader = req.headers['x-profile'];
+    if (
+      profileHeader != null &&
+      profileHeader !== '' &&
+      authUser.type === AuthUserRole.USER
+    ) {
+      const tenantsMap = (user as any)?.tenants || {};
+      if (!Object.prototype.hasOwnProperty.call(tenantsMap, String(profileHeader))) {
+        throw new ApiGateway.Errors.UnAuthorizedError('NO_RIGHTS', {
+          error: 'Profile not accessible',
+        });
+      }
+    }
+    ctx.meta.profile = profileHeader;
 
     return user;
   }

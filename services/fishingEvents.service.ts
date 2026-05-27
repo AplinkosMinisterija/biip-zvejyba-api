@@ -72,6 +72,8 @@ export type FishingEvent<
         type: 'number',
         columnType: 'integer',
         columnName: 'tenantId',
+        // Locked post-create — see security audit #H2.
+        immutable: true,
         populate: {
           action: 'tenants.resolve',
           params: {
@@ -83,6 +85,8 @@ export type FishingEvent<
         type: 'number',
         columnType: 'integer',
         columnName: 'userId',
+        // Locked post-create — see security audit #H2.
+        immutable: true,
         // NULL user_id reiškia, kad event'ą sukūrė sistema (pvz., midnight
         // cron'as uždarinėjantis nepataikytas žvejybas) — populate grąžina
         // sintetinį Sistema actor'ą, kad UI galėtų atskirti nuo realaus

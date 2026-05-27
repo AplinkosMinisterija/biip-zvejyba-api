@@ -20,6 +20,7 @@ export interface Tenant {
   id: string;
   name: string;
   authGroup: string;
+  code?: string;
   isInvestigator: boolean;
 }
 
@@ -58,6 +59,12 @@ export interface Tenant {
           );
         },
         required: true,
+        // Pinned at creation time — a tenant's identity is its auth group.
+        // Without `immutable`, any ADMIN-role user could re-point an existing
+        // tenant at another company's auth group via `PUT /tenants/:id` and
+        // siphon all of that company's future E-vartai logins into this row
+        // (see security audit #C3).
+        immutable: true,
       },
       name: 'string',
       email: 'string',
@@ -287,7 +294,16 @@ export default class TenantsService extends moleculer.Service {
     }
   }
 
-  @Action()
+  // Internal-only — used by seed/import flows that need to bypass the
+  // readonly/onCreate field hooks (e.g. setting `createdBy` from a
+  // synthetic actor). `visibility: 'protected'` hides the action from
+  // moleculer-web's `mappingPolicy: 'all'` fallback URL, where
+  // `permissive: true` would otherwise let any ADMIN forge tenant rows
+  // with arbitrary `authGroup` / `createdBy` (see security audit #H12).
+  @Action({
+    rest: null as any,
+    visibility: 'protected',
+  })
   createPermissive(ctx: Context) {
     return this.createEntity(ctx, ctx.params, {
       permissive: true,

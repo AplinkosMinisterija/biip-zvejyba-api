@@ -163,9 +163,15 @@ export default class FishTypesService extends moleculer.Service {
       busboyConfig: {
         limits: {
           files: 1,
+          // 5 MB cap for fish-type photo (PNG/JPEG); bounds storage abuse.
+          fileSize: 5 * 1024 * 1024,
         },
       },
     },
+    // Catalogue images are managed by biip-admin-web operators, never by
+    // the žvejybos mobile app. Was implicitly DEFAULT (any authenticated
+    // caller) — see security audit #H4.
+    auth: RestrictionType.ADMIN,
   })
   async upload(ctx: Context<{}, UserAuthMeta>) {
     const folder = getFolderName(ctx.meta?.user, ctx.meta?.profile);
