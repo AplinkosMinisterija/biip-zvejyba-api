@@ -179,6 +179,8 @@ export type Research<
         type: 'number',
         columnType: 'integer',
         columnName: 'tenantId',
+        // Locked post-create — see security audit #H2.
+        immutable: true,
         populate: {
           action: 'tenants.resolve',
           params: {
@@ -190,6 +192,7 @@ export type Research<
         type: 'number',
         columnType: 'integer',
         columnName: 'userId',
+        immutable: true,
         populate: {
           action: 'users.resolve',
           params: {
@@ -239,9 +242,18 @@ export default class ResearchesService extends moleculer.Service {
       busboyConfig: {
         limits: {
           files: 1,
+          // 10 MB cap — research PDFs are usually a few hundred KB; this
+          // bounds storage abuse via a single oversized upload (see
+          // security audit #H4). Pair with the INVESTIGATOR auth below.
+          fileSize: 10 * 1024 * 1024,
         },
       },
     },
+    // Was implicitly DEFAULT (USER+ADMIN), which let any authenticated
+    // mobile-app user POST arbitrary PDFs into MinIO. Research uploads
+    // are only legitimate from biip-admin-web operating as an
+    // INVESTIGATOR account.
+    auth: RestrictionType.INVESTIGATOR,
   })
   async upload(ctx: Context<{}, UserAuthMeta>) {
     const folder = getFolderName(ctx.meta?.user, ctx.meta?.profile);

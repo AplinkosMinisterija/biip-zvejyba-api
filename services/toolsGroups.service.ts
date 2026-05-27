@@ -123,6 +123,8 @@ export type ToolsGroup<
         type: 'number',
         columnType: 'integer',
         columnName: 'tenantId',
+        // Locked post-create — see security audit #H2.
+        immutable: true,
         populate: {
           action: 'tenants.resolve',
           params: {
@@ -134,6 +136,7 @@ export type ToolsGroup<
         type: 'number',
         columnType: 'integer',
         columnName: 'userId',
+        immutable: true,
         populate: {
           action: 'users.resolve',
           params: {
@@ -222,12 +225,19 @@ export default class ToolsGroupsService extends moleculer.Service {
       }
     }
 
+    // Earlier this loop fired `removeEntity` without `await`, so the
+    // remove and the subsequent `updateEntity` race — and the catch
+    // never saw the (async) rejection (audit security #A9/#M11).
+    // Best-effort sequential removal + await: if the old wrapper group
+    // is already gone we ignore the error and continue.
     for (const tool of tools) {
       try {
-        this.removeEntity(ctx, {
+        await this.removeEntity(ctx, {
           id: tool.toolsGroup.id,
         });
-      } catch (e) {}
+      } catch (e) {
+        // ignore — old (empty) toolsGroup may already be gone
+      }
     }
 
     return await this.updateEntity(ctx, {
@@ -297,16 +307,32 @@ export default class ToolsGroupsService extends moleculer.Service {
       }
     }
 
-    await this.createEntity(ctx, {
+    // Two-phase write with compensation. moleculer-db / knex doesn't
+    // give us an atomic transaction across these two service calls,
+    // so if the update fails after the create succeeds we'd leave a
+    // half-created toolsGroup behind (audit security #A9/#M11). Roll
+    // it back manually on failure.
+    const newGroup = await this.createEntity(ctx, {
       tools: toolsIds,
       user: userId,
       tenant: tenantId,
     });
 
-    return await this.updateEntity(ctx, {
-      id: ctx.params.id,
-      tools: group.tools.filter((tool) => !toolsIds.includes(tool.id)).map((tool) => tool.id),
-    });
+    try {
+      return await this.updateEntity(ctx, {
+        id: ctx.params.id,
+        tools: group.tools.filter((tool) => !toolsIds.includes(tool.id)).map((tool) => tool.id),
+      });
+    } catch (err) {
+      try {
+        await this.removeEntity(ctx, { id: newGroup.id });
+      } catch (cleanupErr: any) {
+        this.logger.warn(
+          `[disconnectTools] failed to roll back orphan toolsGroup id=${newGroup.id}: ${cleanupErr?.message}`,
+        );
+      }
+      throw err;
+    }
   }
 
   @Action({
@@ -594,11 +620,19 @@ export default class ToolsGroupsService extends moleculer.Service {
   async getUniqueToolsLocationsCount(ctx: Context) {
     const locations = await this.rawQuery(
       ctx,
+      // `deleted_at IS NULL` on both arms — without it soft-deleted
+      // tools_groups_events still bumped the public location count
+      // (audit security #M6).
       `SELECT COUNT(DISTINCT (location->>'id')::text) +
-        CASE WHEN EXISTS ( SELECT 1 FROM tools_groups_events WHERE location IS NOT NULL AND (location->>'name') ILIKE '%baras%')
+        CASE WHEN EXISTS ( SELECT 1 FROM tools_groups_events
+                            WHERE location IS NOT NULL
+                              AND (location->>'name') ILIKE '%baras%'
+                              AND deleted_at IS NULL )
         THEN 1 ELSE 0 END AS location_count
         FROM tools_groups_events
-        WHERE location IS NOT NULL AND (location->>'name') NOT ILIKE '%baras%';`,
+        WHERE location IS NOT NULL
+          AND (location->>'name') NOT ILIKE '%baras%'
+          AND deleted_at IS NULL;`,
     );
     return Number(locations[0]?.location_count);
   }

@@ -194,6 +194,27 @@ export default class MinioService extends Moleculer.Service {
   ) {
     const { bucket, name } = ctx.params;
 
+    // Bucket allowlist: the service-root MinIO credentials can reach
+    // every bucket on the cluster (alis, biip-*, etc.). Without this
+    // check, an authenticated USER could fetch arbitrary objects from
+    // any sibling app's bucket via `GET /minio/<other-bucket>/<path>`
+    // (see security audit #C5).
+    if (bucket !== BUCKET_NAME()) {
+      return throwNotFoundError('File not found.');
+    }
+
+    // Path safety: all legit objects live under `uploads/…`. Reject
+    // anything else, and explicitly reject path-traversal segments —
+    // `..` cannot reach the parent in S3 semantics, but a future
+    // proxy/storage rewrite could, so fail closed at the boundary.
+    if (
+      !name?.length ||
+      name[0] !== 'uploads' ||
+      name.some((seg) => seg === '..' || seg === '' || seg.includes('/') || seg.includes('\\'))
+    ) {
+      return throwNotFoundError('File not found.');
+    }
+
     try {
       const reader: NodeJS.ReadableStream = await ctx.call('minio.getObject', {
         bucketName: bucket,
@@ -269,6 +290,15 @@ export default class MinioService extends Moleculer.Service {
     const { path } = ctx.params;
 
     const [bucket, ...paths] = path.split('/');
+
+    // Bucket allowlist — same reason as `getFile` above: the service's
+    // MinIO root credentials can touch every bucket on the cluster, so a
+    // pathological caller (or future bug that lowers this action's auth
+    // tier) could delete objects in sibling biip apps' buckets (see
+    // security audit #H9). Fail closed at the boundary.
+    if (bucket !== BUCKET_NAME()) {
+      return { sucess: false };
+    }
 
     try {
       const result = await ctx.call('minio.removeObject', {

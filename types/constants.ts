@@ -6,7 +6,11 @@ export enum RestrictionType {
   // DEFAULT = USER or ADMIN
   DEFAULT = 'DEFAULT',
   USER = 'USER',
+  // ADMIN accepts both AuthUserRole.ADMIN and AuthUserRole.SUPER_ADMIN.
   ADMIN = 'ADMIN',
+  // SUPER_ADMIN is the tighter gate — only the platform-level super admin
+  // can hit actions tagged with this (e.g. cross-tenant impersonation).
+  SUPER_ADMIN = 'SUPER_ADMIN',
   PUBLIC = 'PUBLIC',
   INVESTIGATOR = 'INVESTIGATOR',
 }
@@ -94,9 +98,26 @@ export const COMMON_SCOPES = {
   },
 };
 
-export const INNER_AUTH_GROUP_IDS = [
-  Number(process.env.FREELANCER_GROUP_ID),
-  Number(process.env.AUTH_INVESTIGATOR_GROUP_ID),
+// Required env-driven auth group identifiers. The earlier
+// `Number(process.env.X)` form silently produced `NaN` when the
+// variable was missing, and then `INNER_AUTH_GROUP_IDS.includes(...)`
+// never matched — auth groups for FREELANCER / INVESTIGATOR roles
+// would silently flow through the tenant-import path as if they
+// were real companies (see security audit #L1). Fail loud at boot.
+function requireAuthGroupId(name: string): number {
+  const raw = process.env[name];
+  const id = Number(raw);
+  if (!Number.isFinite(id)) {
+    throw new Error(
+      `[env] ${name} must be set to a numeric auth group id (got: ${raw ?? 'undefined'})`,
+    );
+  }
+  return id;
+}
+
+export const INNER_AUTH_GROUP_IDS: readonly number[] = [
+  requireAuthGroupId('FREELANCER_GROUP_ID'),
+  requireAuthGroupId('AUTH_INVESTIGATOR_GROUP_ID'),
 ];
 
 export enum LocationType {

@@ -1,3 +1,4 @@
+import Moleculer from 'moleculer';
 // @ts-ignore
 import transformation from 'transform-coordinates';
 export type CoordinatesPoint = number[];
@@ -29,20 +30,30 @@ export const GeometryType = {
   MULTI_POLYGON: 'MultiPolygon',
 };
 
-export function geometryToGeom(geometry: GeometryObject) {
-  return `ST_AsText(ST_GeomFromGeoJSON('${JSON.stringify(geometry)}'))`;
-}
-
-export function geometriesToGeomCollection(geometries: GeometryObject[]) {
-  return `ST_AsText(ST_Collect(ARRAY(
-    SELECT ST_GeomFromGeoJSON(JSON_ARRAY_ELEMENTS('${JSON.stringify(geometries)}'))
-  )))`;
-}
-
 export function coordinatesToGeometry(coordinates: { x: number; y: number }) {
   const { x, y } = coordinates;
+  const lon = Number(x);
+  const lat = Number(y);
+  // WGS84 valid range: lon ∈ [-180, 180], lat ∈ [-90, 90]. Earlier the
+  // function accepted Infinity / NaN / out-of-range values and silently
+  // produced bogus LKS94 points (audit security #M2). Reject at the
+  // boundary so the downstream PostGIS write never sees garbage.
+  if (
+    !Number.isFinite(lon) ||
+    !Number.isFinite(lat) ||
+    lon < -180 ||
+    lon > 180 ||
+    lat < -90 ||
+    lat > 90
+  ) {
+    throw new Moleculer.Errors.MoleculerClientError(
+      `Invalid WGS84 coordinates (lon=${x}, lat=${y})`,
+      422,
+      'INVALID_COORDINATES',
+    );
+  }
   const transform = transformation('EPSG:4326', '3346');
-  const transformed = transform.forward({ x: Number(x), y: Number(y) });
+  const transformed = transform.forward({ x: lon, y: lat });
   return {
     type: 'FeatureCollection',
     features: [

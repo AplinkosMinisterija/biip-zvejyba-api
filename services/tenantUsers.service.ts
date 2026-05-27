@@ -12,8 +12,9 @@ import {
   INNER_AUTH_GROUP_IDS,
   RestrictionType,
   Table,
+  throwNoRightsError,
 } from '../types';
-import { UserAuthMeta } from './api.service';
+import { AuthUserRole, UserAuthMeta } from './api.service';
 import { User, UserType } from './users.service';
 
 import DbConnection from '../mixins/database.mixin';
@@ -258,7 +259,7 @@ export default class TenantUsersService extends moleculer.Service {
   async invite(
     ctx: Context<
       {
-        tenant: number;
+        tenant?: number;
         role: TenantUserRole;
         firstName: string;
         lastName: string;
@@ -269,12 +270,29 @@ export default class TenantUsersService extends moleculer.Service {
       UserAuthMeta
     >,
   ) {
-    validateCanEditTenantUser(ctx, 'Only OWNER and USER_ADMIN can add users to tenant.');
+    // USER callers (mobile app) MUST identify the target tenant via
+    // `x-profile` — the gateway has already validated their membership
+    // there. They cannot smuggle a different tenant via the body
+    // (audit security #A6/#M9). ADMIN / internal callers (e.g.
+    // `tenants.invite` creating the seed OWNER alongside a brand-new
+    // tenant) don't have `x-profile`, so the body fallback stays open
+    // only for them.
+    const isUserCaller =
+      !!ctx.meta?.user && ctx.meta?.authUser?.type === AuthUserRole.USER;
 
-    const { firstName, lastName, personalCode, role, email, phone, tenant } = ctx.params;
-    // OWNER and USER_ADMIN can invite users
+    let tenantId: number | undefined | null;
+    if (isUserCaller) {
+      validateCanEditTenantUser(ctx, 'Only OWNER and USER_ADMIN can add users to tenant.');
+      tenantId = ctx.meta.profile;
+    } else {
+      tenantId = ctx.meta.profile ?? ctx.params.tenant;
+    }
 
-    const tenantId = ctx.meta.profile || tenant;
+    if (!tenantId) {
+      throwNoRightsError('Tenant not specified.');
+    }
+
+    const { firstName, lastName, personalCode, role, email, phone } = ctx.params;
 
     const currentTenant: Tenant = await ctx.call('tenants.resolve', {
       id: tenantId,

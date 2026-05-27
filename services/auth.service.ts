@@ -164,16 +164,37 @@ export default class AuthService extends moleculer.Service {
         continue;
       }
 
-      // Only forward fields that E-vartai actually returned. Fizinis-asmuo
-      // logins on behalf of a company sometimes ship an empty `companyName`,
-      // which would otherwise wipe the locally imported tenant name.
-      const tenantUpdate: Record<string, any> = { id: tenant.id };
-      if (authGroup.name) tenantUpdate.name = authGroup.name;
-      if (authGroup.companyCode) tenantUpdate.code = authGroup.companyCode;
-      if (authGroup.companyEmail) tenantUpdate.email = authGroup.companyEmail;
-      if (authGroup.companyPhone) tenantUpdate.phone = authGroup.companyPhone;
+      // Defense-in-depth: only sync tenant attributes when the E-vartai
+      // group payload's `companyCode` agrees with the locally-stored code.
+      // Without this, a manipulated juridical-login payload (auth-api
+      // compromise, malformed group response) could rewrite another
+      // company's `name`/`code`/`email`/`phone` via this auto-sync
+      // (see security audit #H3). When the local code is unset (legacy
+      // tenant imported without it) or the payload omits the code, we
+      // still allow the sync — the only blocked case is an *active*
+      // disagreement. tenantUser creation below still proceeds so the
+      // user keeps access; we just refuse to rewrite the company record.
+      const codeMismatch =
+        tenant.code &&
+        authGroup.companyCode &&
+        String(tenant.code) !== String(authGroup.companyCode);
 
-      await ctx.call('tenants.update', tenantUpdate);
+      if (codeMismatch) {
+        this.logger.warn(
+          `[auth.afterUserLoggedIn] companyCode mismatch — local tenant ${tenant.id} has code=${tenant.code} but authGroup ${authGroup.id} returned ${authGroup.companyCode}. Skipping tenant.update.`,
+        );
+      } else {
+        // Only forward fields that E-vartai actually returned. Fizinis-asmuo
+        // logins on behalf of a company sometimes ship an empty `companyName`,
+        // which would otherwise wipe the locally imported tenant name.
+        const tenantUpdate: Record<string, any> = { id: tenant.id };
+        if (authGroup.name) tenantUpdate.name = authGroup.name;
+        if (authGroup.companyCode) tenantUpdate.code = authGroup.companyCode;
+        if (authGroup.companyEmail) tenantUpdate.email = authGroup.companyEmail;
+        if (authGroup.companyPhone) tenantUpdate.phone = authGroup.companyPhone;
+
+        await ctx.call('tenants.update', tenantUpdate);
+      }
 
       const tenantUser: TenantUser = await ctx.call('tenantUsers.findOne', {
         query: {
@@ -268,14 +289,19 @@ export default class AuthService extends moleculer.Service {
       }
     };
 
-    handleSetGroup(isFreelancerChanged, user.isFreelancer, process.env.FREELANCER_GROUP_ID);
-    handleSetGroup(
-      isInvestigatorChanged,
-      user.isInvestigator,
-      process.env.AUTH_INVESTIGATOR_GROUP_ID,
-    );
-
-    return;
+    // Run both group changes concurrently and wait for them — earlier
+    // versions fired-and-forgot, so a failure on one flag (e.g. auth-api
+    // hiccup on freelancer assign) could complete while the other
+    // half-applied, leaving the user in a partial state. See security
+    // audit #L7.
+    await Promise.all([
+      handleSetGroup(isFreelancerChanged, user.isFreelancer, process.env.FREELANCER_GROUP_ID),
+      handleSetGroup(
+        isInvestigatorChanged,
+        user.isInvestigator,
+        process.env.AUTH_INVESTIGATOR_GROUP_ID,
+      ),
+    ]);
   }
 
   @Event()

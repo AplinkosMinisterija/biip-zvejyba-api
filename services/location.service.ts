@@ -8,6 +8,16 @@ import { LocationType, throwNotFoundError } from '../types';
 import { UserAuthMeta } from './api.service';
 import { FishingType } from './fishings.service';
 
+// External GIS / UETK calls must not block the Node event loop
+// indefinitely. Without a per-request timeout, a slow upstream (UETK
+// outage, network partition) chews through worker capacity until the
+// whole API serializes behind the dead socket (see security audit #H5).
+const EXTERNAL_FETCH_TIMEOUT_MS = 10_000;
+const externalFetch = (
+  input: Parameters<typeof fetch>[0],
+  init: Parameters<typeof fetch>[1] = {},
+) => fetch(input, { ...init, signal: AbortSignal.timeout(EXTERNAL_FETCH_TIMEOUT_MS) });
+
 export const CoordinatesProp = {
   type: 'object',
   properties: {
@@ -75,7 +85,14 @@ export default class LocationsService extends moleculer.Service {
     let query = ctx.params.query;
 
     if (typeof query === 'string') {
-      query = JSON.parse(query);
+      // Earlier `JSON.parse(query)` ran unguarded — a malformed string
+      // bubbled up as an opaque 500. Convert parse failures into a clean
+      // 422 (audit security #M12).
+      try {
+        query = JSON.parse(query);
+      } catch {
+        throw new moleculer.Errors.ValidationError('Invalid query JSON');
+      }
     }
 
     if (!query?.coordinates) {
@@ -128,7 +145,7 @@ export default class LocationsService extends moleculer.Service {
 
     const url = `${targetUrl}?${queryString}`;
 
-    const data = await fetch(url).then((r) => r.json());
+    const data = await externalFetch(url).then((r) => r.json());
     const locations = data?.rows;
     if (!locations || !locations.length) return multi ? [] : undefined;
     const mappedLocations = locations.map((location: any) => {
@@ -149,7 +166,7 @@ export default class LocationsService extends moleculer.Service {
     },
   })
   async getMunicipalities() {
-    const res = await fetch(
+    const res = await externalFetch(
       `${process.env.GEO_SERVER}/qgisserver/uetk_zuvinimas?SERVICE=WFS&REQUEST=GetFeature&TYPENAME=municipalities&OUTPUTFORMAT=application/json&propertyName=pavadinimas,kodas`,
       {
         method: 'GET',
@@ -186,7 +203,7 @@ export default class LocationsService extends moleculer.Service {
   })
   async getFishingSections() {
     const url = `${process.env.GEO_SERVER}/api/zuvinimas_barai/collections/fishing_sections/items.json?limit=1000`;
-    const fishingSections = await fetch(url, {
+    const fishingSections = await externalFetch(url, {
       headers: {
         'Content-Type': 'application/json',
       },
@@ -231,7 +248,7 @@ export default class LocationsService extends moleculer.Service {
         const box = getBox(geom, 200);
 
         const bodyOfWatersUrl = `${process.env.GEO_SERVER}/qgisserver/uetk_public?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetFeatureInfo&QUERY_LAYERS=upes%2Cezerai_tvenkiniai&INFO_FORMAT=application%2Fjson&FEATURE_COUNT=1000&X=50&Y=50&SRS=EPSG%3A3346&STYLES=&WIDTH=101&HEIGHT=101&BBOX=${box}`;
-        const bodyOfWatersData = await fetch(bodyOfWatersUrl, {
+        const bodyOfWatersData = await externalFetch(bodyOfWatersUrl, {
           headers: {
             'Content-Type': 'application/json',
           },
@@ -268,7 +285,7 @@ export default class LocationsService extends moleculer.Service {
     if (geom?.features?.length) {
       const box = getBox(geom);
       const bars = `${process.env.GEO_SERVER}/qgisserver/zuvinimas_barai?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetFeatureInfo&QUERY_LAYERS=fishing_sections&INFO_FORMAT=application%2Fjson&FEATURE_COUNT=1000&X=50&Y=50&SRS=EPSG%3A3346&STYLES=&WIDTH=101&HEIGHT=101&BBOX=${box}`;
-      const barsData = await fetch(bars, {
+      const barsData = await externalFetch(bars, {
         headers: {
           'Content-Type': 'application/json',
         },
@@ -303,7 +320,7 @@ export default class LocationsService extends moleculer.Service {
   async getMunicipalityFromPoint(geom: GeomFeatureCollection) {
     const box = getBox(geom);
     const endPoint = `${process.env.GEO_SERVER}/qgisserver/administrative_boundaries?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetFeatureInfo&QUERY_LAYERS=municipalities&INFO_FORMAT=application%2Fjson&FEATURE_COUNT=1000&X=50&Y=50&SRS=EPSG%3A3346&STYLES=&WIDTH=101&HEIGHT=101&BBOX=${box}`;
-    const response = await fetch(endPoint, {
+    const response = await externalFetch(endPoint, {
       headers: {
         'Content-Type': 'application/json',
       },

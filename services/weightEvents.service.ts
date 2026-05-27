@@ -128,6 +128,8 @@ export type WeightEvent<
         type: 'number',
         columnType: 'integer',
         columnName: 'tenantId',
+        // Locked post-create — see security audit #H2.
+        immutable: true,
         populate: {
           action: 'tenants.resolve',
           params: {
@@ -139,6 +141,7 @@ export type WeightEvent<
         type: 'number',
         columnType: 'integer',
         columnName: 'userId',
+        immutable: true,
         populate: {
           action: 'users.resolve',
           params: {
@@ -302,9 +305,13 @@ export default class ToolTypesService extends moleculer.Service {
   async getStatistics(ctx: Context<any>) {
     const data = await this.rawQuery(
       ctx,
+      // `deleted_at IS NULL` mirrors COMMON_SCOPES.notDeleted — without
+      // it the public statistics aggregated soft-deleted rows, leaking
+      // numbers from records the user (or admin) had explicitly removed
+      // (audit security #M6).
       `SELECT SUM((fish_data.value)::numeric) AS total_weight, COUNT(DISTINCT fish_data.key) AS fish_types
         FROM weight_events, LATERAL jsonb_each_text(data) AS fish_data
-        WHERE tools_group_id IS NULL;`,
+        WHERE tools_group_id IS NULL AND deleted_at IS NULL;`,
     );
 
     const locationsCount: number = await ctx.call('toolsGroups.getUniqueToolsLocationsCount');
@@ -346,18 +353,26 @@ export default class ToolTypesService extends moleculer.Service {
           },
         },
       ],
+      // Was `type: number, convert: true, optional: true`, which let
+      // `?fish=foo` slip through as `NaN`; the handler condition
+      // `if (fishId && Number(key) !== fishId)` then read `NaN` as
+      // falsy and skipped the per-fish filter entirely — public
+      // statistics callers got the full unfiltered dataset back. Pin
+      // the param to a positive-integer regex so the gateway rejects
+      // garbage before the handler runs (audit security #M16).
       fish: {
-        type: 'number',
-        convert: true,
+        type: 'string',
         optional: true,
+        pattern: '^[1-9][0-9]*$',
       },
     },
     auth: RestrictionType.PUBLIC,
   })
   async getStatisticsForUETK(
-    ctx: Context<{ date: string | { from?: string; to?: string }; fish: number }>,
+    ctx: Context<{ date: string | { from?: string; to?: string }; fish?: string }>,
   ) {
-    const { fish: fishId, date } = ctx.params;
+    const { fish, date } = ctx.params;
+    const fishId = fish ? Number(fish) : null;
     const query: any = {
       toolsGroup: { $exists: false },
     };
