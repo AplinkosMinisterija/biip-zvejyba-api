@@ -375,8 +375,15 @@ describe('H11 — tools.toolsGroup populate uses parameterized $raw', () => {
   });
 });
 
-describe('A8 — partial UNIQUE indices prevent active-row duplicates', () => {
-  it('tenant_users (tenant_id, user_id) cannot duplicate', async () => {
+describe('A8 — tenantUsers app-level dedupe', () => {
+  // The original audit fix tried to enforce this at the DB level with
+  // a partial UNIQUE index, but the migration crashed on staging
+  // (pre-existing historical duplicates). The migration is now a no-op
+  // and the constraint is deferred to a dedicated PR with data
+  // preflight. This test now exercises the existing app-level guard
+  // (`tenantUsers.beforeCreate`), which already throws ALREADY_EXISTS
+  // before reaching the DB.
+  it('duplicate tenantUsers.create is rejected by beforeCreate', async () => {
     // Use tenantA — tenantB was just removed by the M4 ADMIN-delete test
     // above (specs share a broker instance, jest runs describe blocks in
     // file order). tenantA is the OWNER's home tenant and stays put.
@@ -384,7 +391,6 @@ describe('A8 — partial UNIQUE indices prevent active-row duplicates', () => {
       apiHelper.tenantA,
       'USER' as any,
     );
-    // Try to add the same user again to the same tenant.
     await expect(
       broker.call(
         'tenantUsers.create',
@@ -395,7 +401,7 @@ describe('A8 — partial UNIQUE indices prevent active-row duplicates', () => {
         },
         { meta: { authToken: apiHelper.superAdmin.token } },
       ),
-    ).rejects.toBeTruthy();
+    ).rejects.toMatchObject({ type: 'ALREADY_EXISTS' });
   });
 });
 
