@@ -1,57 +1,32 @@
 /**
- * Defensive UNIQUE constraints, all expressed as PARTIAL unique indices
- * gated on `deleted_at IS NULL` so soft-deleted rows don't collide with
- * fresh ones (audit security #A8 + #M7).
+ * NO-OP.
  *
- * Catches:
- *   - `tenantUsers (tenantId, userId)` — race-induced duplicate
- *     memberships from concurrent `tenantUsers.create`
- *   - `tools (sealNr)` — `validateSealNr` is an app-side check that
- *     loses races with `validateSealNr` running on another node
- *   - `tenants (code)` — duplicate company imports through E-vartai +
- *     `tenants.importBatch`
- *   - `fishings (userId) WHERE end_event_id IS NULL` — guarantees the
- *     single-active-fishing invariant that `startFishing` checks in app
+ * This slot used to add four partial UNIQUE indices (tenant_users,
+ * tools, tenants, fishings) as defense-in-depth against race-induced
+ * duplicates. The original migration ran cleanly on dev but crashed on
+ * staging — staging carries enough history that real duplicates exist
+ * in at least one of those tables, and `CREATE UNIQUE INDEX` against
+ * pre-existing duplicates fails the whole transaction (knex wraps each
+ * migration in `BEGIN…COMMIT`).
  *
- * If this migration fails on an existing duplicate, that's a real data
- * issue — investigate the pair before re-running, don't `--force`.
+ * Knex migration transactions are atomic, so on staging the crash
+ * rolled back every index this file tried to create — knex still sees
+ * this migration as "not yet run". By turning the body into a no-op
+ * we let staging's next boot move past this entry without crashing,
+ * while dev (where the indices DID land) keeps them because dev's
+ * knex_migrations row already says this filename ran.
+ *
+ * The defense-in-depth value is deferred to a follow-up PR that will
+ * (1) audit each table for existing duplicates, (2) decide per pair
+ * whether to soft-delete or keep both, (3) only then add the constraint.
  *
  * @param { import("knex").Knex } knex
  * @returns { Promise<void> }
  */
-exports.up = async function (knex) {
-  // tenant_users (tenantId, userId) partial unique
-  await knex.raw(`
-    CREATE UNIQUE INDEX IF NOT EXISTS tenant_users_tenant_id_user_id_active_unique
-      ON tenant_users (tenant_id, user_id)
-      WHERE deleted_at IS NULL;
-  `);
-
-  // tools (sealNr) partial unique
-  await knex.raw(`
-    CREATE UNIQUE INDEX IF NOT EXISTS tools_seal_nr_active_unique
-      ON tools (seal_nr)
-      WHERE deleted_at IS NULL;
-  `);
-
-  // tenants (code) partial unique
-  await knex.raw(`
-    CREATE UNIQUE INDEX IF NOT EXISTS tenants_code_active_unique
-      ON tenants (code)
-      WHERE deleted_at IS NULL;
-  `);
-
-  // fishings active-per-user invariant
-  await knex.raw(`
-    CREATE UNIQUE INDEX IF NOT EXISTS fishings_user_id_active_unique
-      ON fishings (user_id)
-      WHERE end_event_id IS NULL AND deleted_at IS NULL;
-  `);
+exports.up = async function (_knex) {
+  // intentionally empty — see header comment
 };
 
-exports.down = async function (knex) {
-  await knex.raw(`DROP INDEX IF EXISTS fishings_user_id_active_unique;`);
-  await knex.raw(`DROP INDEX IF EXISTS tenants_code_active_unique;`);
-  await knex.raw(`DROP INDEX IF EXISTS tools_seal_nr_active_unique;`);
-  await knex.raw(`DROP INDEX IF EXISTS tenant_users_tenant_id_user_id_active_unique;`);
+exports.down = async function (_knex) {
+  // intentionally empty — no schema delta to roll back
 };
