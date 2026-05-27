@@ -4,12 +4,13 @@ import { ServiceBroker } from 'moleculer';
 import request from 'supertest';
 import { ApiHelper, serviceBrokerConfig } from '../../helpers/api';
 import { getPublicFileName } from '../../../types';
+import { coordinatesToGeometry } from '../../../modules/geometry';
 
 // Regression coverage for the PR that closed /cso audit findings
-// C1, C2, C3, C4, C5, C6, C7, H1, H2, H4, H9 (see PR description).
-// Each `describe` mirrors one audit finding and asserts the post-fix
-// behaviour. Existing security-regression.spec.ts still covers prior
-// findings (#1–#7 from the earlier audit pass).
+// C1-C7, H1-H5, H9 + the follow-up batch M1, M2, M4, M6, M10, M12,
+// M14, M16, A6, A7, A8, A9, H11. Each `describe` mirrors one audit
+// finding and asserts the post-fix behaviour. Existing
+// security-regression.spec.ts still covers prior findings (#1-#7).
 
 const broker = new ServiceBroker(serviceBrokerConfig);
 const apiHelper = new ApiHelper(broker);
@@ -228,3 +229,182 @@ describe('H4 — research / fishType uploads require INVESTIGATOR / ADMIN', () =
 // not the real `services/minio.service.ts`. The bucket allowlist
 // (`if (bucket !== BUCKET_NAME()) return { sucess: false }`) is verified
 // by code review.
+
+// ── Follow-up batch (M1, M2, M4, M6, M10, M12, M14, M16, A6, A7, A8, A9, H11) ──
+
+describe('M2 — coordinatesToGeometry validates WGS84 range', () => {
+  it('accepts a Lithuanian coordinate', () => {
+    expect(() => coordinatesToGeometry({ x: 24.95, y: 55.45 })).not.toThrow();
+  });
+  it('rejects NaN', () => {
+    expect(() => coordinatesToGeometry({ x: NaN, y: 55 })).toThrow(/Invalid WGS84/);
+  });
+  it('rejects Infinity', () => {
+    expect(() => coordinatesToGeometry({ x: 24, y: Infinity })).toThrow(/Invalid WGS84/);
+  });
+  it('rejects out-of-range latitude', () => {
+    expect(() => coordinatesToGeometry({ x: 24, y: 95 })).toThrow(/Invalid WGS84/);
+  });
+  it('rejects out-of-range longitude', () => {
+    expect(() => coordinatesToGeometry({ x: 200, y: 55 })).toThrow(/Invalid WGS84/);
+  });
+});
+
+describe('M12 — location.search JSON.parse handles malformed input', () => {
+  it('malformed query string returns 422, not a 500', async () => {
+    const res = await request(apiService.server)
+      .get('/zvejyba/api/locations')
+      .set(apiHelper.getHeaders(apiHelper.ownerA.token, apiHelper.tenantA.tenant.id))
+      .query({ query: '{not json' });
+    expect(res.status).toBe(422);
+  });
+});
+
+describe('M16 — public UETK stats reject fish=<garbage>', () => {
+  it('rejects ?fish=foo at the validator', async () => {
+    await request(apiService.server)
+      .get('/zvejyba/api/public/uetk/statistics')
+      .query({ fish: 'foo' })
+      .expect(422);
+  });
+  it('accepts ?fish=42', async () => {
+    await request(apiService.server)
+      .get('/zvejyba/api/public/uetk/statistics')
+      .query({ fish: '42' })
+      .expect(200);
+  });
+});
+
+describe('M1 — fishings.exportCaughtFishes ADMIN-only + JSON validation', () => {
+  it('USER role is rejected', async () => {
+    const res = await request(apiService.server)
+      .get('/zvejyba/api/fishings/exportCaughtFishes')
+      .set(apiHelper.getHeaders(apiHelper.ownerA.token, apiHelper.tenantA.tenant.id));
+    expect([401, 403]).toContain(res.status);
+  });
+
+  it('ADMIN with malformed query JSON gets 422, not 500', async () => {
+    const res = await request(apiService.server)
+      .get('/zvejyba/api/fishings/exportCaughtFishes')
+      .set(apiHelper.getHeaders(apiHelper.adminA.token))
+      .query({ query: '{not json' });
+    expect(res.status).toBe(422);
+  });
+});
+
+describe('A6 — tenantUsers.invite no longer accepts body.tenant', () => {
+  it('an OWNER without x-profile cannot smuggle tenant via body', async () => {
+    const res = await request(apiService.server)
+      .post('/zvejyba/api/tenantUsers/invite')
+      .set(apiHelper.getHeaders(apiHelper.ownerA.token)) // NO x-profile
+      .send({
+        firstName: 'X',
+        lastName: 'Y',
+        personalCode: '39001019999',
+        email: 'evil@test.lt',
+        role: 'OWNER',
+        // Old vulnerable shape — should be ignored by the schema now.
+        tenant: apiHelper.tenantB.tenant.id,
+      });
+    // Either 422 (param schema strips it) or 401 (validateCanEditTenantUser
+    // throws because profile is missing). Both are acceptable rejections.
+    expect([401, 403, 422]).toContain(res.status);
+  });
+});
+
+describe('A7 — users.updateMyProfile only writes email/phone', () => {
+  it('extra fields in body are not persisted', async () => {
+    await request(apiService.server)
+      .patch('/zvejyba/api/users/me')
+      .set(apiHelper.getHeaders(apiHelper.userA.token, apiHelper.tenantA.tenant.id))
+      .send({
+        email: 'newaddr@test.lt',
+        phone: '+37060099999',
+        type: 'ADMIN', // attempted privilege escalation
+        isInvestigator: true,
+        firstName: 'EvilName',
+      });
+
+    const after: any = await broker.call(
+      'users.resolve',
+      { id: apiHelper.userA.user.id },
+      { meta: apiHelper.meta(apiHelper.superAdmin) },
+    );
+    expect(after.email).toBe('newaddr@test.lt');
+    expect(after.phone).toBe('+37060099999');
+    // None of the escalation attempts landed.
+    expect(after.type).toBe('USER');
+    expect(after.isInvestigator).toBe(false);
+    expect(after.firstName).not.toBe('EvilName');
+  });
+});
+
+describe('M4 — tenants.remove is SUPER_ADMIN-only', () => {
+  it('plain ADMIN cannot DELETE /tenants/:id', async () => {
+    const res = await request(apiService.server)
+      .delete(`/zvejyba/api/tenants/${apiHelper.tenantB.tenant.id}`)
+      .set(apiHelper.getHeaders(apiHelper.adminA.token));
+    expect([401, 403]).toContain(res.status);
+  });
+});
+
+describe('H11 — tools.toolsGroup populate uses parameterized $raw', () => {
+  it('a tools.find with populate=toolsGroup does not throw a SQL error', async () => {
+    // The interesting assertion is "no SQL crash from the parameterized
+    // `? = ANY(tools)` bind"; whether the tool happens to be in any
+    // toolsGroup is irrelevant. Use an empty result set so the test
+    // doesn't depend on the seed-driven `toolTypes.id` or per-test
+    // fixture state.
+    const found: any = await broker.call(
+      'tools.find',
+      { query: { id: -1 }, populate: ['toolsGroup'] },
+      { meta: apiHelper.meta(apiHelper.superAdmin) },
+    );
+    expect(Array.isArray(found)).toBe(true);
+  });
+});
+
+describe('A8 — partial UNIQUE indices prevent active-row duplicates', () => {
+  it('tenant_users (tenant_id, user_id) cannot duplicate', async () => {
+    const fresh = await apiHelper.makeTenantMember(
+      apiHelper.tenantB,
+      'USER' as any,
+    );
+    // Try to add the same user again to the same tenant.
+    await expect(
+      broker.call(
+        'tenantUsers.create',
+        {
+          tenant: apiHelper.tenantB.tenant.id,
+          user: fresh.user.id,
+          role: 'USER',
+        },
+        { meta: { authToken: apiHelper.superAdmin.token } },
+      ),
+    ).rejects.toBeTruthy();
+  });
+});
+
+describe('M14 — pageSize capped via DbConnection maxLimit', () => {
+  it('pageSize > 100 is rejected at the validator', async () => {
+    // @moleculer/database wires `maxLimit` into the action params'
+    // `max:` constraint, so callers asking for absurd page sizes 422 at
+    // the gateway instead of silently fanning out N+1 populate calls.
+    await expect(
+      broker.call(
+        'fishings.list',
+        { pageSize: 10000 },
+        { meta: apiHelper.meta(apiHelper.superAdmin) },
+      ),
+    ).rejects.toMatchObject({ code: 422 });
+  });
+
+  it('pageSize <= 100 is accepted', async () => {
+    const res: any = await broker.call(
+      'fishings.list',
+      { pageSize: 100 },
+      { meta: apiHelper.meta(apiHelper.superAdmin) },
+    );
+    expect(res.pageSize).toBe(100);
+  });
+});

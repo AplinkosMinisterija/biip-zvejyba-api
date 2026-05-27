@@ -93,14 +93,12 @@ describe('fishings.service — populate-heavy paths', () => {
     flagged.forEach((id: any) => expect(typeof id).toBe('number'));
   });
 
-  it('GET /fishings/exportCaughtFishes returns an xlsx buffer', async () => {
-    const meta = apiHelper.meta(apiHelper.ownerA, apiHelper.tenantA.tenant.id);
-    // exportCaughtFishes JSON.parses ctx.params.query — pass an empty object
-    // so the call survives the parse + falls through to a (possibly empty)
-    // workbook generation path.
+  it('GET /fishings/exportCaughtFishes returns an xlsx buffer (admin only)', async () => {
+    // Endpoint is ADMIN-only since the security hardening pass — see
+    // security-hardening.spec.ts (M1) for the rejection assertion.
     const res = await request(apiService.server)
       .get('/zvejyba/api/fishings/exportCaughtFishes')
-      .set(apiHelper.getHeaders(apiHelper.ownerA.token, apiHelper.tenantA.tenant.id))
+      .set(apiHelper.getHeaders(apiHelper.adminA.token))
       .query({ query: JSON.stringify({}) });
     // Either 200 with an xlsx body, or a soft fallback. The interesting
     // thing for coverage is that the action's body actually ran.

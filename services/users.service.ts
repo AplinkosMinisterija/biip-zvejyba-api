@@ -32,12 +32,6 @@ function sanitizeQueryForTenantScope(query: any) {
   return clean;
 }
 
-export enum UserRole {
-  ADMIN = 'ROLE_ADMIN',
-  USER = 'ROLE_USER',
-  INSPECTOR = 'ROLE_INSPECTOR',
-}
-
 export enum UserType {
   ADMIN = 'ADMIN',
   USER = 'USER',
@@ -52,7 +46,6 @@ export interface User {
   email: string;
   phone: string;
   active: boolean;
-  roles: UserRole[];
   type: UserType;
   isFreelancer: boolean;
   isInvestigator: boolean;
@@ -102,15 +95,23 @@ export interface User {
         columnType: 'integer',
         columnName: 'authUserId',
         required: true,
-        populate: async (ctx: Context, values: number[]) => {
+        // Auth-side records carry MORE PII than the local mirror
+        // (asmensKodas, full e-vartai claims). Populating them for a
+        // regular USER caller would let `?populate=authUser` enumerate
+        // that PII (audit security #M10). Gate the auth-API lookup to
+        // admin-tier callers; everyone else gets the raw FK back.
+        populate: async (ctx: Context<any, UserAuthMeta>, values: number[]) => {
+          const isAdmin =
+            ctx.meta?.authUser?.type === AuthUserRole.ADMIN ||
+            ctx.meta?.authUser?.type === AuthUserRole.SUPER_ADMIN;
+          if (!isAdmin) return values;
           return Promise.all(
             values.map((value) => {
               try {
-                const data = ctx.call('auth.users.get', {
+                return ctx.call('auth.users.get', {
                   id: value,
                   scope: false,
                 });
-                return data;
               } catch (e) {
                 return value;
               }
@@ -258,7 +259,13 @@ export default class UsersService extends moleculer.Service {
         error: 'Not logged in',
       });
     }
-    return this.updateEntity(ctx, { id: ctx.meta.user.id, ...ctx.params });
+    // Destructure explicitly instead of `...ctx.params` — even with the
+    // params validator stripping unknown fields, spreading the full
+    // params bag is a stencil that's easy to break later (e.g. by
+    // adding a new optional param that the caller can now silently
+    // write to `users.update`). See security audit #A7/#M13.
+    const { email, phone } = ctx.params;
+    return this.updateEntity(ctx, { id: ctx.meta.user.id, email, phone });
   }
   @Action({
     params: {

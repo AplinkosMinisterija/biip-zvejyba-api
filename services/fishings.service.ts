@@ -685,12 +685,28 @@ export default class FishTypesService extends moleculer.Service {
 
   @Action({
     rest: 'GET /exportCaughtFishes',
+    // ADMIN-only: the endpoint returns a flat Excel file with cross-row
+    // PII (createdBy.firstName/lastName). It was implicitly DEFAULT
+    // (any authenticated USER) and the inline `JSON.parse(query || {})`
+    // crashed on the empty-object fallback — both flagged by the audit
+    // (#M1).
+    auth: RestrictionType.ADMIN,
+    params: {
+      query: { type: 'string', optional: true },
+    },
   })
-  async exportCaughtFishes(ctx: Context<any, ResponseHeadersMeta>) {
-    ctx.params.query = JSON.parse(ctx?.params?.query || {});
+  async exportCaughtFishes(ctx: Context<{ query?: string }, ResponseHeadersMeta>) {
+    let parsedQuery: any = {};
+    if (ctx.params.query) {
+      try {
+        parsedQuery = JSON.parse(ctx.params.query);
+      } catch {
+        throw new moleculer.Errors.ValidationError('Invalid query JSON');
+      }
+    }
 
     const fishings: Fishing<'weightEvents' | 'tenant'>[] = await ctx.call('fishings.find', {
-      query: ctx?.params?.query,
+      query: parsedQuery,
       populate: 'weightEvents,tenant',
       sort: 'id',
     });

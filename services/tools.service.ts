@@ -172,7 +172,13 @@ async function validateData({ ctx, params, entity, value }: FieldHookCallback) {
               return await ctx.call('toolsGroups.findOne', {
                 query: {
                   ...query,
-                  $raw: `${tool.id} = ANY(tools)`,
+                  // Parameterized form — the template-literal version
+                  // (`${tool.id} = ANY(tools)`) was safe today because
+                  // `tool.id` is a DB-side integer, but it's the same
+                  // shape that turns into SQL injection the day anyone
+                  // copies the idiom and inlines a user-supplied value
+                  // (audit security #H11).
+                  $raw: { condition: '? = ANY(tools)', bindings: [Number(tool.id)] },
                 },
                 sort: ['-createdAt'],
                 populate: ['buildEvent'],

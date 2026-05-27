@@ -83,7 +83,13 @@ export default function (opts: any = {}) {
     enabled: false,
   };
 
-  opts = _.defaultsDeep(opts, { adapter }, { cache: opts.cache || cache });
+  // @moleculer/database default is `maxLimit: -1` (unbounded). With
+  // `populate` chains that fan-out to N nested ctx.calls, a single
+  // `GET /fishings?pageSize=10000&populate=weightEvents,toolsGroup`
+  // can stall the worker and blow DB connection budget (audit security
+  // #M14). Cap to 100 by default; individual services can override
+  // by passing `maxLimit` through opts.
+  opts = _.defaultsDeep(opts, { adapter, maxLimit: 100 }, { cache: opts.cache || cache });
 
   const removeRestActions: any = {};
 

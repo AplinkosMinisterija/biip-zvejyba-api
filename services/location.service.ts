@@ -85,7 +85,14 @@ export default class LocationsService extends moleculer.Service {
     let query = ctx.params.query;
 
     if (typeof query === 'string') {
-      query = JSON.parse(query);
+      // Earlier `JSON.parse(query)` ran unguarded — a malformed string
+      // bubbled up as an opaque 500. Convert parse failures into a clean
+      // 422 (audit security #M12).
+      try {
+        query = JSON.parse(query);
+      } catch {
+        throw new moleculer.Errors.ValidationError('Invalid query JSON');
+      }
     }
 
     if (!query?.coordinates) {

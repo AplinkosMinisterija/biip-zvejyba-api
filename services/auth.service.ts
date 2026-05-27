@@ -289,14 +289,19 @@ export default class AuthService extends moleculer.Service {
       }
     };
 
-    handleSetGroup(isFreelancerChanged, user.isFreelancer, process.env.FREELANCER_GROUP_ID);
-    handleSetGroup(
-      isInvestigatorChanged,
-      user.isInvestigator,
-      process.env.AUTH_INVESTIGATOR_GROUP_ID,
-    );
-
-    return;
+    // Run both group changes concurrently and wait for them — earlier
+    // versions fired-and-forgot, so a failure on one flag (e.g. auth-api
+    // hiccup on freelancer assign) could complete while the other
+    // half-applied, leaving the user in a partial state. See security
+    // audit #L7.
+    await Promise.all([
+      handleSetGroup(isFreelancerChanged, user.isFreelancer, process.env.FREELANCER_GROUP_ID),
+      handleSetGroup(
+        isInvestigatorChanged,
+        user.isInvestigator,
+        process.env.AUTH_INVESTIGATOR_GROUP_ID,
+      ),
+    ]);
   }
 
   @Event()

@@ -10,7 +10,7 @@ import {
   INNER_AUTH_GROUP_IDS,
   RestrictionType,
 } from '../types';
-import { TenantUser, TenantUserRole } from './tenantUsers.service';
+import { TenantUserRole } from './tenantUsers.service';
 
 import DbConnection, { PopulateHandlerFn } from '../mixins/database.mixin';
 import { UserAuthMeta } from './api.service';
@@ -108,7 +108,11 @@ export interface Tenant {
       rest: null,
     },
     update: {},
-    remove: {},
+    // Tenant deletion is destructive and cascades through tenantUsers,
+    // fishings, weight events, etc. Restrict to SUPER_ADMIN so junior
+    // platform admins can't accidentally soft-delete a paying company
+    // (audit security #M4).
+    remove: { auth: RestrictionType.SUPER_ADMIN },
   },
 })
 export default class TenantsService extends moleculer.Service {
@@ -202,27 +206,21 @@ export default class TenantsService extends moleculer.Service {
     return tenant;
   }
 
-  @Method
-  async removeAuthGroup(ctx: any) {
-    const tenant: Tenant = await ctx.call('tenants.resolve', {
-      id: ctx.params.id,
-    });
-
-    const tenantUsers: TenantUser[] = await ctx.call('tenantUsers.find', {
-      query: {
-        tenant: ctx.params.id,
-      },
-    });
-
-    await Promise.all(tenantUsers.map((tu) => ctx.call('tenantUsers.remove', { id: tu.id })));
-
-    const authGroup = await ctx.call('auth.groups.remove', {
-      id: tenant.authGroup,
-    });
-
-    ctx.params.authGroup = authGroup.id;
-
-    return ctx;
+  // `tenants.removed` two-step cleanup:
+  //   1) tenantUsers.service.ts removes the local membership rows (`tenants.removed` handler there)
+  //   2) we remove the auth-side group here, so the auth API doesn't accumulate orphaned groups
+  //      whose IDs could later be silently reused (see security audit #L6).
+  @Event()
+  async 'tenants.removed'(ctx: Context<{ data: Tenant }>) {
+    const tenant = ctx.params.data;
+    if (!tenant?.authGroup) return;
+    try {
+      await ctx.call('auth.groups.remove', { id: tenant.authGroup });
+    } catch (err: any) {
+      this.logger.warn(
+        `[tenants.removed] auth.groups.remove failed for tenant=${tenant.id} authGroup=${tenant.authGroup}: ${err?.message}`,
+      );
+    }
   }
 
   @Event()
