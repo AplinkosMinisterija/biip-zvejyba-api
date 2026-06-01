@@ -756,8 +756,13 @@ export default class FishTypesService extends moleculer.Service {
       Object.values(fishOnBoat).forEach((toolGroup) => {
         const fishIds = Object.keys(toolGroup.data).map(Number);
 
-        const location = toolGroup.location.name;
-        const tool = toolGroup.toolsGroup.tools[0].toolType.label;
+        const location = toolGroup.location?.name;
+        // A tools group whose tools were all soft-deleted populates to an
+        // empty `tools` array (toolsGroups.tools → tools.find applies the
+        // notDeleted scope, then .filter(Boolean) drops the missing ids), so
+        // tools[0] is undefined. Optional-chain rather than crash the whole
+        // admin export over a single legacy/edited row.
+        const tool = toolGroup.toolsGroup?.tools?.[0]?.toolType?.label;
 
         fishIds.forEach((id) => {
           const fish = fishTypesMap.get(id as any)?.label;
@@ -770,11 +775,11 @@ export default class FishTypesService extends moleculer.Service {
             };
           }
 
-          if (!info[id].locations.includes(location)) {
+          if (location && !info[id].locations.includes(location)) {
             info[id].locations.push(location);
           }
 
-          if (!info[id].tools.includes(tool)) {
+          if (tool && !info[id].tools.includes(tool)) {
             info[id].tools.push(tool);
           }
         });

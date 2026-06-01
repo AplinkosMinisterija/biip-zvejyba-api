@@ -201,3 +201,64 @@ describe('fishings — weighFish payload guards', () => {
     expect(res.body.success).toBe(true);
   });
 });
+
+describe('fishings/exportCaughtFishes — empty tools group (regression)', () => {
+  // Regression for the admin Excel export crashing with
+  // "Cannot read properties of undefined (reading 'toolType')": a boat
+  // tools group whose tools were all soft-deleted populates to an empty
+  // `tools` array, so `tools[0].toolType.label` blew up the whole export.
+  it('exports without crashing when a boat tools group has no live tools', async () => {
+    const ownerMeta = apiHelper.meta(apiHelper.ownerA, apiHelper.tenantA.tenant.id);
+
+    await broker.call('weightEvents.removeAllEntities');
+    await broker.call('fishingEvents.removeAllEntities');
+    await broker.call('fishings.removeAllEntities');
+
+    const fishId = await seedFishType();
+    const toolId = await seedToolForOwner(apiHelper.ownerA, apiHelper.tenantA.tenant.id);
+
+    const tool: any = await broker.call(
+      'tools.get',
+      { id: toolId, populate: ['toolsGroup'] },
+      { meta: ownerMeta },
+    );
+    const toolsGroupId = tool.toolsGroup?.id ?? tool.toolsGroup;
+    expect(toolsGroupId).toBeTruthy();
+
+    await broker.call(
+      'fishings.startFishing',
+      { type: 'INLAND_WATERS', coordinates: sampleCoords },
+      { meta: ownerMeta },
+    );
+
+    const location = {
+      id: '1',
+      name: 'Testas',
+      type: 'INLAND_WATERS',
+      municipality: { id: 1, name: 'Klaipėda' },
+    };
+
+    // Boat (preliminary) catch — carries the tools group.
+    await broker.call(
+      'weightEvents.createWeightEvent',
+      { toolsGroup: toolsGroupId, coordinates: sampleCoords, location, data: { [fishId]: 5 } },
+      { meta: ownerMeta },
+    );
+    // Shore (total) catch — no tools group.
+    await broker.call(
+      'weightEvents.createWeightEvent',
+      { coordinates: sampleCoords, location, data: { [fishId]: 5 } },
+      { meta: ownerMeta },
+    );
+
+    // Soft-delete the only tool → toolsGroup.tools populates to [].
+    await broker.call('tools.remove', { id: toolId }, { meta: ownerMeta });
+
+    const res = await request(apiService.server)
+      .get('/zvejyba/api/fishings/exportCaughtFishes')
+      .set(apiHelper.getHeaders(apiHelper.adminA.token));
+
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/spreadsheet|octet-stream/);
+  });
+});
