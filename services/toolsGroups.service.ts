@@ -428,23 +428,17 @@ export default class ToolsGroupsService extends moleculer.Service {
       throw new moleculer.Errors.ValidationError('Fishing not started');
     }
 
-    // A tool deployed in an earlier (already-ended) fishing and left in the
-    // water cannot be pulled back to the warehouse until its catch is recorded
-    // in the CURRENT session — either a "Patikrinta" press or an actual weigh
-    // (both write a weight_event scoped to the current fishing, which
-    // `getFishByToolsGroup` reads). Otherwise the leftover net's catch is
-    // silently lost when the angler returns next trip and removes it without
-    // logging anything. The fishing-id comparison mirrors
-    // `assertSiblingsHaveFishLogged` — `find`/`resolve` return encoded ids, so
-    // a direct `===` against `currentFishing.id` is correct.
-    const builtFishingId = group.buildEvent?.fishing?.id;
-    if (builtFishingId && builtFishingId !== currentFishing.id) {
-      const weighed: WeightEvent = await ctx.call('weightEvents.getFishByToolsGroup', {
-        toolsGroup: ctx.params.id,
-      });
-      if (!weighed) {
-        throw new moleculer.Errors.ValidationError('Previous fishing tool not weighted');
-      }
+    // Every tool must be checked ("Patikrinta") or weighed before it can be
+    // pulled back to the warehouse — both write a weight_event scoped to the
+    // current session, which `getFishByToolsGroup` reads. This holds whether
+    // the net was set this trip or an earlier, already-ended one: returning it
+    // unchecked silently loses the catch. (Originally only the previous-fishing
+    // leftover case was guarded; the rule now applies to in-session tools too.)
+    const weighed: WeightEvent = await ctx.call('weightEvents.getFishByToolsGroup', {
+      toolsGroup: ctx.params.id,
+    });
+    if (!weighed) {
+      throw new moleculer.Errors.ValidationError('Previous fishing tool not weighted');
     }
 
     // Refuse to return the last unchecked tool of a type when every sibling
