@@ -413,8 +413,9 @@ export default class ToolsGroupsService extends moleculer.Service {
   ) {
     const userId = ctx.meta.user.id;
     const tenantId = ctx.meta.profile;
-    const group: ToolsGroup<'tools'> = await ctx.call('toolsGroups.resolve', {
+    const group: ToolsGroup<'tools' | 'buildEvent'> = await ctx.call('toolsGroups.resolve', {
       id: ctx.params.id,
+      populate: ['tools', 'buildEvent'],
     });
     if (!group) {
       throw new moleculer.Errors.ValidationError('Invalid group');
@@ -425,6 +426,25 @@ export default class ToolsGroupsService extends moleculer.Service {
     const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
     if (!currentFishing) {
       throw new moleculer.Errors.ValidationError('Fishing not started');
+    }
+
+    // A tool deployed in an earlier (already-ended) fishing and left in the
+    // water cannot be pulled back to the warehouse until its catch is recorded
+    // in the CURRENT session — either a "Patikrinta" press or an actual weigh
+    // (both write a weight_event scoped to the current fishing, which
+    // `getFishByToolsGroup` reads). Otherwise the leftover net's catch is
+    // silently lost when the angler returns next trip and removes it without
+    // logging anything. The fishing-id comparison mirrors
+    // `assertSiblingsHaveFishLogged` — `find`/`resolve` return encoded ids, so
+    // a direct `===` against `currentFishing.id` is correct.
+    const builtFishingId = group.buildEvent?.fishing?.id;
+    if (builtFishingId && builtFishingId !== currentFishing.id) {
+      const weighed: WeightEvent = await ctx.call('weightEvents.getFishByToolsGroup', {
+        toolsGroup: ctx.params.id,
+      });
+      if (!weighed) {
+        throw new moleculer.Errors.ValidationError('Previous fishing tool not weighted');
+      }
     }
 
     // Refuse to return the last unchecked tool of a type when every sibling
@@ -640,11 +660,11 @@ export default class ToolsGroupsService extends moleculer.Service {
   @Method
   async assertSiblingsHaveFishLogged(
     ctx: Context,
-    group: ToolsGroup<'tools'>,
+    group: ToolsGroup<'tools' | 'buildEvent'>,
     currentFishing: Fishing,
   ) {
     const toolTypeId = (group.tools?.[0] as Tool<'toolType'> | undefined)?.toolType?.id;
-    const ownLocationId = (group as ToolsGroup<'tools' | 'buildEvent'>).buildEvent?.location?.id;
+    const ownLocationId = group.buildEvent?.location?.id;
     if (!toolTypeId || ownLocationId == null) return;
 
     // Same shape as `getNotCheckedToolsGroups` — `find` returns user-scoped
