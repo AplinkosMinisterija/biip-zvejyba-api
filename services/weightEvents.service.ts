@@ -187,17 +187,35 @@ export default class ToolTypesService extends moleculer.Service {
   })
   async getFishByToolsGroup(ctx: Context<{ toolsGroup: number }>) {
     const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
-    if (!currentFishing) {
-      throw new moleculer.Errors.ValidationError('Fishing not started');
+
+    // The angler app scopes the catch to the active session. Admin / journal
+    // views reach here through the toolsGroups `weightEvent` virtual populate
+    // and have no current fishing — they must NOT be rejected with
+    // "Fishing not started" (that 422'd the whole `toolsGroups/all` list in
+    // the admin įrankiai page). Fall back to the tool group's own weight
+    // history: a tools_group id is tied to a single fishing (returning a net
+    // spawns a fresh group), so the latest weight event is unambiguous with
+    // or without the fishing filter. `removeTools` still guards currentFishing
+    // before calling, so its behaviour is unchanged.
+    const query: { toolsGroup: number; fishing?: number } = {
+      toolsGroup: ctx.params.toolsGroup,
+    };
+    if (currentFishing) {
+      query.fishing = currentFishing.id;
     }
 
-    const weights = await this.findEntities(ctx, {
-      query: {
-        fishing: currentFishing.id,
-        toolsGroup: ctx.params.toolsGroup,
-      },
+    // Go through the scoped `find` (ProfileMixin `beforeSelect`) rather than
+    // the unscoped `findEntities`, so the action defends itself: it returns
+    // only weight events the caller's tenant/user may see (admins bypass the
+    // scope and see all) regardless of whether the caller pre-scoped the
+    // toolsGroup id. Dropping the in-session `fishing` filter above otherwise
+    // removed the only implicit tenant constraint (security audit follow-up).
+    // `populate: []` keeps the previous raw shape (no defaultPopulates).
+    const weights: WeightEvent[] = await ctx.call('weightEvents.find', {
+      query,
       sort: '-createdAt',
       limit: 1,
+      populate: [],
     });
     return weights[0];
   }
