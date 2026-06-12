@@ -396,7 +396,17 @@ export default class FishTypesService extends moleculer.Service {
       ctx.params.uetkCadastralId = '00070001'; // Kuršių marios
     }
 
-    return this.createEntity(ctx, { ...ctx.params, startEvent: startEvent.id });
+    const fishing = await this.createEntity(ctx, { ...ctx.params, startEvent: startEvent.id });
+
+    // A new fishing may add a location → drop the cached `fishingLocations`
+    // options for the views that include it (admin's all-list + the creator's
+    // own scope). Other tenants' caches stay valid.
+    await this.broker.cacher?.del([
+      'fishings.locations:admin',
+      `fishings.locations:${this.fishingLocationsScope(ctx)}`,
+    ]);
+
+    return fishing;
   }
 
   @Action({
@@ -561,6 +571,16 @@ export default class FishTypesService extends moleculer.Service {
     auth: RestrictionType.DEFAULT,
   })
   async fishingLocations(ctx: Context<unknown, UserAuthMeta>) {
+    // Per-scope cache: the result differs by caller (admin → all, company →
+    // its tenant, freelancer → own), so the key MUST carry the scope or one
+    // tenant would read another's cached list. Built explicitly (not
+    // declarative `#meta` keys) so the scope is provably in the key. Saves the
+    // distinct query + the external UETK resolve on repeat opens and on the
+    // async-select's per-keystroke option fetches. Invalidated on startFishing.
+    const cacheKey = `fishings.locations:${this.fishingLocationsScope(ctx)}`;
+    const cached = await this.broker.cacher?.get(cacheKey);
+    if (cached) return cached;
+
     const fishings: Array<{ uetkCadastralId?: string; polderId?: number }> = await ctx.call(
       'fishings.find',
       { query: {}, fields: ['uetkCadastralId', 'polderId'] },
@@ -594,7 +614,24 @@ export default class FishTypesService extends moleculer.Service {
       ...polders.map((p) => ({ id: p.id, name: p.name, polder: true })),
     ];
     options.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'lt'));
+    await this.broker.cacher?.set(cacheKey, options, 60 * 60);
     return options;
+  }
+
+  // Cache-key scope for `fishingLocations`, mirroring how `fishings.find`
+  // scopes the rows: admins share one "all" entry; tenant members share their
+  // tenant's; a freelancer keys on their own user. Derived from trusted
+  // `ctx.meta`, so a caller can never craft it to read another scope's cache.
+  @Method
+  fishingLocationsScope(ctx: Context<unknown, UserAuthMeta>): string {
+    const meta = ctx.meta;
+    const isAdmin = [AuthUserRole.ADMIN, AuthUserRole.SUPER_ADMIN].some(
+      (role) => role === meta?.authUser?.type,
+    );
+    if (isAdmin) return 'admin';
+    if (meta?.profile && meta?.user) return `t:${meta.profile}`;
+    if (meta?.user) return `u:${meta.user.id}`;
+    return 'anon';
   }
 
   @Action({
