@@ -396,17 +396,7 @@ export default class FishTypesService extends moleculer.Service {
       ctx.params.uetkCadastralId = '00070001'; // Kuršių marios
     }
 
-    const fishing = await this.createEntity(ctx, { ...ctx.params, startEvent: startEvent.id });
-
-    // A new fishing may add a location → drop the cached `fishingLocations`
-    // options for the views that include it (admin's all-list + the creator's
-    // own scope). Other tenants' caches stay valid.
-    await this.broker.cacher?.del([
-      'fishings.locations:admin',
-      `fishings.locations:${this.fishingLocationsScope(ctx)}`,
-    ]);
-
-    return fishing;
+    return this.createEntity(ctx, { ...ctx.params, startEvent: startEvent.id });
   }
 
   @Action({
@@ -530,7 +520,7 @@ export default class FishTypesService extends moleculer.Service {
   // doesn't scope them); personal profiles keep `user` stripped (forced to
   // self) — see security-regression spec.
   @Method
-  beforeJournalSelect(ctx: Context<{ query?: { user?: unknown } }, UserAuthMeta>) {
+  async beforeJournalSelect(ctx: Context<{ query?: Record<string, unknown> }, UserAuthMeta>) {
     const requestedMember = this.scalarMemberId(ctx.params?.query?.user);
 
     this.beforeSelect(ctx);
@@ -543,7 +533,45 @@ export default class FishTypesService extends moleculer.Service {
     if (!isAdmin && isTenantProfile && requestedMember != null) {
       ctx.params.query = { ...ctx.params.query, user: requestedMember };
     }
+
+    await this.applyLocationFilter(ctx);
     return ctx;
+  }
+
+  // Event-based location filter. The granular location lives on the tool
+  // events, not the fishing row, so translate the picked `{ locationId,
+  // locationName }` into the fishings that have a build/remove event there and
+  // constrain the list by id. The outer ProfileMixin scope (tenant/user) still
+  // applies, so this can never cross tenants. Matched by id AND name because
+  // bar and polder ids can collide. The transport keys are always stripped so
+  // they never reach the list as bogus column filters.
+  @Method
+  async applyLocationFilter(ctx: Context<{ query?: Record<string, unknown> }, UserAuthMeta>) {
+    const query = ctx.params?.query;
+    if (!query) return;
+
+    const locationId = query.locationId;
+    const locationName = query.locationName;
+    delete query.locationId;
+    delete query.locationName;
+
+    if (
+      locationId == null ||
+      locationName == null ||
+      typeof locationId === 'object' ||
+      typeof locationName === 'object'
+    ) {
+      return;
+    }
+
+    const rows = await this.rawQuery(
+      ctx,
+      `SELECT DISTINCT fishing_id FROM tools_groups_events
+       WHERE location->>'id' = ? AND location->>'name' = ? AND deleted_at IS NULL`,
+      [String(locationId), String(locationName)],
+    );
+    const ids = rows.map((r: any) => Number(r.fishing_id)).filter(Number.isFinite);
+    query.id = { $in: ids.length ? ids : [-1] };
   }
 
   // Accept only a single bare scalar id. An object/array is the only way to
@@ -559,61 +587,42 @@ export default class FishTypesService extends moleculer.Service {
   }
 
   // Distinct locations that appear in the caller's fishings — options for the
-  // journal "location" filter. Scope is whatever `fishings.find` applies to
-  // the caller (admin → all, company → its tenant, freelancer → own), so the
-  // dropdown only lists places actually fished. Names are resolved the same
-  // way as the `location` virtual field; the external UETK lookup is wrapped
-  // defensively so a slow/down UETK degrades to "polders only" instead of
-  // breaking the whole filter. Each option carries `polder` so the client
-  // knows whether the selection filters `polderId` or `uetkCadastralId`.
+  // journal "location" filter. The granular location (estuary bar, inland water
+  // body, polder) lives in `tools_groups_events.location` JSONB, NOT on the
+  // fishing row: a fishing spans several bars, and every ESTUARY fishing carries
+  // the same fixed "Kuršių marios" cadastral id. So we read the distinct event
+  // locations, scoped exactly like the journal via the ProfileMixin-scoped
+  // `toolsGroupsEvents.find` (admin → all, company → its tenant, freelancer →
+  // own). Each option is { id, name }; the client filters by both, because bar
+  // and polder ids can collide (see toolsGroups "Tools-by-location collision").
   @Action({
     rest: 'GET /locations',
     auth: RestrictionType.DEFAULT,
   })
   async fishingLocations(ctx: Context<unknown, UserAuthMeta>) {
-    // Per-scope cache: the result differs by caller (admin → all, company →
-    // its tenant, freelancer → own), so the key MUST carry the scope or one
-    // tenant would read another's cached list. Built explicitly (not
-    // declarative `#meta` keys) so the scope is provably in the key. Saves the
-    // distinct query + the external UETK resolve on repeat opens and on the
-    // async-select's per-keystroke option fetches. Invalidated on startFishing.
+    // Per-scope cache: the result differs by caller, so the key MUST carry the
+    // scope or one tenant would read another's list. TTL only — locations
+    // change slowly, so a new bar showing up within the hour is acceptable.
     const cacheKey = `fishings.locations:${this.fishingLocationsScope(ctx)}`;
     const cached = await this.broker.cacher?.get(cacheKey);
     if (cached) return cached;
 
-    const fishings: Array<{ uetkCadastralId?: string; polderId?: number }> = await ctx.call(
-      'fishings.find',
-      { query: {}, fields: ['uetkCadastralId', 'polderId'] },
+    const events: Array<{ location?: { id?: string; name?: string } }> = await ctx.call(
+      'toolsGroupsEvents.find',
+      { query: {}, fields: ['location'] },
     );
 
-    const cadastralIds = Array.from(
-      new Set(fishings.map((f) => f.uetkCadastralId).filter((id): id is string => !!id)),
-    );
-    const polderIds = Array.from(
-      new Set(fishings.map((f) => f.polderId).filter((id): id is number => id != null)),
-    );
-
-    let waterBodies: Array<{ id: string; name: string }> = [];
-    if (cadastralIds.length) {
-      try {
-        waterBodies = await ctx.call('locations.uetkSearchByCadastralId', {
-          cadastralId: cadastralIds,
-        });
-      } catch (err: any) {
-        this.logger.warn(`[fishingLocations] UETK lookup failed: ${err?.message}`);
-      }
+    const byKey = new Map<string, { id: string; name: string }>();
+    for (const event of events) {
+      const loc = event.location;
+      if (!loc?.id || !loc?.name) continue;
+      const key = `${loc.id}|${loc.name}`;
+      if (!byKey.has(key)) byKey.set(key, { id: String(loc.id), name: loc.name });
     }
-    const polders: Polder[] = polderIds.length
-      ? await ctx.call('polders.find', { query: { id: { $in: polderIds } } })
-      : [];
 
-    const options = [
-      ...(waterBodies || [])
-        .filter((l) => !!l)
-        .map((l) => ({ id: l.id, name: l.name, polder: false })),
-      ...polders.map((p) => ({ id: p.id, name: p.name, polder: true })),
-    ];
-    options.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'lt'));
+    const options = Array.from(byKey.values()).sort((a, b) =>
+      (a.name || '').localeCompare(b.name || '', 'lt'),
+    );
     await this.broker.cacher?.set(cacheKey, options, 60 * 60);
     return options;
   }
