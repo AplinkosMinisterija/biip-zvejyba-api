@@ -18,7 +18,7 @@ import {
 
 import ProfileMixin from '../mixins/profile.mixin';
 import { coordinatesToGeometry, geomToWgs } from '../modules/geometry';
-import { UserAuthMeta } from './api.service';
+import { AuthUserRole, UserAuthMeta } from './api.service';
 import { FishingEvent, FishingEventType } from './fishingEvents.service';
 import { FishType } from './fishTypes.service';
 import { Coordinates, CoordinatesProp, Location } from './location.service';
@@ -292,11 +292,11 @@ export type Fishing<
       startFishing: ['beforeCreate'],
       skipFishing: ['beforeCreate'],
       currentFishing: ['beforeSelect'],
-      list: ['beforeSelect'],
-      find: ['beforeSelect'],
-      count: ['beforeSelect'],
+      list: ['beforeJournalSelect'],
+      find: ['beforeJournalSelect'],
+      count: ['beforeJournalSelect'],
       get: ['beforeSelect'],
-      all: ['beforeSelect'],
+      all: ['beforeJournalSelect'],
     },
   },
 })
@@ -396,7 +396,17 @@ export default class FishTypesService extends moleculer.Service {
       ctx.params.uetkCadastralId = '00070001'; // Kuršių marios
     }
 
-    return this.createEntity(ctx, { ...ctx.params, startEvent: startEvent.id });
+    const fishing = await this.createEntity(ctx, { ...ctx.params, startEvent: startEvent.id });
+
+    // A new fishing may add a location → drop the cached `fishingLocations`
+    // options for the views that include it (admin's all-list + the creator's
+    // own scope). Other tenants' caches stay valid.
+    await this.broker.cacher?.del([
+      'fishings.locations:admin',
+      `fishings.locations:${this.fishingLocationsScope(ctx)}`,
+    ]);
+
+    return fishing;
   }
 
   @Action({
@@ -507,6 +517,121 @@ export default class FishTypesService extends moleculer.Service {
     } catch {
       return true;
     }
+  }
+
+  // Journal-list scoping. ProfileMixin.beforeSelect strips `user` from caller
+  // queries (a FORBIDDEN key) to block horizontal escalation. For the fishing
+  // journal a company (tenant-profile) member is allowed to narrow the
+  // *already tenant-scoped* list to one colleague, so we re-apply `user` AFTER
+  // the shared scoping — only for tenant profiles, only as a bare scalar, and
+  // with `tenant: profile` still enforced. This exposes nothing new (every
+  // tenant member can already read the whole tenant journal) and can never
+  // cross tenants. Admins keep their unrestricted `query.user` (the mixin
+  // doesn't scope them); personal profiles keep `user` stripped (forced to
+  // self) — see security-regression spec.
+  @Method
+  beforeJournalSelect(ctx: Context<{ query?: { user?: unknown } }, UserAuthMeta>) {
+    const requestedMember = this.scalarMemberId(ctx.params?.query?.user);
+
+    this.beforeSelect(ctx);
+
+    const meta = ctx.meta;
+    const isAdmin = [AuthUserRole.ADMIN, AuthUserRole.SUPER_ADMIN].some(
+      (role) => role === meta?.authUser?.type,
+    );
+    const isTenantProfile = !!meta?.profile && !!meta?.user;
+    if (!isAdmin && isTenantProfile && requestedMember != null) {
+      ctx.params.query = { ...ctx.params.query, user: requestedMember };
+    }
+    return ctx;
+  }
+
+  // Accept only a single bare scalar id. An object/array is the only way to
+  // smuggle a Mongo operator / `$raw` through the `user` value, and a
+  // comma-list string would be expanded into an IN(...) by moleculer-knex-
+  // filters — so we restrict strings to one alphanumeric token (covers both
+  // raw integer ids and secure-encoded ids) and reject everything else.
+  @Method
+  scalarMemberId(value: unknown): number | string | null {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && /^[A-Za-z0-9]{1,40}$/.test(value)) return value;
+    return null;
+  }
+
+  // Distinct locations that appear in the caller's fishings — options for the
+  // journal "location" filter. Scope is whatever `fishings.find` applies to
+  // the caller (admin → all, company → its tenant, freelancer → own), so the
+  // dropdown only lists places actually fished. Names are resolved the same
+  // way as the `location` virtual field; the external UETK lookup is wrapped
+  // defensively so a slow/down UETK degrades to "polders only" instead of
+  // breaking the whole filter. Each option carries `polder` so the client
+  // knows whether the selection filters `polderId` or `uetkCadastralId`.
+  @Action({
+    rest: 'GET /locations',
+    auth: RestrictionType.DEFAULT,
+  })
+  async fishingLocations(ctx: Context<unknown, UserAuthMeta>) {
+    // Per-scope cache: the result differs by caller (admin → all, company →
+    // its tenant, freelancer → own), so the key MUST carry the scope or one
+    // tenant would read another's cached list. Built explicitly (not
+    // declarative `#meta` keys) so the scope is provably in the key. Saves the
+    // distinct query + the external UETK resolve on repeat opens and on the
+    // async-select's per-keystroke option fetches. Invalidated on startFishing.
+    const cacheKey = `fishings.locations:${this.fishingLocationsScope(ctx)}`;
+    const cached = await this.broker.cacher?.get(cacheKey);
+    if (cached) return cached;
+
+    const fishings: Array<{ uetkCadastralId?: string; polderId?: number }> = await ctx.call(
+      'fishings.find',
+      { query: {}, fields: ['uetkCadastralId', 'polderId'] },
+    );
+
+    const cadastralIds = Array.from(
+      new Set(fishings.map((f) => f.uetkCadastralId).filter((id): id is string => !!id)),
+    );
+    const polderIds = Array.from(
+      new Set(fishings.map((f) => f.polderId).filter((id): id is number => id != null)),
+    );
+
+    let waterBodies: Array<{ id: string; name: string }> = [];
+    if (cadastralIds.length) {
+      try {
+        waterBodies = await ctx.call('locations.uetkSearchByCadastralId', {
+          cadastralId: cadastralIds,
+        });
+      } catch (err: any) {
+        this.logger.warn(`[fishingLocations] UETK lookup failed: ${err?.message}`);
+      }
+    }
+    const polders: Polder[] = polderIds.length
+      ? await ctx.call('polders.find', { query: { id: { $in: polderIds } } })
+      : [];
+
+    const options = [
+      ...(waterBodies || [])
+        .filter((l) => !!l)
+        .map((l) => ({ id: l.id, name: l.name, polder: false })),
+      ...polders.map((p) => ({ id: p.id, name: p.name, polder: true })),
+    ];
+    options.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'lt'));
+    await this.broker.cacher?.set(cacheKey, options, 60 * 60);
+    return options;
+  }
+
+  // Cache-key scope for `fishingLocations`, mirroring how `fishings.find`
+  // scopes the rows: admins share one "all" entry; tenant members share their
+  // tenant's; a freelancer keys on their own user. Derived from trusted
+  // `ctx.meta`, so a caller can never craft it to read another scope's cache.
+  @Method
+  fishingLocationsScope(ctx: Context<unknown, UserAuthMeta>): string {
+    const meta = ctx.meta;
+    const isAdmin = [AuthUserRole.ADMIN, AuthUserRole.SUPER_ADMIN].some(
+      (role) => role === meta?.authUser?.type,
+    );
+    if (isAdmin) return 'admin';
+    if (meta?.profile && meta?.user) return `t:${meta.profile}`;
+    if (meta?.user) return `u:${meta.user.id}`;
+    return 'anon';
   }
 
   @Action({
