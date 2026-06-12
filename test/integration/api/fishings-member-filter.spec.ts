@@ -58,6 +58,28 @@ describe('fishings journal — company member filter', () => {
     expect(ids).toContain(userAFishingId); // colleague's fishing shows
     expect(ids).not.toContain(ownerAFishingId); // own fishing filtered out
     expect(ids).not.toContain(ownerBFishingId); // never another tenant
+    // The paginated total must reflect the member filter too (only userA's
+    // single tenantA fishing), not the whole tenant journal.
+    expect(res.body.total).toBe(1);
+  });
+
+  it('a comma-list user value is rejected (no IN-expansion), stays tenant-scoped', async () => {
+    const res = await request(apiService.server)
+      .get('/zvejyba/api/fishings')
+      .set(apiHelper.getHeaders(apiHelper.ownerA.token, apiHelper.tenantA.tenant.id))
+      .query({
+        query: JSON.stringify({
+          user: `${apiHelper.userA.user.id},${apiHelper.ownerB.user.id}`,
+        }),
+      })
+      .expect(200);
+
+    const ids = idsOf(res);
+    // Rejected → no member narrowing → full tenantA journal (userA + ownerA),
+    // and crucially no tenantB leak via a smuggled IN(...) list.
+    expect(ids).toContain(userAFishingId);
+    expect(ids).toContain(ownerAFishingId);
+    expect(ids).not.toContain(ownerBFishingId);
   });
 
   it('the member filter can never cross tenants', async () => {

@@ -536,13 +536,15 @@ export default class FishTypesService extends moleculer.Service {
     return ctx;
   }
 
-  // Accept only a bare scalar id (number or short plain string). An object or
-  // array is the only way to smuggle a Mongo operator / `$raw` through the
-  // `user` value, so anything non-scalar is rejected (the filter is skipped).
+  // Accept only a single bare scalar id. An object/array is the only way to
+  // smuggle a Mongo operator / `$raw` through the `user` value, and a
+  // comma-list string would be expanded into an IN(...) by moleculer-knex-
+  // filters — so we restrict strings to one alphanumeric token (covers both
+  // raw integer ids and secure-encoded ids) and reject everything else.
   @Method
   scalarMemberId(value: unknown): number | string | null {
     if (typeof value === 'number' && Number.isFinite(value)) return value;
-    if (typeof value === 'string' && value.length > 0 && value.length <= 40) return value;
+    if (typeof value === 'string' && /^[A-Za-z0-9]{1,40}$/.test(value)) return value;
     return null;
   }
 
