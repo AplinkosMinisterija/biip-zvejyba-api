@@ -18,7 +18,7 @@ import {
 
 import ProfileMixin from '../mixins/profile.mixin';
 import { coordinatesToGeometry, geomToWgs } from '../modules/geometry';
-import { UserAuthMeta } from './api.service';
+import { AuthUserRole, UserAuthMeta } from './api.service';
 import { FishingEvent, FishingEventType } from './fishingEvents.service';
 import { FishType } from './fishTypes.service';
 import { Coordinates, CoordinatesProp, Location } from './location.service';
@@ -292,11 +292,11 @@ export type Fishing<
       startFishing: ['beforeCreate'],
       skipFishing: ['beforeCreate'],
       currentFishing: ['beforeSelect'],
-      list: ['beforeSelect'],
-      find: ['beforeSelect'],
-      count: ['beforeSelect'],
+      list: ['beforeJournalSelect'],
+      find: ['beforeJournalSelect'],
+      count: ['beforeJournalSelect'],
       get: ['beforeSelect'],
-      all: ['beforeSelect'],
+      all: ['beforeJournalSelect'],
     },
   },
 })
@@ -507,6 +507,43 @@ export default class FishTypesService extends moleculer.Service {
     } catch {
       return true;
     }
+  }
+
+  // Journal-list scoping. ProfileMixin.beforeSelect strips `user` from caller
+  // queries (a FORBIDDEN key) to block horizontal escalation. For the fishing
+  // journal a company (tenant-profile) member is allowed to narrow the
+  // *already tenant-scoped* list to one colleague, so we re-apply `user` AFTER
+  // the shared scoping — only for tenant profiles, only as a bare scalar, and
+  // with `tenant: profile` still enforced. This exposes nothing new (every
+  // tenant member can already read the whole tenant journal) and can never
+  // cross tenants. Admins keep their unrestricted `query.user` (the mixin
+  // doesn't scope them); personal profiles keep `user` stripped (forced to
+  // self) — see security-regression spec.
+  @Method
+  beforeJournalSelect(ctx: Context<{ query?: { user?: unknown } }, UserAuthMeta>) {
+    const requestedMember = this.scalarMemberId(ctx.params?.query?.user);
+
+    this.beforeSelect(ctx);
+
+    const meta = ctx.meta;
+    const isAdmin = [AuthUserRole.ADMIN, AuthUserRole.SUPER_ADMIN].some(
+      (role) => role === meta?.authUser?.type,
+    );
+    const isTenantProfile = !!meta?.profile && !!meta?.user;
+    if (!isAdmin && isTenantProfile && requestedMember != null) {
+      ctx.params.query = { ...ctx.params.query, user: requestedMember };
+    }
+    return ctx;
+  }
+
+  // Accept only a bare scalar id (number or short plain string). An object or
+  // array is the only way to smuggle a Mongo operator / `$raw` through the
+  // `user` value, so anything non-scalar is rejected (the filter is skipped).
+  @Method
+  scalarMemberId(value: unknown): number | string | null {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.length > 0 && value.length <= 40) return value;
+    return null;
   }
 
   @Action({
