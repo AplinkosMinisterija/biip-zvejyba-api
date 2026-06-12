@@ -74,4 +74,29 @@ describe('fishings.fishingLocations — journal location options', () => {
     );
     expect(res).toEqual([]);
   });
+
+  it('starting a fishing invalidates the cached options for that scope', async () => {
+    const ownerMeta = apiHelper.meta(apiHelper.ownerA, apiHelper.tenantA.tenant.id);
+    const cacheKey = `fishings.locations:t:${apiHelper.tenantA.tenant.id}`;
+
+    // Prime the cache for this scope.
+    await broker.call('fishings.fishingLocations', {}, { meta: ownerMeta });
+    expect(await broker.cacher!.get(cacheKey)).toBeTruthy();
+
+    // A new fishing must drop the entry (proves the `cacher.del([...])` call
+    // actually fires and removes the right keys — not just a no-op).
+    const toolTypes: any[] = await broker.call('toolTypes.find');
+    await broker.call(
+      'tools.create',
+      { sealNr: 'S-INV-1', toolType: toolTypes[0].id, data: { eyeSize: 60, netLength: 30 } },
+      { meta: ownerMeta },
+    );
+    await broker.call(
+      'fishings.startFishing',
+      { type: 'POLDERS', coordinates: { x: 21.13, y: 55.71 }, polderId: polderAId },
+      { meta: ownerMeta },
+    );
+
+    expect(await broker.cacher!.get(cacheKey)).toBeFalsy();
+  });
 });
