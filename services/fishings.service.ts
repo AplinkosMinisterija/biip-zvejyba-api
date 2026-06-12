@@ -548,6 +548,55 @@ export default class FishTypesService extends moleculer.Service {
     return null;
   }
 
+  // Distinct locations that appear in the caller's fishings — options for the
+  // journal "location" filter. Scope is whatever `fishings.find` applies to
+  // the caller (admin → all, company → its tenant, freelancer → own), so the
+  // dropdown only lists places actually fished. Names are resolved the same
+  // way as the `location` virtual field; the external UETK lookup is wrapped
+  // defensively so a slow/down UETK degrades to "polders only" instead of
+  // breaking the whole filter. Each option carries `polder` so the client
+  // knows whether the selection filters `polderId` or `uetkCadastralId`.
+  @Action({
+    rest: 'GET /locations',
+    auth: RestrictionType.DEFAULT,
+  })
+  async fishingLocations(ctx: Context<unknown, UserAuthMeta>) {
+    const fishings: Array<{ uetkCadastralId?: string; polderId?: number }> = await ctx.call(
+      'fishings.find',
+      { query: {}, fields: ['uetkCadastralId', 'polderId'] },
+    );
+
+    const cadastralIds = Array.from(
+      new Set(fishings.map((f) => f.uetkCadastralId).filter((id): id is string => !!id)),
+    );
+    const polderIds = Array.from(
+      new Set(fishings.map((f) => f.polderId).filter((id): id is number => id != null)),
+    );
+
+    let waterBodies: Array<{ id: string; name: string }> = [];
+    if (cadastralIds.length) {
+      try {
+        waterBodies = await ctx.call('locations.uetkSearchByCadastralId', {
+          cadastralId: cadastralIds,
+        });
+      } catch (err: any) {
+        this.logger.warn(`[fishingLocations] UETK lookup failed: ${err?.message}`);
+      }
+    }
+    const polders: Polder[] = polderIds.length
+      ? await ctx.call('polders.find', { query: { id: { $in: polderIds } } })
+      : [];
+
+    const options = [
+      ...(waterBodies || [])
+        .filter((l) => !!l)
+        .map((l) => ({ id: l.id, name: l.name, polder: false })),
+      ...polders.map((p) => ({ id: p.id, name: p.name, polder: true })),
+    ];
+    options.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'lt'));
+    return options;
+  }
+
   @Action({
     rest: 'GET /current',
     auth: RestrictionType.USER,
