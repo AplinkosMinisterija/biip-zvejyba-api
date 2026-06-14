@@ -1,72 +1,85 @@
 'use strict';
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 import { ServiceBroker } from 'moleculer';
+import request from 'supertest';
 import { ApiHelper, serviceBrokerConfig } from '../../helpers/api';
 
-// `fishings.fishingLocations` powers the journal "location" filter: the
-// distinct places the caller actually fished, scoped like the journal itself
-// (admin → all, company → its tenant, freelancer → own). Tested with POLDERS
-// fishings only — polders resolve from the local table, so no external UETK
-// call is needed (that branch is defensively wrapped anyway).
+// `fishings.fishingLocations` powers the journal "location" filter. The
+// granular location (estuary bar, inland water body, polder) lives in
+// `tools_groups_events.location` — NOT on the fishing row — so the options are
+// the distinct event locations, scoped like the journal, and the filter
+// (?query={locationId,locationName}) returns the fishings that have an event
+// there. Seeded with the real build flow so a real tools_groups_event exists.
 const broker = new ServiceBroker(serviceBrokerConfig);
 const apiHelper = new ApiHelper(broker);
-apiHelper.initializeServices();
+const apiService = apiHelper.initializeServices();
 
-let polderAId: number;
-let polderBId: number;
+const sampleCoords = { x: 21.13, y: 55.71 };
+const barFive = { id: '5', name: 'baras 5', type: 'ESTUARY', municipality: { id: 41, name: 'Klaipėda' } };
+const barSix = { id: '6', name: 'baras 6', type: 'ESTUARY', municipality: { id: 41, name: 'Klaipėda' } };
+
+let ownerAFishingId: any;
+let ownerBFishingId: any;
+
+// Start an ESTUARY fishing for `owner` and build a net at `location`, which
+// creates the tools_groups_event carrying that location. Returns the fishing id.
+async function buildAt(owner: any, tenantId: any, sealNr: string, location: any) {
+  const meta = apiHelper.meta(owner, tenantId);
+  const headers = apiHelper.getHeaders(owner.token, tenantId);
+  const toolTypes: any[] = await broker.call('toolTypes.find');
+  await broker.call(
+    'tools.create',
+    { sealNr, toolType: toolTypes[0].id, data: { eyeSize: 60, netLength: 30 } },
+    { meta },
+  );
+  await broker.call('fishings.startFishing', { type: 'ESTUARY', coordinates: sampleCoords }, { meta });
+  const fishing: any = await broker.call('fishings.currentFishing', {}, { meta });
+  const groups: any[] = await broker.call(
+    'toolsGroups.find',
+    { query: { removeEvent: { $exists: false } } },
+    { meta },
+  );
+  await request(apiService.server)
+    .post(`/zvejyba/api/toolsGroups/build/${groups[0].id}`)
+    .set(headers)
+    .send({ coordinates: sampleCoords, location })
+    .expect(200);
+  return fishing.id;
+}
 
 beforeAll(async () => {
   await broker.start();
   await apiHelper.setup();
-
-  const polders: any[] = await broker.call('polders.find');
-  polderAId = polders[0].id;
-  polderBId = polders[1].id;
-
-  const adminMeta = { authToken: apiHelper.superAdmin.token };
-  await broker.call(
-    'fishings.create',
-    { type: 'POLDERS', tenant: apiHelper.tenantA.tenant.id, user: apiHelper.ownerA.user.id, polderId: polderAId },
-    { meta: adminMeta },
-  );
-  await broker.call(
-    'fishings.create',
-    { type: 'POLDERS', tenant: apiHelper.tenantB.tenant.id, user: apiHelper.ownerB.user.id, polderId: polderBId },
-    { meta: adminMeta },
-  );
+  ownerAFishingId = await buildAt(apiHelper.ownerA, apiHelper.tenantA.tenant.id, 'S-LA-1', barFive);
+  ownerBFishingId = await buildAt(apiHelper.ownerB, apiHelper.tenantB.tenant.id, 'S-LB-1', barSix);
 });
 afterAll(() => broker.stop());
 
-const polderIds = (res: any[]) => res.filter((o) => o.polder).map((o) => o.id);
+const names = (res: any[]) => res.map((o) => o.name);
+const rowIds = (res: any) => (res.body.rows ?? []).map((r: any) => r.id);
 
-describe('fishings.fishingLocations — journal location options', () => {
+describe('fishings.fishingLocations — granular event-location options', () => {
   it('a company sees only the locations its own tenant fished', async () => {
     const res: any[] = await broker.call(
       'fishings.fishingLocations',
       {},
       { meta: apiHelper.meta(apiHelper.ownerA, apiHelper.tenantA.tenant.id) },
     );
-    const ids = polderIds(res);
-    expect(ids).toContain(polderAId);
-    expect(ids).not.toContain(polderBId); // never another tenant's location
-    // Options carry a name + a `polder` discriminator for the client.
-    const opt = res.find((o) => o.id === polderAId);
-    expect(opt).toMatchObject({ polder: true });
-    expect(typeof opt.name).toBe('string');
+    expect(names(res)).toContain('baras 5');
+    expect(names(res)).not.toContain('baras 6'); // never another tenant's bar
+    expect(res.find((o) => o.name === 'baras 5')).toMatchObject({ id: '5' });
   });
 
-  it('an admin sees locations across all tenants', async () => {
+  it('an admin sees event locations across all tenants', async () => {
     const res: any[] = await broker.call(
       'fishings.fishingLocations',
       {},
       { meta: apiHelper.meta(apiHelper.superAdmin) },
     );
-    const ids = polderIds(res);
-    expect(ids).toContain(polderAId);
-    expect(ids).toContain(polderBId);
+    expect(names(res)).toEqual(expect.arrayContaining(['baras 5', 'baras 6']));
   });
 
-  it('a freelancer with no fishings gets an empty list', async () => {
+  it('a freelancer with no tool events gets an empty list', async () => {
     const res: any[] = await broker.call(
       'fishings.fishingLocations',
       {},
@@ -74,29 +87,35 @@ describe('fishings.fishingLocations — journal location options', () => {
     );
     expect(res).toEqual([]);
   });
+});
 
-  it('starting a fishing invalidates the cached options for that scope', async () => {
-    const ownerMeta = apiHelper.meta(apiHelper.ownerA, apiHelper.tenantA.tenant.id);
-    const cacheKey = `fishings.locations:t:${apiHelper.tenantA.tenant.id}`;
+describe('fishings journal — location filter', () => {
+  it('returns the fishings that have an event at the picked location', async () => {
+    const res = await request(apiService.server)
+      .get('/zvejyba/api/fishings')
+      .set(apiHelper.getHeaders(apiHelper.ownerA.token, apiHelper.tenantA.tenant.id))
+      .query({ query: JSON.stringify({ locationId: '5', locationName: 'baras 5' }) })
+      .expect(200);
+    expect(rowIds(res)).toContain(ownerAFishingId);
+  });
 
-    // Prime the cache for this scope.
-    await broker.call('fishings.fishingLocations', {}, { meta: ownerMeta });
-    expect(await broker.cacher!.get(cacheKey)).toBeTruthy();
+  it('excludes fishings that were not at that location', async () => {
+    const res = await request(apiService.server)
+      .get('/zvejyba/api/fishings')
+      .set(apiHelper.getHeaders(apiHelper.ownerA.token, apiHelper.tenantA.tenant.id))
+      .query({ query: JSON.stringify({ locationId: '6', locationName: 'baras 6' }) })
+      .expect(200);
+    expect(rowIds(res)).not.toContain(ownerAFishingId);
+  });
 
-    // A new fishing must drop the entry (proves the `cacher.del([...])` call
-    // actually fires and removes the right keys — not just a no-op).
-    const toolTypes: any[] = await broker.call('toolTypes.find');
-    await broker.call(
-      'tools.create',
-      { sealNr: 'S-INV-1', toolType: toolTypes[0].id, data: { eyeSize: 60, netLength: 30 } },
-      { meta: ownerMeta },
-    );
-    await broker.call(
-      'fishings.startFishing',
-      { type: 'POLDERS', coordinates: { x: 21.13, y: 55.71 }, polderId: polderAId },
-      { meta: ownerMeta },
-    );
-
-    expect(await broker.cacher!.get(cacheKey)).toBeFalsy();
+  it('cannot reach another tenant via the location filter', async () => {
+    // ownerB filters by ownerA's bar → tenant scope keeps ownerA's fishing out.
+    const res = await request(apiService.server)
+      .get('/zvejyba/api/fishings')
+      .set(apiHelper.getHeaders(apiHelper.ownerB.token, apiHelper.tenantB.tenant.id))
+      .query({ query: JSON.stringify({ locationId: '5', locationName: 'baras 5' }) })
+      .expect(200);
+    expect(rowIds(res)).not.toContain(ownerAFishingId);
+    expect(rowIds(res)).not.toContain(ownerBFishingId); // ownerB wasn't at baras 5
   });
 });
