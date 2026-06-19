@@ -821,12 +821,15 @@ export default class FishTypesService extends moleculer.Service {
 
   @Action({
     rest: 'GET /exportCaughtFishes',
-    // ADMIN-only: the endpoint returns a flat Excel file with cross-row
-    // PII (createdBy.firstName/lastName). It was implicitly DEFAULT
-    // (any authenticated USER) and the inline `JSON.parse(query || {})`
-    // crashed on the empty-object fallback — both flagged by the audit
-    // (#M1).
-    auth: RestrictionType.ADMIN,
+    // DEFAULT (USER or ADMIN) — same tier as the journal `list`/`find`. The
+    // sheet is built from `fishings.find`, which runs `beforeJournalSelect`
+    // → `beforeSelect`, so a USER only ever exports their OWN tenant's rows
+    // (or, as a freelancer, their own) — exactly the journal they can already
+    // read, no cross-tenant PII. ADMIN stays unscoped (full export). The
+    // earlier #M1 ADMIN-only lock over-corrected and stopped a fisher from
+    // exporting their own journal; the `JSON.parse` guard for the `query`
+    // string (below) is the part of #M1 that we keep.
+    auth: RestrictionType.DEFAULT,
     params: {
       query: { type: 'string', optional: true },
     },

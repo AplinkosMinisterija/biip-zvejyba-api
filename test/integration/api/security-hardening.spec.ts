@@ -2,9 +2,9 @@
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 import { ServiceBroker } from 'moleculer';
 import request from 'supertest';
-import { ApiHelper, serviceBrokerConfig } from '../../helpers/api';
-import { getPublicFileName } from '../../../types';
 import { coordinatesToGeometry } from '../../../modules/geometry';
+import { getPublicFileName } from '../../../types';
+import { ApiHelper, serviceBrokerConfig } from '../../helpers/api';
 
 // Regression coverage for the PR that closed /cso audit findings
 // C1-C7, H1-H5, H9 + the follow-up batch M1, M2, M4, M6, M10, M12,
@@ -275,20 +275,61 @@ describe('M16 — public UETK stats reject fish=<garbage>', () => {
   });
 });
 
-describe('M1 — fishings.exportCaughtFishes ADMIN-only + JSON validation', () => {
-  it('USER role is rejected', async () => {
+describe('M1 — fishings.exportCaughtFishes: fishers export their OWN journal + JSON validation', () => {
+  // The #M1 ADMIN-only lock over-corrected: a plain USER can read their
+  // journal but could not export it. The endpoint is now DEFAULT, and the
+  // data is sourced from the tenant-scoped `fishings.find`, so a USER only
+  // exports their own rows.
+  it('USER (fisher) CAN export their own journal (200, not 401)', async () => {
     const res = await request(apiService.server)
       .get('/zvejyba/api/fishings/exportCaughtFishes')
       .set(apiHelper.getHeaders(apiHelper.ownerA.token, apiHelper.tenantA.tenant.id));
-    expect([401, 403]).toContain(res.status);
+    expect(res.status).toBe(200);
   });
 
-  it('ADMIN with malformed query JSON gets 422, not 500', async () => {
+  it('the export source (`fishings.find`) is tenant-scoped for a USER — no cross-tenant leak', async () => {
+    await broker.call(
+      'fishings.create',
+      {
+        type: 'INLAND_WATERS',
+        tenant: apiHelper.tenantA.tenant.id,
+        user: apiHelper.ownerA.user.id,
+      },
+      { meta: { authToken: apiHelper.superAdmin.token } },
+    );
+    await broker.call(
+      'fishings.create',
+      {
+        type: 'INLAND_WATERS',
+        tenant: apiHelper.tenantB.tenant.id,
+        user: apiHelper.ownerB.user.id,
+      },
+      { meta: { authToken: apiHelper.superAdmin.token } },
+    );
+
+    // Exactly what `exportCaughtFishes` reads, with the fisher's own meta.
+    const found: any[] = await broker.call(
+      'fishings.find',
+      {},
+      { meta: apiHelper.meta(apiHelper.ownerA, apiHelper.tenantA.tenant.id) },
+    );
+    const tenants = new Set(found.map((f) => String(f.tenant)));
+    expect(tenants.has(String(apiHelper.tenantB.tenant.id))).toBe(false);
+  });
+
+  it('USER with malformed query JSON gets 422, not 500', async () => {
     const res = await request(apiService.server)
       .get('/zvejyba/api/fishings/exportCaughtFishes')
-      .set(apiHelper.getHeaders(apiHelper.adminA.token))
+      .set(apiHelper.getHeaders(apiHelper.ownerA.token, apiHelper.tenantA.tenant.id))
       .query({ query: '{not json' });
     expect(res.status).toBe(422);
+  });
+
+  it('ADMIN can still export (unscoped, full)', async () => {
+    const res = await request(apiService.server)
+      .get('/zvejyba/api/fishings/exportCaughtFishes')
+      .set(apiHelper.getHeaders(apiHelper.adminA.token));
+    expect(res.status).toBe(200);
   });
 });
 
@@ -387,10 +428,7 @@ describe('A8 — tenantUsers app-level dedupe', () => {
     // Use tenantA — tenantB was just removed by the M4 ADMIN-delete test
     // above (specs share a broker instance, jest runs describe blocks in
     // file order). tenantA is the OWNER's home tenant and stays put.
-    const fresh = await apiHelper.makeTenantMember(
-      apiHelper.tenantA,
-      'USER' as any,
-    );
+    const fresh = await apiHelper.makeTenantMember(apiHelper.tenantA, 'USER' as any);
     await expect(
       broker.call(
         'tenantUsers.create',
