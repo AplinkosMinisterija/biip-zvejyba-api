@@ -176,3 +176,79 @@ describe('tenantUsers delete is guarded (beforeRemove) — OWNER keeps control',
     expect([401, 403]).toContain(res.status);
   });
 });
+
+// The guards above MUST NOT over-block the legitimate flow: a tenant OWNER
+// (and USER_ADMIN, via the same `validateCanEditTenantUser` gate) keeps full
+// control of their OWN tenant's members — add, edit, delete. Each test asserts
+// the change actually took effect, not just a 200.
+describe('tenant OWNER keeps full member management (add / edit / delete)', () => {
+  it('OWNER can ADD a member via POST /tenantUsers/invite', async () => {
+    const res = await request(apiService.server)
+      .post('/zvejyba/api/tenantUsers/invite')
+      .set(apiHelper.getHeaders(apiHelper.ownerA.token, apiHelper.tenantA.tenant.id))
+      .send({
+        firstName: 'Added',
+        lastName: 'Member',
+        personalCode: '39010101010',
+        role: 'USER',
+        email: 'added.member@test.lt',
+      })
+      .expect(200);
+
+    expect(res.body.role).toBe('USER');
+    expect(String(res.body.tenant)).toBe(String(apiHelper.tenantA.tenant.id));
+
+    // The membership row really exists in the OWNER's tenant.
+    const created: any = await broker.call(
+      'tenantUsers.resolve',
+      { id: res.body.id },
+      { meta: apiHelper.meta(apiHelper.superAdmin) },
+    );
+    expect(String(created.tenant)).toBe(String(apiHelper.tenantA.tenant.id));
+  });
+
+  it('OWNER can EDIT a member`s role + contact via PATCH /tenantUsers/update/:id', async () => {
+    const member = await apiHelper.makeTenantMember(apiHelper.tenantA, 'USER' as any);
+    const tuId = await tenantUserId(member.user.id, apiHelper.tenantA.tenant.id);
+
+    await request(apiService.server)
+      .patch(`/zvejyba/api/tenantUsers/update/${tuId}`)
+      .set(apiHelper.getHeaders(apiHelper.ownerA.token, apiHelper.tenantA.tenant.id))
+      .send({ role: 'USER_ADMIN', email: 'edited.member@test.lt', phone: '+37061122334' })
+      .expect(200);
+
+    // Role change persisted on the membership…
+    const tu: any = await broker.call(
+      'tenantUsers.resolve',
+      { id: tuId },
+      { meta: apiHelper.meta(apiHelper.superAdmin) },
+    );
+    expect(tu.role).toBe('USER_ADMIN');
+
+    // …and contact details persisted on the member's user.
+    const u: any = await broker.call(
+      'users.resolve',
+      { id: member.user.id },
+      { meta: apiHelper.meta(apiHelper.superAdmin) },
+    );
+    expect(u.email).toBe('edited.member@test.lt');
+    expect(u.phone).toBe('+37061122334');
+  });
+
+  it('OWNER can DELETE a member via DELETE /tenantUsers/:id (row removed)', async () => {
+    const member = await apiHelper.makeTenantMember(apiHelper.tenantA, 'USER' as any);
+    const tuId = await tenantUserId(member.user.id, apiHelper.tenantA.tenant.id);
+
+    await request(apiService.server)
+      .delete(`/zvejyba/api/tenantUsers/${tuId}`)
+      .set(apiHelper.getHeaders(apiHelper.ownerA.token, apiHelper.tenantA.tenant.id))
+      .expect(200);
+
+    const gone: any = await broker.call(
+      'tenantUsers.resolve',
+      { id: tuId, throwIfNotExist: false },
+      { meta: apiHelper.meta(apiHelper.superAdmin) },
+    );
+    expect(gone).toBeFalsy();
+  });
+});
