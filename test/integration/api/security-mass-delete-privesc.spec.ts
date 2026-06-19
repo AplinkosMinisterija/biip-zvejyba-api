@@ -235,6 +235,53 @@ describe('tenant OWNER keeps full member management (add / edit / delete)', () =
     expect(u.phone).toBe('+37061122334');
   });
 
+  it('OWNER can edit email/phone with the member`s CURRENT role (the web-form shape)', async () => {
+    // Exactly the failing real request: the form resubmits the unchanged role
+    // (`USER`) alongside new contact details. This must NOT trigger an auth
+    // group reassignment — only the contact fields change.
+    const member = await apiHelper.makeTenantMember(apiHelper.tenantA, 'USER' as any);
+    const tuId = await tenantUserId(member.user.id, apiHelper.tenantA.tenant.id);
+
+    await request(apiService.server)
+      .patch(`/zvejyba/api/tenantUsers/update/${tuId}`)
+      .set(apiHelper.getHeaders(apiHelper.ownerA.token, apiHelper.tenantA.tenant.id))
+      .send({ email: 'contact.only@test.lt', phone: '064421421', role: 'USER' })
+      .expect(200);
+
+    const u: any = await broker.call(
+      'users.resolve',
+      { id: member.user.id },
+      { meta: apiHelper.meta(apiHelper.superAdmin) },
+    );
+    expect(u.email).toBe('contact.only@test.lt');
+    expect(u.phone).toBe('064421421');
+
+    const tu: any = await broker.call(
+      'tenantUsers.resolve',
+      { id: tuId },
+      { meta: apiHelper.meta(apiHelper.superAdmin) },
+    );
+    expect(tu.role).toBe('USER');
+  });
+
+  it('OWNER can edit email/phone with NO role field at all', async () => {
+    const member = await apiHelper.makeTenantMember(apiHelper.tenantA, 'USER' as any);
+    const tuId = await tenantUserId(member.user.id, apiHelper.tenantA.tenant.id);
+
+    await request(apiService.server)
+      .patch(`/zvejyba/api/tenantUsers/update/${tuId}`)
+      .set(apiHelper.getHeaders(apiHelper.ownerA.token, apiHelper.tenantA.tenant.id))
+      .send({ email: 'norole@test.lt', phone: '+37060001112' })
+      .expect(200);
+
+    const u: any = await broker.call(
+      'users.resolve',
+      { id: member.user.id },
+      { meta: apiHelper.meta(apiHelper.superAdmin) },
+    );
+    expect(u.email).toBe('norole@test.lt');
+  });
+
   it('OWNER can DELETE a member via DELETE /tenantUsers/:id (row removed)', async () => {
     const member = await apiHelper.makeTenantMember(apiHelper.tenantA, 'USER' as any);
     const tuId = await tenantUserId(member.user.id, apiHelper.tenantA.tenant.id);

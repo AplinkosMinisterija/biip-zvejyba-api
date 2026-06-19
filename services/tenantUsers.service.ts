@@ -219,18 +219,28 @@ export default class TenantUsersService extends moleculer.Service {
 
     // `tenantUsers.resolve` is not tenant-scoped, so a USER_ADMIN/OWNER of one
     // tenant could otherwise pass another tenant's membership id and edit it
-    // (IDOR). Pin the target to the caller's active tenant.
-    if (String(tenantUser.tenant) !== String(profile)) {
+    // (IDOR). Pin the target to the caller's active tenant via a raw scoped
+    // lookup on the `tenantId` column (do NOT compare the serialized
+    // `tenantUser.tenant`, which can be a populated/encoded reference).
+    const ownedInTenant = await this.findEntity(ctx, {
+      query: { id, tenant: profile },
+    });
+    if (!ownedInTenant) {
       throwNoRightsError('Cannot edit a user from another tenant.');
     }
 
     const currentUser = tenantUser.user;
-    const currentTenant: Tenant = await ctx.call('tenants.resolve', {
-      throwIfNotExist: true,
-      id: profile,
-    });
 
-    if (role) {
+    // Only touch the auth group when the role ACTUALLY changes. The web form
+    // resubmits the member's current role on every email/phone edit, and a
+    // needless `auth.users.assignToGroup` (which requires auth-API group-admin
+    // rights and can 401) would then break an otherwise valid contact edit.
+    if (role && role !== tenantUser.role) {
+      const currentTenant: Tenant = await ctx.call('tenants.resolve', {
+        throwIfNotExist: true,
+        id: profile,
+      });
+
       await ctx.call('tenantUsers.update', {
         id,
         tenant: profile,
