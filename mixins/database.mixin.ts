@@ -109,8 +109,18 @@ export default function (opts: any = {}) {
         return this.findEntity(ctx);
       },
 
-      async removeAllEntities(ctx: any) {
-        return await this.clearEntities(ctx);
+      // `clearEntities` is an unscoped hard `DELETE FROM <table>` (bypasses
+      // soft-delete and tenant scope). It must NEVER be HTTP-reachable: the
+      // gateway runs `mappingPolicy: 'all'`, so without `protected` any
+      // authenticated USER could `POST /<service>/removeAllEntities` and wipe
+      // every tenant's rows (security audit — mass deletion). `protected`
+      // keeps internal `broker.call`/`ctx.call` (tests, seeds) working while
+      // moleculer-web refuses to serve it (mirrors `users.resolve`).
+      removeAllEntities: {
+        visibility: 'protected',
+        handler(ctx: any) {
+          return this.clearEntities(ctx);
+        },
       },
 
       async populateByProp(
@@ -164,11 +174,7 @@ export default function (opts: any = {}) {
 
         return ids.filter((id) => queryIds.indexOf(id) >= 0);
       },
-      async rawQuery(
-        ctx: Context,
-        sql: string,
-        bindings?: readonly any[],
-      ): Promise<any[]> {
+      async rawQuery(ctx: Context, sql: string, bindings?: readonly any[]): Promise<any[]> {
         const adapter = await (this as any).getAdapter(ctx);
         const knex = adapter.client;
         const result = await knex.raw(sql, (bindings ?? []) as any[]);

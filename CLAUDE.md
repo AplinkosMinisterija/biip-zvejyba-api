@@ -163,6 +163,38 @@ collide** (polder id 1 vs bar 1). `toolsGroupsByLocation` filters by
 by stored `location.type` (legacy rows have it null). Don't change this
 without re-thinking the legacy fallback.
 
+### Action exposure — `mappingPolicy: 'all'` publishes EVERY action
+
+The gateway (`api.service.ts`) runs `mappingPolicy: 'all'` + `whitelist:
+['**']`, so moleculer-web's fallback URL serves **any `published` action**
+at `POST /zvejyba/api/<service>/<action>` — `rest: null` does NOT hide it
+(only `visibility: 'protected'`/`'private'` does). Two consequences when
+adding code:
+
+1. **A destructive/internal action with no `auth` is reachable by any USER.**
+   `getRestrictionType` falls back to `RestrictionType.DEFAULT` (= USER or
+   ADMIN) when neither the action nor `settings.auth` sets one. Every
+   `DbConnection` service inherits `removeAllEntities` (an unscoped hard
+   `DELETE FROM`), so it MUST stay `visibility: 'protected'` (see
+   database.mixin.ts) — same reason `users.resolve` is protected. Internal
+   `broker.call`/`ctx.call` still reach protected actions.
+2. **Scope hooks only run on the verbs you wire them to.** `beforeSelect`
+   typically covers `list/find/count/get/all` — NOT `update`/`remove`/
+   `resolve`. So the generic `update`/`remove` are unscoped cross-tenant
+   writes/deletes unless you set them `auth: ADMIN` or add a `before`
+   guard (e.g. `tenantUsers.beforeRemove` checks OWNER/USER_ADMIN + same
+   tenant). Internal `ctx.call` bypasses the gateway, so locking the HTTP
+   auth never breaks service-to-service flows.
+
+### `$raw` query operator = SQL sink — deep-strip user queries
+
+`@moleculer/database`'s knex adapter executes `query.$raw` as `whereRaw`
+**and recurses into every nested object**, so `query[$or][0][id][$raw]`
+reaches raw SQL. Top-level-only stripping is bypassable — `sanitizeUserQuery`
+(profile.mixin) and `sanitizeQueryForTenantScope` (users.service) must
+`stripRawDeep` the user query at every depth. Server-built `$raw` clauses
+(parameterized, spread in AFTER sanitization) are unaffected.
+
 ### Virtual-field populate gotchas
 
 When a service uses `secure: true` on its primary key (every service in
@@ -228,6 +260,27 @@ appear without the `call` prefix (e.g. `mol $ tenants-import --dry`).
 
 ## Recent fix log (worth knowing)
 
+- **mass-delete/privesc/SQLi batch** — closed three systemic holes from a
+  security audit: (1) `removeAllEntities` → `visibility: 'protected'` so the
+  `mappingPolicy: 'all'` fallback URL can't wipe tables; (2) nested `$raw`
+  deep-stripped from user queries (profile.mixin + users.service) to kill
+  SQL injection via `query[$or][…][$raw]`; (3) `tenantUsers.update` → ADMIN
+  and a `beforeRemove` guard (OWNER/USER_ADMIN + same-tenant) so a USER can't
+  self-promote or touch another tenant's membership. Tests:
+  `security-mass-delete-privesc.spec.ts`. See "Action exposure" + "`$raw`
+  query operator" patterns above.
+- **cross-tenant IDOR batch** — the default db `update`/`remove` (and
+  toolsGroups' `:id` custom actions, which used the unscoped
+  `toolsGroups.resolve`) ran no tenant scope, so a USER could edit/delete
+  another tenant's rows by id. Added `ProfileMixin.beforeMutate` (mirrors
+  `tools.beforeDelete`) and wired it into the mutation verbs of fishings,
+  toolsGroups (+ build/connect/disconnect/remove/weigh), tools, weightEvents,
+  fishingEvents, toolsGroupsEvents, researches. Also locked `researches.fishes`
+  to ADMIN over HTTP (internal-only, no tenant/user column) and pinned
+  `researches.listRelated` to `publicFields` (was leaking investigator PII via
+  caller-chosen `fields`/`populate`). Tests: `security-cross-tenant-idor.spec.ts`.
+  Deferred: unauthenticated Prometheus `/metrics` on :3030 — infra-side (verify
+  biip-infra never proxies 3030; binding to localhost risks breaking scraping).
 - **PR #117** — `location_manual` boolean on `tools_groups_events` /
   `weight_events` plus virtual `Fishing.hasManualLocation`. First cut
   used `ctx.call('…events.find', { fields: ['fishing'] })` for the

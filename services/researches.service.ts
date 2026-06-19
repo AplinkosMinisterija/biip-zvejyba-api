@@ -15,7 +15,6 @@ import {
   Table,
 } from '../types';
 
-import _ from 'lodash';
 import ProfileMixin from '../mixins/profile.mixin';
 import { GeomFeatureCollection } from '../modules/geometry';
 import { getFolderName } from '../utils';
@@ -225,6 +224,11 @@ export type Research<
   hooks: {
     before: {
       create: ['beforeCreate', 'handleMunicipality'],
+      // The generic remove (and the rest:null update reachable via the
+      // mappingPolicy fallback) had no scope — a USER could delete another
+      // tenant's research by id. Pin both to the caller.
+      update: ['beforeMutate'],
+      remove: ['beforeMutate'],
       list: ['beforeSelect'],
       find: ['beforeSelect'],
       count: ['beforeSelect'],
@@ -311,17 +315,19 @@ export default class ResearchesService extends moleculer.Service {
       };
     }
 
-    return ctx.call(
-      'researches.list',
-      _.merge({}, ctx.params || {}, {
-        query: {
-          cadastralId: research.cadastralId,
-          id: {
-            $ne: research.id,
-          },
-        },
-      }),
-    );
+    // Pin `fields` to the public allowlist and ignore any caller-supplied
+    // `fields`/`populate`/`scope` — otherwise a public caller can
+    // `?fields=user,tenant&populate=user` to dereference the investigator's
+    // PII. The sibling `listPublic`/`getPublic` already pin `publicFields`.
+    return ctx.call('researches.list', {
+      fields: publicFields,
+      page: ctx.params?.page || 1,
+      pageSize: ctx.params?.pageSize || 10,
+      query: {
+        cadastralId: research.cadastralId,
+        id: { $ne: research.id },
+      },
+    });
   }
 
   @Action({

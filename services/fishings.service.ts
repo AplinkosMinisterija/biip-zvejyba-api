@@ -291,6 +291,10 @@ export type Fishing<
     before: {
       startFishing: ['beforeCreate'],
       skipFishing: ['beforeCreate'],
+      // `update` is ADMIN-only; `remove` (rest:null but reachable via the
+      // mappingPolicy fallback) had no scope — guard it so a USER can't
+      // delete another tenant's fishing by id.
+      remove: ['beforeMutate'],
       currentFishing: ['beforeSelect'],
       list: ['beforeSelect'],
       find: ['beforeSelect'],
@@ -482,9 +486,7 @@ export default class FishTypesService extends moleculer.Service {
   ) {
     if (!fishWeightEvents.length) return;
 
-    const hasAnyFishLogged = fishWeightEvents.some(
-      (w) => w.data && Object.keys(w.data).length > 0,
-    );
+    const hasAnyFishLogged = fishWeightEvents.some((w) => w.data && Object.keys(w.data).length > 0);
     if (!hasAnyFishLogged) {
       throw new moleculer.Errors.ValidationError(
         'Negalima baigti žvejybos: yra įrankių, pažymėtų kaip patikrinti, bet žuvies svoris dar neįrašytas. Pirmiausia įrašykite žuvis arba grąžinkite įrankius į sandėlį.',

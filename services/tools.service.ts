@@ -224,6 +224,10 @@ async function validateData({ ctx, params, entity, value }: FieldHookCallback) {
     before: {
       create: ['beforeCreate'],
       remove: ['beforeDelete'],
+      // `remove` has its own ownership check (`beforeDelete`); the generic
+      // `update` had none, so a USER could overwrite another tenant's sealed
+      // tool by id. `beforeMutate` scopes it to the caller.
+      update: ['beforeMutate'],
       availableTools: ['beforeSelect'],
       list: ['beforeSelect'],
       find: ['beforeSelect'],
