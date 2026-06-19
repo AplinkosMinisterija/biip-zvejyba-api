@@ -14,7 +14,7 @@ import { TenantUser, TenantUserRole } from './tenantUsers.service';
 
 import ApiGateway from 'moleculer-web';
 import DbConnection, { PopulateHandlerFn } from '../mixins/database.mixin';
-import { isInGroup } from '../utils';
+import { isInGroup, stripRawDeep } from '../utils';
 import { AuthUserRole, UserAuthMeta } from './api.service';
 
 // Strip security-sensitive keys from user-supplied query before merging
@@ -22,12 +22,16 @@ import { AuthUserRole, UserAuthMeta } from './api.service';
 // profile.mixin.ts — caller-controlled `$raw` is especially dangerous
 // because moleculer-knex-filters executes it as raw SQL.
 const TENANT_SCOPE_FORBIDDEN_KEYS = ['$raw', 'tenants'] as const;
+
+// `$raw` is deep-stripped (see `stripRawDeep`) — a top-level-only strip is
+// bypassed by nesting it under any operator. The server-built `$raw` tenant
+// clause is spread in AFTER this runs, so it is unaffected.
 function sanitizeQueryForTenantScope(query: any) {
   if (!query || typeof query !== 'object') return {};
   const clean: Record<string, any> = {};
   for (const key of Object.keys(query)) {
     if ((TENANT_SCOPE_FORBIDDEN_KEYS as readonly string[]).includes(key)) continue;
-    clean[key] = query[key];
+    clean[key] = stripRawDeep(query[key]);
   }
   return clean;
 }
@@ -275,7 +279,6 @@ export default class UsersService extends moleculer.Service {
   async all(ctx: Context) {
     return this.findEntities(ctx);
   }
-
 
   @Action({
     rest: 'POST /:id/impersonate',

@@ -171,6 +171,10 @@ export type ToolsGroupsEvent<
   hooks: {
     before: {
       create: ['beforeCreate'],
+      // Cross-tenant IDOR guard for id-based mutations (the read scope in
+      // `beforeSelect` does not run on update/remove).
+      update: ['beforeMutate'],
+      remove: ['beforeMutate'],
       list: ['beforeSelect'],
       find: ['beforeSelect'],
       count: ['beforeSelect'],

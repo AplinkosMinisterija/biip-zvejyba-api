@@ -160,6 +160,10 @@ export type WeightEvent<
   hooks: {
     before: {
       createWeightEvent: ['beforeCreate', 'beforeFishWeigh'],
+      // Scope id-based mutations to the caller — the generic update/remove
+      // are otherwise an unscoped cross-tenant edit/delete of catch records.
+      update: ['beforeMutate'],
+      remove: ['beforeMutate'],
       list: ['beforeSelect'],
       find: ['beforeSelect'],
       count: ['beforeSelect'],

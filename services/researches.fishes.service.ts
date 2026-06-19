@@ -9,6 +9,7 @@ import {
   COMMON_SCOPES,
   CommonFields,
   CommonPopulates,
+  RestrictionType,
   Table,
 } from '../types';
 
@@ -37,6 +38,14 @@ export type ResearchFish<
     }),
   ],
   settings: {
+    // This entity is managed exclusively through the (INVESTIGATOR-gated)
+    // `researches` service via internal `ctx.call`; it has no `tenant`/`user`
+    // column to scope on and no FE consumer. `rest: false` does not hide it
+    // because the gateway's `mappingPolicy: 'all'` still serves
+    // `/researches.fishes/<action>` — without this any USER could read/write
+    // arbitrary research-fish rows by id. Lock all HTTP access to ADMIN;
+    // internal calls bypass the gateway and keep working.
+    auth: RestrictionType.ADMIN,
     fields: {
       id: {
         type: 'number',

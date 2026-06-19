@@ -154,7 +154,18 @@ export type ToolsGroup<
   },
   hooks: {
     before: {
-      buildTools: ['beforeCreate'],
+      // Every `:id` mutation resolves a toolsGroup by id; `beforeMutate`
+      // pins that id to the caller's tenant/user so a USER can't build,
+      // connect, weigh, or remove tools on another tenant's group (the
+      // actions used `toolsGroups.resolve`, which is unscoped). The generic
+      // `update`/`remove` get the same guard.
+      buildTools: ['beforeMutate', 'beforeCreate'],
+      connectTools: ['beforeMutate'],
+      disconnectTools: ['beforeMutate'],
+      removeTools: ['beforeMutate'],
+      weighFish: ['beforeMutate'],
+      update: ['beforeMutate'],
+      remove: ['beforeMutate'],
       list: ['beforeSelect'],
       find: ['beforeSelect'],
       count: ['beforeSelect'],
@@ -664,13 +675,10 @@ export default class ToolsGroupsService extends moleculer.Service {
     // Same shape as `getNotCheckedToolsGroups` — `find` returns user-scoped
     // groups, IDs come back encoded so comparisons match `currentFishing.id`
     // without us having to think about `secure: true` decoding.
-    const activeGroups: ToolsGroup<'tools' | 'buildEvent'>[] = await ctx.call(
-      'toolsGroups.find',
-      {
-        query: { removeEvent: { $exists: false } },
-        populate: ['tools', 'buildEvent'],
-      },
-    );
+    const activeGroups: ToolsGroup<'tools' | 'buildEvent'>[] = await ctx.call('toolsGroups.find', {
+      query: { removeEvent: { $exists: false } },
+      populate: ['tools', 'buildEvent'],
+    });
 
     // Scope siblings by fishing + bar/location + tool type. Each bar is a
     // self-contained checking session — a net weighed with fish in bar 2
@@ -691,14 +699,10 @@ export default class ToolsGroupsService extends moleculer.Service {
       query: { fishing: currentFishing.id, toolsGroup: { $in: siblingIds } },
     });
 
-    const checkedGroupIds = new Set(
-      sibWeights.map((w) => w.toolsGroup).filter((id) => id != null),
-    );
+    const checkedGroupIds = new Set(sibWeights.map((w) => w.toolsGroup).filter((id) => id != null));
     if (checkedGroupIds.has(group.id)) return; // self already weighed/checked — allow
 
-    const anyWithFish = sibWeights.some(
-      (w) => w.data && Object.keys(w.data).length > 0,
-    );
+    const anyWithFish = sibWeights.some((w) => w.data && Object.keys(w.data).length > 0);
     const unchecked = siblings.length - checkedGroupIds.size;
 
     // We're the last unchecked of this type AND siblings only have empty
