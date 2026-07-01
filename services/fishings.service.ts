@@ -318,8 +318,29 @@ export default class FishTypesService extends moleculer.Service {
     visibility: 'protected',
   })
   async endFishings(ctx: Context) {
+    // Auto-close only fishings that already have an onshore weigh-in
+    // (`weight_events.tools_group_id IS NULL`). A fishing with no shore
+    // weight is an incomplete catch report — silently ending it would
+    // freeze it with no landed catch, so leave it open for the fisher to
+    // finish. Raw SQL for the "has any shore weight" aggregation dodges the
+    // secure-id / ProfileMixin-scope layering (see CLAUDE.md → "Virtual-field
+    // populate gotchas").
+    const rows: Array<{ fishing_id: number }> = await this.rawQuery(
+      ctx,
+      `SELECT DISTINCT fishing_id FROM weight_events
+         WHERE tools_group_id IS NULL AND fishing_id IS NOT NULL AND deleted_at IS NULL`,
+    );
+    const fishingIdsWithShoreWeight = rows
+      .map((r) => Number(r.fishing_id))
+      .filter(Number.isFinite);
+
+    if (!fishingIdsWithShoreWeight.length) return [];
+
     const fishings: Fishing[] = await ctx.call('fishings.find', {
-      query: { endEvent: { $exists: false } },
+      query: {
+        endEvent: { $exists: false },
+        id: { $in: fishingIdsWithShoreWeight },
+      },
     });
 
     const result = [];
