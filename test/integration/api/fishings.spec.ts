@@ -118,18 +118,40 @@ describe('fishings.service — start/skip/current/end flow', () => {
     expect(res.body.skipEvent).toBeTruthy();
   });
 
-  it('endFishings closes fishings with an onshore weigh-in but leaves shore-less ones open', async () => {
+  it('endFishings closes only fishings weighed on shore; boat-only or empty ones stay open', async () => {
     const ownerAMeta = apiHelper.meta(apiHelper.ownerA, apiHelper.tenantA.tenant.id);
     const ownerBMeta = apiHelper.meta(apiHelper.ownerB, apiHelper.tenantB.tenant.id);
+    const userAMeta = apiHelper.meta(apiHelper.userA, apiHelper.tenantA.tenant.id);
     const fishId = await seedFishType();
 
-    // ownerA: an open fishing with NO onshore weigh-in → must stay open (the
-    // cron never silently closes an incomplete catch report).
+    // ownerA: an open fishing with NO weigh-in at all → must stay open.
     await seedToolForOwner(apiHelper.ownerA, apiHelper.tenantA.tenant.id);
     const withoutShore: any = await broker.call(
       'fishings.startFishing',
       { type: 'INLAND_WATERS', coordinates: sampleCoords },
       { meta: ownerAMeta },
+    );
+
+    // userA: an open fishing with ONLY a boat (preliminary) weigh-in — the
+    // weight event carries a toolsGroup (tools_group_id IS NOT NULL); nothing
+    // was weighed on shore, so this fishing must ALSO stay open. This is the
+    // case the cron must NOT close: fish weighed "laive", not "krante".
+    const boatToolId = await seedToolForOwner(apiHelper.userA, apiHelper.tenantA.tenant.id);
+    const boatTool: any = await broker.call(
+      'tools.get',
+      { id: boatToolId, populate: ['toolsGroup'] },
+      { meta: userAMeta },
+    );
+    const boatToolsGroupId = boatTool.toolsGroup?.id ?? boatTool.toolsGroup;
+    const boatOnly: any = await broker.call(
+      'fishings.startFishing',
+      { type: 'INLAND_WATERS', coordinates: sampleCoords },
+      { meta: userAMeta },
+    );
+    await broker.call(
+      'weightEvents.createWeightEvent',
+      { toolsGroup: boatToolsGroupId, coordinates: sampleCoords, data: { [fishId]: 5 } },
+      { meta: userAMeta },
     );
 
     // ownerB: an open fishing WITH an onshore weigh-in (tools_group_id NULL) →
@@ -151,6 +173,7 @@ describe('fishings.service — start/skip/current/end flow', () => {
 
     expect(closedIds).toContain(String(withShore.id));
     expect(closedIds).not.toContain(String(withoutShore.id));
+    expect(closedIds).not.toContain(String(boatOnly.id));
     closed.forEach((f) => expect(f.endEvent).toBeTruthy());
 
     const stillOpen: any = await broker.call(
@@ -159,6 +182,13 @@ describe('fishings.service — start/skip/current/end flow', () => {
       { meta: ownerAMeta },
     );
     expect(stillOpen.endEvent).toBeFalsy();
+
+    const boatStillOpen: any = await broker.call(
+      'fishings.get',
+      { id: boatOnly.id },
+      { meta: userAMeta },
+    );
+    expect(boatStillOpen.endEvent).toBeFalsy();
   });
 
   it('GET /fishings/history/:id returns a sorted event list', async () => {
