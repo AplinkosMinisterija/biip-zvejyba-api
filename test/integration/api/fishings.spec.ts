@@ -118,18 +118,47 @@ describe('fishings.service — start/skip/current/end flow', () => {
     expect(res.body.skipEvent).toBeTruthy();
   });
 
-  it('endFishings cron action closes orphaned fishings (sets endEvent + system user)', async () => {
-    // Open one fishing for ownerB (different tenant) without closing it.
-    await seedToolForOwner(apiHelper.ownerB, apiHelper.tenantB.tenant.id);
-    await broker.call(
+  it('endFishings closes fishings with an onshore weigh-in but leaves shore-less ones open', async () => {
+    const ownerAMeta = apiHelper.meta(apiHelper.ownerA, apiHelper.tenantA.tenant.id);
+    const ownerBMeta = apiHelper.meta(apiHelper.ownerB, apiHelper.tenantB.tenant.id);
+    const fishId = await seedFishType();
+
+    // ownerA: an open fishing with NO onshore weigh-in → must stay open (the
+    // cron never silently closes an incomplete catch report).
+    await seedToolForOwner(apiHelper.ownerA, apiHelper.tenantA.tenant.id);
+    const withoutShore: any = await broker.call(
       'fishings.startFishing',
       { type: 'INLAND_WATERS', coordinates: sampleCoords },
-      { meta: apiHelper.meta(apiHelper.ownerB, apiHelper.tenantB.tenant.id) },
+      { meta: ownerAMeta },
+    );
+
+    // ownerB: an open fishing WITH an onshore weigh-in (tools_group_id NULL) →
+    // must be auto-closed even though the fisher never pressed "Baigti".
+    await seedToolForOwner(apiHelper.ownerB, apiHelper.tenantB.tenant.id);
+    const withShore: any = await broker.call(
+      'fishings.startFishing',
+      { type: 'INLAND_WATERS', coordinates: sampleCoords },
+      { meta: ownerBMeta },
+    );
+    await broker.call(
+      'weightEvents.createWeightEvent',
+      { coordinates: sampleCoords, data: { [fishId]: 5 } },
+      { meta: ownerBMeta },
     );
 
     const closed: any[] = await broker.call('fishings.endFishings');
-    expect(closed.length).toBeGreaterThan(0);
+    const closedIds = closed.map((f) => String(f.id));
+
+    expect(closedIds).toContain(String(withShore.id));
+    expect(closedIds).not.toContain(String(withoutShore.id));
     closed.forEach((f) => expect(f.endEvent).toBeTruthy());
+
+    const stillOpen: any = await broker.call(
+      'fishings.get',
+      { id: withoutShore.id },
+      { meta: ownerAMeta },
+    );
+    expect(stillOpen.endEvent).toBeFalsy();
   });
 
   it('GET /fishings/history/:id returns a sorted event list', async () => {

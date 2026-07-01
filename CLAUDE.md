@@ -260,6 +260,17 @@ appear without the `call` prefix (e.g. `mol $ tenants-import --dry`).
 
 ## Recent fix log (worth knowing)
 
+- **endFishings cron gates on onshore weight** — the midnight `endFishings`
+  cron (`0 0 * * *`, Europe/Vilnius) used to close EVERY open fishing
+  (`endEvent: { $exists: false }`) unconditionally. Now it only auto-closes
+  fishings that already have an onshore weigh-in (a `weight_events` row with
+  `tools_group_id IS NULL`); shore-less fishings (incomplete catch reports,
+  and skip-only rows) are left open for the fisher to finish. The "has any
+  shore weight" set comes from raw SQL (numeric ids), intersected with the
+  moleculer `endEvent: { $exists: false }` query via `id: { $in }` — same
+  raw-SQL-for-aggregation pattern as `applyLocationFilter` /
+  `getManualLocationFlags`. Test: `fishings.spec.ts` → "endFishings closes
+  fishings with an onshore weigh-in but leaves shore-less ones open".
 - **mass-delete/privesc/SQLi batch** — closed three systemic holes from a
   security audit: (1) `removeAllEntities` → `visibility: 'protected'` so the
   `mappingPolicy: 'all'` fallback URL can't wipe tables; (2) nested `$raw`
