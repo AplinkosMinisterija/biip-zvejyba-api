@@ -1,5 +1,6 @@
 'use strict';
 
+import helmet from 'helmet';
 import moleculer, { Context } from 'moleculer';
 import { Action, Method, Service } from 'moleculer-decorators';
 import ApiGateway from 'moleculer-web';
@@ -24,20 +25,20 @@ export enum AuthUserRole {
   name: 'api',
   mixins: [ApiGateway],
   // More info about settings: https://moleculer.services/docs/0.14/moleculer-web.html
-  // TODO: helmet
   settings: {
     port: process.env.PORT || 3000,
     path: '/zvejyba',
 
-    // Global CORS settings for all routes
+    // Global CORS settings for all routes. Stays `*` intentionally —
+    // this API serves an unknown set of third-party clients, so a
+    // closed allowlist would break consumers we don't have an inventory
+    // of. Bearer-token auth (not cookies) means the browser doesn't
+    // auto-send credentials cross-origin, which limits the blast
+    // radius of `*`.
     cors: {
-      // Configures the Access-Control-Allow-Origin CORS header.
       origin: '*',
-      // Configures the Access-Control-Allow-Methods CORS header.
       methods: ['GET', 'OPTIONS', 'POST', 'PUT', 'DELETE'],
-      // Configures the Access-Control-Allow-Headers CORS header.
       allowedHeaders: '*',
-      // Configures the Access-Control-Max-Age CORS header.
       maxAge: 3600,
     },
 
@@ -49,8 +50,12 @@ export enum AuthUserRole {
           '**',
         ],
 
-        // Route-level Express middlewares. More info: https://moleculer.services/docs/0.14/moleculer-web.html#Middlewares
-        use: [],
+        // Route-level Express middlewares. Helmet adds standard security
+        // headers (X-Content-Type-Options, Referrer-Policy, HSTS in prod,
+        // etc.). CSP is intentionally disabled — this is a JSON API, not
+        // an HTML surface, and a wrong CSP here breaks the `minio.getFile`
+        // file proxy / xlsx export response without protecting anything.
+        use: [helmet({ contentSecurityPolicy: false })],
 
         // Enable/disable parameter merging method. More info: https://moleculer.services/docs/0.14/moleculer-web.html#Disable-merging
         mergeParams: true,
@@ -145,7 +150,28 @@ export default class ApiService extends moleculer.Service {
     ctx.meta.authUser = authUser;
     ctx.meta.authToken = token;
     ctx.meta.user = user;
-    ctx.meta.profile = req.headers['x-profile'];
+
+    // Validate `x-profile` (tenant id) membership at the gateway. Without
+    // this, any USER could set the header to an arbitrary tenant id and
+    // ProfileMixin would silently scope every read/write to that tenant.
+    // Only USER-type callers (those with a local `user` mirror + `tenants`
+    // map) are checked — ADMIN/SUPER_ADMIN have no per-tenant scope.
+    // Freelancer mode sends no `x-profile` header at all (FE skips it when
+    // `isNaN(profileId)`), so missing/empty header is the freelancer path.
+    const profileHeader = req.headers['x-profile'];
+    if (
+      profileHeader != null &&
+      profileHeader !== '' &&
+      authUser.type === AuthUserRole.USER
+    ) {
+      const tenantsMap = (user as any)?.tenants || {};
+      if (!Object.prototype.hasOwnProperty.call(tenantsMap, String(profileHeader))) {
+        throw new ApiGateway.Errors.UnAuthorizedError('NO_RIGHTS', {
+          error: 'Profile not accessible',
+        });
+      }
+    }
+    ctx.meta.profile = profileHeader;
 
     return user;
   }
@@ -168,6 +194,15 @@ export default class ApiService extends moleculer.Service {
     if (
       restrictionType === RestrictionType.ADMIN &&
       ![AuthUserRole.ADMIN, AuthUserRole.SUPER_ADMIN].includes(authUser.type)
+    ) {
+      throw new ApiGateway.Errors.UnAuthorizedError('NO_RIGHTS', {
+        error: 'Unauthorized',
+      });
+    }
+
+    if (
+      restrictionType === RestrictionType.SUPER_ADMIN &&
+      authUser.type !== AuthUserRole.SUPER_ADMIN
     ) {
       throw new ApiGateway.Errors.UnAuthorizedError('NO_RIGHTS', {
         error: 'Unauthorized',

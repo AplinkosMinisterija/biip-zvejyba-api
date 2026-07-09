@@ -6,6 +6,8 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+.DS_Store
+
 # Runtime data
 pids
 *.pid
@@ -71,3 +73,5 @@ dist/
 
 # Remove generated files
 generated-sources
+# Playwright MCP local snapshots
+.playwright-mcp/

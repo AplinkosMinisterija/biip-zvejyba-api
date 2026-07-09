@@ -10,7 +10,7 @@
     "dev": "yarn run db:migrate && ts-node ./node_modules/moleculer/bin/moleculer-runner.js --env --hot --repl --config moleculer.config.ts services/**/*.service.ts",
     "start": "yarn run db:migrate --knexfile ./dist/knexfile.js && moleculer-runner --config dist/moleculer.config.js",
     "cli": "moleculer connect NATS",
-    "test": "export DB_CONNECTION=postgresql://postgres:postgres@localhost:5331/zvejyba && yarn run db:migrate && jest",
+    "test": "export DB_CONNECTION=${DB_CONNECTION:-postgresql://postgres:postgres@localhost:5644/zvejyba} && yarn run db:migrate && jest --runInBand --forceExit",
     "test:watch": "yarn run test --watch",
     "test:coverage": "yarn run test --coverage",
     "lint": "eslint --ext .js,.ts .",
@@ -36,6 +36,7 @@
     "@types/mkdirp": "^1.0.2",
     "@types/node": "^18.15.3",
     "@types/qs": "^6.9.9",
+    "@types/supertest": "^7.2.0",
     "@types/transform-coordinates": "^1.0.0",
     "@types/uuid": "^9.0.1",
     "@typescript-eslint/eslint-plugin": "^5.55.0",
@@ -53,6 +54,7 @@
     "moleculer-repl": "^0.7.3",
     "prettier": "2.8.4",
     "prettier-plugin-organize-imports": "^3.2.2",
+    "supertest": "^7.2.2",
     "ts-jest": "^29.0.5",
     "ts-node": "^10.9.1",
     "typescript": "5.1.6"
@@ -60,8 +62,11 @@
   "dependencies": {
     "@moleculer/database": "github:ambrazasp/moleculerjs-database",
     "@r2d2bzh/moleculer-cron": "^0.1.4",
-    "biip-auth-nodejs": "github:DadPatch/biip-auth-nodejs",
+    "@turf/centroid": "^7.2.0",
+    "biip-auth-nodejs": "DadPatch/biip-auth-nodejs",
     "dotenv": "^16.0.3",
+    "exceljs": "^4.4.0",
+    "helmet": "^8.1.0",
     "ioredis": "^5.3.1",
     "knex": "^3.0.1",
     "lodash": "^4.17.21",
@@ -72,8 +77,8 @@
     "moleculer-db": "^0.8.23",
     "moleculer-decorators": "^1.3.0",
     "moleculer-knex-filters": "github:DadPatch/moleculer-knex-filters",
-    "moleculer-minio": "github:zeckon/moleculer-minio",
-    "moleculer-postgis": "^0.2.7",
+    "moleculer-minio": "github:dadpatch/moleculer-minio",
+    "moleculer-postgis": "github:AplinkosMinisterija/moleculer-postgis#v0.4.0",
     "moleculer-sentry": "^2.0.0",
     "moleculer-web": "^0.10.5",
     "moment": "^2.29.4",
@@ -92,27 +97,10 @@
     ],
     "*.{md,html,css}": "prettier --write"
   },
-  "jest": {
-    "coverageDirectory": "<rootDir>/coverage",
-    "testEnvironment": "node",
-    "moduleFileExtensions": [
-      "ts",
-      "tsx",
-      "js"
-    ],
-    "transform": {
-      "^.+\\.(ts|tsx)$": "ts-jest"
-    },
-    "testMatch": [
-      "**/*.spec.(ts|js)"
-    ],
-    "globals": {
-      "ts-jest": {
-        "tsconfig": "tsconfig.json"
-      }
-    }
-  },
   "eslintConfig": {
     "extends": "@aplinkosministerija/eslint-config-biip-api"
+  },
+  "resolutions": {
+    "moleculer-postgis": "github:AplinkosMinisterija/moleculer-postgis#v0.4.0"
   }
 }

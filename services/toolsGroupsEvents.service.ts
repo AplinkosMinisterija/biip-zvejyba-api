@@ -31,11 +31,14 @@ interface Fields extends CommonFields {
       name: string;
     };
   };
+  locationManual: boolean;
   data: any;
   fishing: Fishing['id'];
 }
 
-interface Populates extends CommonPopulates {}
+interface Populates extends CommonPopulates {
+  fishing: Fishing;
+}
 
 export type ToolsGroupsEvent<
   P extends keyof Populates = never,
@@ -48,6 +51,7 @@ export type ToolsGroupsEvent<
     DbConnection(),
     PostgisMixin({
       srid: 3346,
+      geojson: { maxDecimalDigits: 2 },
     }),
     ProfileMixin,
   ],
@@ -74,6 +78,7 @@ export type ToolsGroupsEvent<
         properties: {
           id: 'string',
           name: 'string',
+          type: { type: 'string', optional: true },
           municipality: {
             type: 'object',
             properties: {
@@ -82,6 +87,10 @@ export type ToolsGroupsEvent<
             },
           },
         },
+      },
+      locationManual: {
+        type: 'boolean',
+        default: false,
       },
       data: 'any', // Type is not clear yet
       fishing: {
@@ -99,6 +108,8 @@ export type ToolsGroupsEvent<
         type: 'number',
         columnType: 'integer',
         columnName: 'tenantId',
+        // Locked post-create — see security audit #H2.
+        immutable: true,
         populate: {
           action: 'tenants.resolve',
           params: {
@@ -110,6 +121,7 @@ export type ToolsGroupsEvent<
         type: 'number',
         columnType: 'integer',
         columnName: 'userId',
+        immutable: true,
         populate: {
           action: 'users.resolve',
           params: {
@@ -143,7 +155,7 @@ export type ToolsGroupsEvent<
       ...COMMON_SCOPES,
     },
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
-    defaultPopulates: ['geom'],
+    defaultPopulates: ['geom', 'fishing'],
   },
   actions: {
     create: {
@@ -159,6 +171,10 @@ export type ToolsGroupsEvent<
   hooks: {
     before: {
       create: ['beforeCreate'],
+      // Cross-tenant IDOR guard for id-based mutations (the read scope in
+      // `beforeSelect` does not run on update/remove).
+      update: ['beforeMutate'],
+      remove: ['beforeMutate'],
       list: ['beforeSelect'],
       find: ['beforeSelect'],
       count: ['beforeSelect'],

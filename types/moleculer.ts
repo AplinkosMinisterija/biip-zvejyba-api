@@ -313,3 +313,7 @@ export interface EntityChangedParams<T> {
   data: T | T[] | null;
   oldData?: T;
 }
+
+export interface ResponseHeadersMeta {
+  $responseHeaders?: Record<string, string>;
+}

@@ -14,13 +14,26 @@ import { TenantUser, TenantUserRole } from './tenantUsers.service';
 
 import ApiGateway from 'moleculer-web';
 import DbConnection, { PopulateHandlerFn } from '../mixins/database.mixin';
-import { isInGroup } from '../utils';
+import { isInGroup, stripRawDeep } from '../utils';
 import { AuthUserRole, UserAuthMeta } from './api.service';
 
-export enum UserRole {
-  ADMIN = 'ROLE_ADMIN',
-  USER = 'ROLE_USER',
-  INSPECTOR = 'ROLE_INSPECTOR',
+// Strip security-sensitive keys from user-supplied query before merging
+// with our enforced tenant scope. Mirrors `sanitizeUserQuery` in
+// profile.mixin.ts — caller-controlled `$raw` is especially dangerous
+// because moleculer-knex-filters executes it as raw SQL.
+const TENANT_SCOPE_FORBIDDEN_KEYS = ['$raw', 'tenants'] as const;
+
+// `$raw` is deep-stripped (see `stripRawDeep`) — a top-level-only strip is
+// bypassed by nesting it under any operator. The server-built `$raw` tenant
+// clause is spread in AFTER this runs, so it is unaffected.
+function sanitizeQueryForTenantScope(query: any) {
+  if (!query || typeof query !== 'object') return {};
+  const clean: Record<string, any> = {};
+  for (const key of Object.keys(query)) {
+    if ((TENANT_SCOPE_FORBIDDEN_KEYS as readonly string[]).includes(key)) continue;
+    clean[key] = stripRawDeep(query[key]);
+  }
+  return clean;
 }
 
 export enum UserType {
@@ -37,7 +50,6 @@ export interface User {
   email: string;
   phone: string;
   active: boolean;
-  roles: UserRole[];
   type: UserType;
   isFreelancer: boolean;
   isInvestigator: boolean;
@@ -87,15 +99,23 @@ export interface User {
         columnType: 'integer',
         columnName: 'authUserId',
         required: true,
-        populate: async (ctx: Context, values: number[]) => {
+        // Auth-side records carry MORE PII than the local mirror
+        // (asmensKodas, full e-vartai claims). Populating them for a
+        // regular USER caller would let `?populate=authUser` enumerate
+        // that PII (audit security #M10). Gate the auth-API lookup to
+        // admin-tier callers; everyone else gets the raw FK back.
+        populate: async (ctx: Context<any, UserAuthMeta>, values: number[]) => {
+          const isAdmin =
+            ctx.meta?.authUser?.type === AuthUserRole.ADMIN ||
+            ctx.meta?.authUser?.type === AuthUserRole.SUPER_ADMIN;
+          if (!isAdmin) return values;
           return Promise.all(
             values.map((value) => {
               try {
-                const data = ctx.call('auth.users.get', {
+                return ctx.call('auth.users.get', {
                   id: value,
                   scope: false,
                 });
-                return data;
               } catch (e) {
                 return value;
               }
@@ -161,6 +181,16 @@ export interface User {
     all: {
       auth: RestrictionType.DEFAULT,
     },
+
+    // moleculer-web's `mappingPolicy: 'all'` auto-publishes every default
+    // @moleculer/database action — including `resolve`, which fetches by
+    // primary key without going through the `filterTenant` hook (hooks
+    // only cover count/list/find/get/all). That meant a USER calling
+    // `POST /api/users/resolve {id: <other-tenant-userId>}` got the full
+    // record (see security audit #H1). Drop visibility to `protected` so
+    // internal `ctx.call('users.resolve', ...)` keeps working but HTTP
+    // can't reach it.
+    resolve: { visibility: 'protected' },
   },
 })
 export default class UsersService extends moleculer.Service {
@@ -172,12 +202,16 @@ export default class UsersService extends moleculer.Service {
       });
     }
     if (ctx.meta.user && ctx.meta.profile) {
+      // Security $raw clause must be spread LAST so a user-supplied
+      // `query.$raw` cannot replace the tenant scope and read users
+      // outside their tenant.
+      const userQuery = sanitizeQueryForTenantScope(ctx.params.query);
       ctx.params.query = {
+        ...userQuery,
         $raw: {
           condition: `?? \\? ?`,
           bindings: ['tenants', Number(ctx.meta.profile)],
         },
-        ...ctx.params.query,
       };
     } else if (
       !ctx.meta.user &&
@@ -203,9 +237,10 @@ export default class UsersService extends moleculer.Service {
               bindings: ['tenants', ctx.params.filter.tenantId],
             };
           }
+          const adminQuery = sanitizeQueryForTenantScope(ctx.params.query);
           ctx.params.query = {
+            ...adminQuery,
             $raw,
-            ...ctx.params.query,
           };
           delete ctx.params.filter.tenantId;
           delete ctx.params.filter.role;
@@ -228,7 +263,13 @@ export default class UsersService extends moleculer.Service {
         error: 'Not logged in',
       });
     }
-    return this.updateEntity(ctx, { id: ctx.meta.user.id, ...ctx.params });
+    // Destructure explicitly instead of `...ctx.params` — even with the
+    // params validator stripping unknown fields, spreading the full
+    // params bag is a stencil that's easy to break later (e.g. by
+    // adding a new optional param that the caller can now silently
+    // write to `users.update`). See security audit #A7/#M13.
+    const { email, phone } = ctx.params;
+    return this.updateEntity(ctx, { id: ctx.meta.user.id, email, phone });
   }
   @Action({
     params: {
@@ -239,17 +280,40 @@ export default class UsersService extends moleculer.Service {
     return this.findEntities(ctx);
   }
 
-  @Action()
-  async test(ctx: Context) {
-    const adapter = await this.getAdapter(ctx);
-    const knex = adapter.client;
-    const response = await knex.raw('select * from users where id = ?', [1]);
-    return response.rows;
+  @Action({
+    rest: 'POST /:id/impersonate',
+    // SUPER_ADMIN only — `auth: ADMIN` would accept any ROLE_ADMIN, who
+    // could then mint a session for any target user (including other
+    // admins or company OWNERs). See security audit #C7. The dedicated
+    // `RestrictionType.SUPER_ADMIN` tier is enforced by
+    // `api.service.ts authorize()`.
+    auth: RestrictionType.SUPER_ADMIN,
+    params: {
+      id: {
+        type: 'number',
+        convert: true,
+      },
+    },
+  })
+  async impersonate(ctx: Context<{ id: number }, UserAuthMeta>) {
+    const { id } = ctx.params;
+    const user: User = await ctx.call('users.resolve', { id });
+
+    this.logger.warn(
+      `[impersonate] SUPER_ADMIN authUserId=${ctx.meta.authUser.id} impersonating userId=${id} authUserId=${user?.authUser}`,
+    );
+
+    return ctx.call('auth.users.impersonate', { id: user.authUser });
   }
 
   @Action({
     rest: 'GET /byTenant/:tenant',
-    auth: RestrictionType.DEFAULT,
+    // ADMIN-only: this endpoint rewrites the tenant scope `$raw` from the
+    // URL param, bypassing `filterTenant`. Allowing USER role here let any
+    // member of any tenant enumerate users of any other tenant (see
+    // security audit #C2). Cross-tenant USER queries belong to
+    // `tenantUsers.list`, which is ProfileMixin-scoped.
+    auth: RestrictionType.ADMIN,
     params: {
       tenant: {
         type: 'number',
@@ -288,9 +352,10 @@ export default class UsersService extends moleculer.Service {
       };
     }
 
+    const byTenantQuery = sanitizeQueryForTenantScope(params.query);
     params.query = {
+      ...byTenantQuery,
       $raw,
-      ...params.query,
     };
 
     const rows = await this.findEntities(ctx, params);
@@ -300,7 +365,11 @@ export default class UsersService extends moleculer.Service {
   }
 
   @Action({
-    auth: RestrictionType.DEFAULT,
+    // ADMIN-only: same reason as `byTenant` above — when `tenants[]` is
+    // supplied the action wipes the `filterTenant`-installed `$raw` clause
+    // and replaces it with a user-controlled tenant list, allowing
+    // cross-tenant enumeration.
+    auth: RestrictionType.ADMIN,
     params: {
       tenants: {
         type: 'array',
@@ -326,9 +395,10 @@ export default class UsersService extends moleculer.Service {
         bindings: ['tenants', ...ids],
       };
 
+      const listQuery = sanitizeQueryForTenantScope(params.query);
       params.query = {
+        ...listQuery,
         $raw,
-        ...params.query,
       };
     }
 
@@ -398,17 +468,22 @@ export default class UsersService extends moleculer.Service {
     const adapter = await this.getAdapter(ctx);
     const table = adapter.getTable();
 
+    // Use parameterized bindings, not string interpolation. Today both
+    // values are validated (enum role, numeric tenant FK), but interpolating
+    // into raw SQL is a time-bomb — anyone wiring a `permissive: true`
+    // path on `tenantUsers.create/update` would turn this into SQL
+    // injection through the `role` string.
     switch (type) {
       case 'create':
       case 'update':
       case 'replace':
-        $set.tenants = table.client.raw(
-          `tenants || '{"${tenantUser.tenant}":"${tenantUser.role}"}'::jsonb`,
-        );
+        $set.tenants = table.client.raw(`tenants || ?::jsonb`, [
+          JSON.stringify({ [String(tenantUser.tenant)]: tenantUser.role }),
+        ]);
         break;
 
       case 'remove':
-        $set.tenants = table.client.raw(`tenants - '${tenantUser.tenant}'`);
+        $set.tenants = table.client.raw(`tenants - ?`, [String(tenantUser.tenant)]);
         break;
     }
 

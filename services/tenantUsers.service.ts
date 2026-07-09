@@ -12,8 +12,9 @@ import {
   INNER_AUTH_GROUP_IDS,
   RestrictionType,
   Table,
+  throwNoRightsError,
 } from '../types';
-import { UserAuthMeta } from './api.service';
+import { AuthUserRole, UserAuthMeta } from './api.service';
 import { User, UserType } from './users.service';
 
 import DbConnection from '../mixins/database.mixin';
@@ -131,6 +132,11 @@ export type TenantUser<
       count: ['beforeSelect'],
       get: ['beforeSelect'],
       all: ['beforeSelect'],
+      // The generic `remove` stays USER-callable (the web app deletes a
+      // member via `DELETE /tenantUsers/:id`), so it MUST be guarded — see
+      // `beforeRemove`. Internal cascades (`users.removed`/`tenants.removed`)
+      // use `removeEntities` directly and skip this action hook.
+      remove: ['beforeRemove'],
     },
   },
 
@@ -144,8 +150,16 @@ export type TenantUser<
     create: {
       auth: RestrictionType.ADMIN,
     },
+    // The generic db `update` has NO ownership/tenant scope and accepts any
+    // `role`, so it must not be reachable by a USER — that is a self-promotion
+    // / cross-tenant privilege escalation (a USER could `POST
+    // /tenantUsers/update {id, role:"OWNER"}` via the mappingPolicy:'all'
+    // fallback). Members are edited through the guarded `updateTenantUser`
+    // (`PATCH /update/:id`), which OWNER/USER_ADMIN use; internal callers
+    // (`updateTenantUser`, `afterUserLoggedIn`) reach this via local ctx.call,
+    // which bypasses the gateway auth.
     update: {
-      auth: RestrictionType.DEFAULT,
+      auth: RestrictionType.ADMIN,
     },
     remove: {
       auth: RestrictionType.DEFAULT,
@@ -203,13 +217,30 @@ export default class TenantUsersService extends moleculer.Service {
       populate: ['user'],
     });
 
-    const currentUser = tenantUser.user;
-    const currentTenant: Tenant = await ctx.call('tenants.resolve', {
-      throwIfNotExist: true,
-      id: profile,
+    // `tenantUsers.resolve` is not tenant-scoped, so a USER_ADMIN/OWNER of one
+    // tenant could otherwise pass another tenant's membership id and edit it
+    // (IDOR). Pin the target to the caller's active tenant via a raw scoped
+    // lookup on the `tenantId` column (do NOT compare the serialized
+    // `tenantUser.tenant`, which can be a populated/encoded reference).
+    const ownedInTenant = await this.findEntity(ctx, {
+      query: { id, tenant: profile },
     });
+    if (!ownedInTenant) {
+      throwNoRightsError('Cannot edit a user from another tenant.');
+    }
 
-    if (role) {
+    const currentUser = tenantUser.user;
+
+    // Only touch the auth group when the role ACTUALLY changes. The web form
+    // resubmits the member's current role on every email/phone edit, and a
+    // needless `auth.users.assignToGroup` (which requires auth-API group-admin
+    // rights and can 401) would then break an otherwise valid contact edit.
+    if (role && role !== tenantUser.role) {
+      const currentTenant: Tenant = await ctx.call('tenants.resolve', {
+        throwIfNotExist: true,
+        id: profile,
+      });
+
       await ctx.call('tenantUsers.update', {
         id,
         tenant: profile,
@@ -258,7 +289,7 @@ export default class TenantUsersService extends moleculer.Service {
   async invite(
     ctx: Context<
       {
-        tenant: number;
+        tenant?: number;
         role: TenantUserRole;
         firstName: string;
         lastName: string;
@@ -269,12 +300,28 @@ export default class TenantUsersService extends moleculer.Service {
       UserAuthMeta
     >,
   ) {
-    validateCanEditTenantUser(ctx, 'Only OWNER and USER_ADMIN can add users to tenant.');
+    // USER callers (mobile app) MUST identify the target tenant via
+    // `x-profile` — the gateway has already validated their membership
+    // there. They cannot smuggle a different tenant via the body
+    // (audit security #A6/#M9). ADMIN / internal callers (e.g.
+    // `tenants.invite` creating the seed OWNER alongside a brand-new
+    // tenant) don't have `x-profile`, so the body fallback stays open
+    // only for them.
+    const isUserCaller = !!ctx.meta?.user && ctx.meta?.authUser?.type === AuthUserRole.USER;
 
-    const { firstName, lastName, personalCode, role, email, phone, tenant } = ctx.params;
-    // OWNER and USER_ADMIN can invite users
+    let tenantId: number | undefined | null;
+    if (isUserCaller) {
+      validateCanEditTenantUser(ctx, 'Only OWNER and USER_ADMIN can add users to tenant.');
+      tenantId = ctx.meta.profile;
+    } else {
+      tenantId = ctx.meta.profile ?? ctx.params.tenant;
+    }
 
-    const tenantId = ctx.meta.profile || tenant;
+    if (!tenantId) {
+      throwNoRightsError('Tenant not specified.');
+    }
+
+    const { firstName, lastName, personalCode, role, email, phone } = ctx.params;
 
     const currentTenant: Tenant = await ctx.call('tenants.resolve', {
       id: tenantId,
@@ -338,6 +385,7 @@ export default class TenantUsersService extends moleculer.Service {
         email: user.email,
         phone: user.phone,
         role: tenantUser.role,
+        isInvestigator: tenantUser.tenant.isInvestigator,
         code: tenantUser.tenant.code,
       };
     });
@@ -377,6 +425,36 @@ export default class TenantUsersService extends moleculer.Service {
       id: userEntity.authUser,
       groupId: tenantEntity.authGroup,
     });
+  }
+
+  @Method
+  async beforeRemove(ctx: Context<{ id: number }, UserAuthMeta>) {
+    // Internal callers (the `users.removed`/`tenants.removed` cascades use
+    // `removeEntities`, not this action; seeds/ticks carry no auth) pass
+    // through untouched.
+    if (!ctx.meta?.authUser) return ctx;
+
+    // Platform admins manage any membership.
+    if (
+      [AuthUserRole.ADMIN, AuthUserRole.SUPER_ADMIN].some((role) => role === ctx.meta.authUser.type)
+    ) {
+      return ctx;
+    }
+
+    // A USER may remove members only if they are OWNER/USER_ADMIN of their
+    // active tenant, and only members that belong to that same tenant — the
+    // generic `remove` is otherwise an unscoped cross-tenant delete (IDOR).
+    validateCanEditTenantUser(ctx, 'Only OWNER and USER_ADMIN can remove users from tenant.');
+
+    const target: TenantUser = await ctx.call('tenantUsers.resolve', {
+      id: ctx.params.id,
+      throwIfNotExist: true,
+    });
+    if (String(target.tenant) !== String(ctx.meta.profile)) {
+      throwNoRightsError('Cannot remove a user from another tenant.');
+    }
+
+    return ctx;
   }
 
   @Method

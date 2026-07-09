@@ -1,7 +1,7 @@
 'use strict';
 
 import moleculer, { Context } from 'moleculer';
-import { Action, Service } from 'moleculer-decorators';
+import { Action, Method, Service } from 'moleculer-decorators';
 import DbConnection from '../mixins/database.mixin';
 import ProfileMixin from '../mixins/profile.mixin';
 import { coordinatesToGeometry } from '../modules/geometry';
@@ -11,6 +11,7 @@ import {
   COMMON_SCOPES,
   CommonFields,
   CommonPopulates,
+  LocationType,
   RestrictionType,
   Table,
 } from '../types';
@@ -19,10 +20,10 @@ import { FishType } from './fishTypes.service';
 import { Fishing } from './fishings.service';
 import { Coordinates, CoordinatesProp, Location, LocationProp } from './location.service';
 import { Tenant } from './tenants.service';
-import { ToolCategory } from './toolTypes.service';
 import { Tool } from './tools.service';
 import { ToolsGroupHistoryTypes, ToolsGroupsEvent } from './toolsGroupsEvents.service';
 import { User } from './users.service';
+import { WeightEvent } from './weightEvents.service';
 
 interface Fields extends CommonFields {
   id: number;
@@ -35,8 +36,8 @@ interface Fields extends CommonFields {
 }
 
 interface Populates extends CommonPopulates {
-  tools: Tool[];
-  buildEvent: ToolsGroupsEvent;
+  tools: Tool<'toolType'>[];
+  buildEvent: ToolsGroupsEvent<'fishing'>;
   removeEvent: ToolsGroupsEvent;
   weightEvent: ToolsGroupsEvent;
   tenant: Tenant;
@@ -64,23 +65,20 @@ export type ToolsGroup<
         columnName: 'tools',
         default: () => [],
         async populate(ctx: Context, values: number[], entities: ToolsGroup[]) {
+          if (!values?.length || !entities?.length) return [];
+
           const tools: Tool[] = await ctx.call('tools.find', {
-            query: {
-              id: { $in: values },
-            },
+            query: { id: { $in: values } },
             populate: ['toolType'],
           });
 
-          return entities?.map((entity) => {
-            const t = entity.tools?.map((toolId) => {
-              const tool = tools.find((t) => t.id === toolId);
-              return tool;
-            });
-            if (t.length) {
-              return t;
-            }
-            return entity.tools;
-          });
+          const toolsMap = new Map(tools.map((t) => [t.id, t]));
+
+          return entities.map((entity) =>
+            entity.tools?.length
+              ? entity.tools.map((id) => toolsMap.get(id)).filter(Boolean)
+              : entity.tools,
+          );
         },
       },
       buildEvent: {
@@ -125,6 +123,8 @@ export type ToolsGroup<
         type: 'number',
         columnType: 'integer',
         columnName: 'tenantId',
+        // Locked post-create — see security audit #H2.
+        immutable: true,
         populate: {
           action: 'tenants.resolve',
           params: {
@@ -136,6 +136,7 @@ export type ToolsGroup<
         type: 'number',
         columnType: 'integer',
         columnName: 'userId',
+        immutable: true,
         populate: {
           action: 'users.resolve',
           params: {
@@ -149,11 +150,22 @@ export type ToolsGroup<
       ...COMMON_SCOPES,
     },
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
-    defaultPopulates: ['tools'],
+    defaultPopulates: ['tools', 'buildEvent'],
   },
   hooks: {
     before: {
-      buildTools: ['beforeCreate'],
+      // Every `:id` mutation resolves a toolsGroup by id; `beforeMutate`
+      // pins that id to the caller's tenant/user so a USER can't build,
+      // connect, weigh, or remove tools on another tenant's group (the
+      // actions used `toolsGroups.resolve`, which is unscoped). The generic
+      // `update`/`remove` get the same guard.
+      buildTools: ['beforeMutate', 'beforeCreate'],
+      connectTools: ['beforeMutate'],
+      disconnectTools: ['beforeMutate'],
+      removeTools: ['beforeMutate'],
+      weighFish: ['beforeMutate'],
+      update: ['beforeMutate'],
+      remove: ['beforeMutate'],
       list: ['beforeSelect'],
       find: ['beforeSelect'],
       count: ['beforeSelect'],
@@ -169,80 +181,216 @@ export type ToolsGroup<
 })
 export default class ToolsGroupsService extends moleculer.Service {
   @Action({
-    rest: 'POST /build',
+    rest: 'POST /connect/:id',
     auth: RestrictionType.USER,
     params: {
+      id: 'number|convert',
       tools: {
         type: 'array',
         items: 'number',
       },
-      coordinates: CoordinatesProp,
-      location: LocationProp,
     },
   })
-  async buildTools(
+  async connectTools(
     ctx: Context<{
       tools: number[];
-      coordinates: Coordinates;
-      location: Location;
+      id: number;
     }>,
   ) {
+    const group: ToolsGroup<'tools'> = await ctx.call('toolsGroups.resolve', {
+      id: ctx.params.id,
+      populate: ['tools'],
+    });
+    if (!group) {
+      throw new moleculer.Errors.ValidationError('Invalid group');
+    }
+
     if (!ctx.params.tools.length) {
       throw new moleculer.Errors.ValidationError('No tools');
     }
-    // fishing validation
-    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
-    if (!currentFishing) {
-      throw new moleculer.Errors.ValidationError('Fishing not started');
-    }
 
-    // Tools validation
+    const toolGroupToolType = group.tools[0].toolType.id;
+
     const tools: Tool<'toolsGroup' | 'toolType'>[] = await ctx.call('tools.find', {
       query: {
         id: { $in: ctx.params.tools },
       },
       populate: ['toolsGroup', 'toolType'],
     });
-    // if tools do not exist or do not belong to user/tenant
+
     if (tools.length && tools.length !== ctx.params.tools.length) {
       throw new moleculer.Errors.ValidationError('Tools do not exist');
     }
 
-    // if tools in the water
-    const builtTools = tools.filter((tool) => tool.toolsGroup && !tool.toolsGroup.removeEvent);
+    const builtTools = tools.filter(
+      (tool) => tool?.toolsGroup?.buildEvent && !tool?.toolsGroup?.removeEvent,
+    );
 
     if (builtTools.length) {
       throw new moleculer.Errors.ValidationError('Tools is in use');
     }
-    // validate if multiple tools connected
-    if (ctx.params.tools.length > 1) {
-      //number of tool types
-      const uniqueToolTypes = tools.reduce((toolTypes, tool) => {
-        if (!toolTypes.includes(tool.toolType.id)) {
-          toolTypes.push(tool.toolType.id);
-        }
-        return toolTypes;
-      }, []);
-      if (uniqueToolTypes.length > 1) {
-        throw new moleculer.Errors.ValidationError('To many tool types');
-      }
-      //is valid tool category
-      if (tools[0].toolType.type !== ToolCategory.NET) {
-        throw new moleculer.Errors.ValidationError('Invalid tool category');
+
+    for (const tool of tools) {
+      if (tool.toolType.id !== toolGroupToolType) {
+        throw new moleculer.Errors.ValidationError('Too many tool types');
       }
     }
+
+    // Earlier this loop fired `removeEntity` without `await`, so the
+    // remove and the subsequent `updateEntity` race — and the catch
+    // never saw the (async) rejection (audit security #A9/#M11).
+    // Best-effort sequential removal + await: if the old wrapper group
+    // is already gone we ignore the error and continue.
+    for (const tool of tools) {
+      try {
+        await this.removeEntity(ctx, {
+          id: tool.toolsGroup.id,
+        });
+      } catch (e) {
+        // ignore — old (empty) toolsGroup may already be gone
+      }
+    }
+
+    return await this.updateEntity(ctx, {
+      id: ctx.params.id,
+      tools: [...group.tools.map((tool) => tool.id), ...tools.map((tool) => tool.id)],
+    });
+  }
+
+  @Action({
+    rest: 'POST /disconnect/:id',
+    auth: RestrictionType.USER,
+    params: {
+      id: 'number|convert',
+      tools: {
+        type: 'array',
+        items: 'number',
+      },
+    },
+  })
+  async disconnectTools(
+    ctx: Context<
+      {
+        tools: number[];
+        id: number;
+      },
+      UserAuthMeta
+    >,
+  ) {
+    const userId = ctx.meta.user.id;
+    const tenantId = ctx.meta.profile;
+    const toolsIds = ctx.params.tools;
+    const group: ToolsGroup<'tools'> = await ctx.call('toolsGroups.resolve', {
+      id: ctx.params.id,
+      populate: ['tools'],
+    });
+    if (!group) {
+      throw new moleculer.Errors.ValidationError('Invalid group');
+    }
+
+    const toolGroupId = group.id;
+
+    if (!ctx.params.tools.length) {
+      throw new moleculer.Errors.ValidationError('No tools');
+    }
+
+    const tools: Tool<'toolsGroup' | 'toolType'>[] = await ctx.call('tools.find', {
+      query: {
+        id: { $in: ctx.params.tools },
+      },
+      populate: ['toolsGroup', 'toolType'],
+    });
+    if (tools.length && tools.length !== ctx.params.tools.length) {
+      throw new moleculer.Errors.ValidationError('Tools do not exist');
+    }
+
+    const builtTools = tools.filter(
+      (tool) => tool.toolsGroup.buildEvent && !tool.toolsGroup.removeEvent,
+    );
+
+    if (builtTools.length) {
+      throw new moleculer.Errors.ValidationError('Tools are in use');
+    }
+
+    for (const tool of tools) {
+      if (tool.toolsGroup.id !== toolGroupId) {
+        throw new moleculer.Errors.ValidationError('Tool belongs to another tool group');
+      }
+    }
+
+    // Two-phase write with compensation. moleculer-db / knex doesn't
+    // give us an atomic transaction across these two service calls,
+    // so if the update fails after the create succeeds we'd leave a
+    // half-created toolsGroup behind (audit security #A9/#M11). Roll
+    // it back manually on failure.
+    const newGroup = await this.createEntity(ctx, {
+      tools: toolsIds,
+      user: userId,
+      tenant: tenantId,
+    });
+
+    try {
+      return await this.updateEntity(ctx, {
+        id: ctx.params.id,
+        tools: group.tools.filter((tool) => !toolsIds.includes(tool.id)).map((tool) => tool.id),
+      });
+    } catch (err) {
+      try {
+        await this.removeEntity(ctx, { id: newGroup.id });
+      } catch (cleanupErr: any) {
+        this.logger.warn(
+          `[disconnectTools] failed to roll back orphan toolsGroup id=${newGroup.id}: ${cleanupErr?.message}`,
+        );
+      }
+      throw err;
+    }
+  }
+
+  @Action({
+    rest: 'POST /build/:id',
+    auth: RestrictionType.USER,
+    params: {
+      id: 'number|convert',
+      coordinates: CoordinatesProp,
+      location: LocationProp,
+      locationManual: { type: 'boolean', optional: true, convert: true },
+    },
+  })
+  async buildTools(
+    ctx: Context<{
+      id: number;
+      coordinates: Coordinates;
+      location: Location;
+      locationManual?: boolean;
+    }>,
+  ) {
+    const group: ToolsGroup<'tools'> = await ctx.call('toolsGroups.resolve', {
+      id: ctx.params.id,
+      populate: ['tools'],
+    });
+    if (!group) {
+      throw new moleculer.Errors.ValidationError('Invalid group');
+    }
+
+    // fishing validation
+    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
+    if (!currentFishing) {
+      throw new moleculer.Errors.ValidationError('Fishing not started');
+    }
+
     const geom = coordinatesToGeometry(ctx.params.coordinates);
 
     const buildEvent: ToolsGroupsEvent = await ctx.call('toolsGroupsEvents.create', {
       type: ToolsGroupHistoryTypes.BUILD_TOOLS,
       geom,
       location: ctx.params.location,
+      locationManual: !!ctx.params.locationManual,
       fishing: currentFishing.id,
     });
 
     try {
-      return await this.createEntity(ctx, {
-        ...ctx.params,
+      return await this.updateEntity(ctx, {
+        id: ctx.params.id,
         buildEvent: buildEvent.id,
       });
     } catch (e) {
@@ -260,17 +408,25 @@ export default class ToolsGroupsService extends moleculer.Service {
       id: 'number|convert',
       coordinates: CoordinatesProp,
       location: LocationProp,
+      locationManual: { type: 'boolean', optional: true, convert: true },
     },
   })
   async removeTools(
-    ctx: Context<{
-      id: number;
-      coordinates: Coordinates;
-      location: Location;
-    }>,
+    ctx: Context<
+      {
+        id: number;
+        coordinates: Coordinates;
+        location: Location;
+        locationManual?: boolean;
+      },
+      UserAuthMeta
+    >,
   ) {
-    const group: ToolsGroup = await ctx.call('toolsGroups.resolve', {
+    const userId = ctx.meta.user.id;
+    const tenantId = ctx.meta.profile;
+    const group: ToolsGroup<'tools' | 'buildEvent'> = await ctx.call('toolsGroups.resolve', {
       id: ctx.params.id,
+      populate: ['tools', 'buildEvent'],
     });
     if (!group) {
       throw new moleculer.Errors.ValidationError('Invalid group');
@@ -282,17 +438,46 @@ export default class ToolsGroupsService extends moleculer.Service {
     if (!currentFishing) {
       throw new moleculer.Errors.ValidationError('Fishing not started');
     }
+
+    // Every tool must be checked ("Patikrinta") or weighed before it can be
+    // pulled back to the warehouse — both write a weight_event scoped to the
+    // current session, which `getFishByToolsGroup` reads. This holds whether
+    // the net was set this trip or an earlier, already-ended one: returning it
+    // unchecked silently loses the catch. (Originally only the previous-fishing
+    // leftover case was guarded; the rule now applies to in-session tools too.)
+    const weighed: WeightEvent = await ctx.call('weightEvents.getFishByToolsGroup', {
+      toolsGroup: ctx.params.id,
+    });
+    if (!weighed) {
+      throw new moleculer.Errors.ValidationError('Previous fishing tool not weighted');
+    }
+
+    // Refuse to return the last unchecked tool of a type when every sibling
+    // of the same type only got an empty "Patikrinta" event (weight_event
+    // with `data: {}`). Otherwise the catch is silently lost: the
+    // `notChecked` popup warns the user but they can click past it; the
+    // hard error forces them to weigh fish on at least one tool first.
+    await this.assertSiblingsHaveFishLogged(ctx, group, currentFishing);
+
     const geom = coordinatesToGeometry(ctx.params.coordinates);
     const removeEvent: ToolsGroupsEvent = await ctx.call('toolsGroupsEvents.create', {
       type: ToolsGroupHistoryTypes.REMOVE_TOOLS,
       geom,
       location: ctx.params.location,
+      locationManual: !!ctx.params.locationManual,
       fishing: currentFishing.id,
     });
+
     try {
-      return await this.updateEntity(ctx, {
+      await this.updateEntity(ctx, {
         id: ctx.params.id,
         removeEvent: removeEvent.id,
+      });
+
+      await ctx.call('toolsGroups.create', {
+        tools: group.tools.map((tool) => tool.id),
+        user: userId,
+        tenant: tenantId,
       });
     } catch (e) {
       await ctx.call('toolsGroupsEvents.remove', {
@@ -309,6 +494,7 @@ export default class ToolsGroupsService extends moleculer.Service {
       id: 'number|convert',
       coordinates: CoordinatesProp,
       location: LocationProp,
+      locationManual: { type: 'boolean', optional: true, convert: true },
       data: 'object',
     },
   })
@@ -318,6 +504,7 @@ export default class ToolsGroupsService extends moleculer.Service {
         id: number;
         coordinates: Coordinates;
         location: Location;
+        locationManual?: boolean;
         data: { [key: FishType['id']]: number };
       },
       UserAuthMeta
@@ -327,6 +514,7 @@ export default class ToolsGroupsService extends moleculer.Service {
       toolsGroup: ctx.params.id,
       coordinates: ctx.params.coordinates,
       location: ctx.params.location,
+      locationManual: !!ctx.params.locationManual,
       data: ctx.params.data,
     });
     return { success: true };
@@ -337,12 +525,14 @@ export default class ToolsGroupsService extends moleculer.Service {
     auth: RestrictionType.USER,
     params: {
       id: 'string',
+      locationType: { type: 'string', optional: true, enum: Object.values(LocationType) },
     },
   })
   async toolsGroupsByLocation(
     ctx: Context<
       {
         id: string;
+        locationType?: LocationType;
       },
       UserAuthMeta
     >,
@@ -360,9 +550,93 @@ export default class ToolsGroupsService extends moleculer.Service {
       populate: ['tools', 'buildEvent', 'weightEvent'],
     });
 
-    return notRemovedToolsGroups.filter(
-      (toolGroup) => toolGroup.buildEvent.location.id === ctx.params.id,
-    );
+    const { id, locationType } = ctx.params;
+
+    return notRemovedToolsGroups.filter((toolGroup) => {
+      const loc: any = toolGroup?.buildEvent?.location;
+      // Polder ids overlap with estuary bar ids (both small ints), so id alone
+      // is not enough to identify the bucket. The `buildEvent.fishing.type`
+      // reliably reflects which kind of fishing the tool was built in (always
+      // populated, no migration needed) — use that as the source of truth.
+      if (String(loc?.id) !== String(id)) return false;
+      if (!locationType) return true;
+      const fishingType: any = (toolGroup?.buildEvent as any)?.fishing?.type;
+      return fishingType === locationType;
+    });
+  }
+
+  @Action({
+    rest: 'GET /notChecked',
+    params: {
+      toolsGroup: 'number|convert|optional',
+    },
+    auth: RestrictionType.USER,
+  })
+  async getNotCheckedToolsGroups(ctx: Context<{ toolsGroup?: number }>) {
+    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
+    if (!currentFishing) {
+      throw new moleculer.Errors.ValidationError('Fishing not started');
+    }
+
+    const notRemovedToolsGroups: ToolsGroup<'buildEvent'>[] = await ctx.call('toolsGroups.find', {
+      query: { removeEvent: { $exists: false } },
+      populate: ['buildEvent'],
+    });
+
+    const weightEvents: WeightEvent<'toolsGroup'>[] = await ctx.call('weightEvents.find', {
+      query: { fishing: currentFishing.id },
+    });
+
+    // Map<toolsGroup.id, hasAnyFishLogged> — a "Patikrinta" press writes a
+    // weight_event with `data: {}`, so we need to look at the payload to
+    // tell apart "checked-with-fish" from "checked-empty".
+    const weightByGroup = new Map<number, boolean>();
+    for (const w of weightEvents) {
+      const groupId = w.toolsGroup?.id;
+      if (groupId == null) continue;
+      const hasFish = !!w.data && Object.keys(w.data).length > 0;
+      weightByGroup.set(groupId, weightByGroup.get(groupId) || hasFish);
+    }
+
+    const locationStats = new Map<
+      string,
+      { name: string; checked: number; unchecked: number; withFish: number }
+    >();
+    for (const group of notRemovedToolsGroups) {
+      const buildFishing = group.buildEvent?.fishing;
+      // Different fishing type → not our concern (e.g. ESTUARY vs INLAND).
+      // Previously also skipped the current fishing entirely, but the user
+      // needs to be warned when they cross over to a new bar leaving an
+      // earlier bar of the same trip half-finished.
+      if (buildFishing?.type !== currentFishing.type) continue;
+      const location = group.buildEvent?.location;
+      if (!location?.id) continue;
+      const key = String(location.id);
+      const entry = locationStats.get(key) ?? {
+        name: location.name ?? '',
+        checked: 0,
+        unchecked: 0,
+        withFish: 0,
+      };
+      if (weightByGroup.has(group.id)) {
+        entry.checked += 1;
+        if (weightByGroup.get(group.id)) entry.withFish += 1;
+      } else {
+        entry.unchecked += 1;
+      }
+      locationStats.set(key, entry);
+    }
+
+    return Array.from(locationStats.entries())
+      .filter(([, stats]) => {
+        // Surface bars that are still "in progress": either some tools are
+        // unchecked, or every checked one is an empty Patikrinta (no fish
+        // logged yet). Fully-weighed bars with no leftover tools fall out.
+        if (stats.unchecked > 0 && stats.checked > 0) return true;
+        if (stats.checked > 0 && stats.withFish === 0) return true;
+        return false;
+      })
+      .map(([id, stats]) => ({ id, name: stats.name }));
   }
 
   @Action({
@@ -371,12 +645,72 @@ export default class ToolsGroupsService extends moleculer.Service {
   async getUniqueToolsLocationsCount(ctx: Context) {
     const locations = await this.rawQuery(
       ctx,
+      // `deleted_at IS NULL` on both arms — without it soft-deleted
+      // tools_groups_events still bumped the public location count
+      // (audit security #M6).
       `SELECT COUNT(DISTINCT (location->>'id')::text) +
-        CASE WHEN EXISTS ( SELECT 1 FROM tools_groups_events WHERE location IS NOT NULL AND (location->>'name') ILIKE '%baras%') 
+        CASE WHEN EXISTS ( SELECT 1 FROM tools_groups_events
+                            WHERE location IS NOT NULL
+                              AND (location->>'name') ILIKE '%baras%'
+                              AND deleted_at IS NULL )
         THEN 1 ELSE 0 END AS location_count
         FROM tools_groups_events
-        WHERE location IS NOT NULL AND (location->>'name') NOT ILIKE '%baras%';`,
+        WHERE location IS NOT NULL
+          AND (location->>'name') NOT ILIKE '%baras%'
+          AND deleted_at IS NULL;`,
     );
     return Number(locations[0]?.location_count);
+  }
+
+  @Method
+  async assertSiblingsHaveFishLogged(
+    ctx: Context,
+    group: ToolsGroup<'tools' | 'buildEvent'>,
+    currentFishing: Fishing,
+  ) {
+    const toolTypeId = (group.tools?.[0] as Tool<'toolType'> | undefined)?.toolType?.id;
+    const ownLocationId = group.buildEvent?.location?.id;
+    if (!toolTypeId || ownLocationId == null) return;
+
+    // Same shape as `getNotCheckedToolsGroups` — `find` returns user-scoped
+    // groups, IDs come back encoded so comparisons match `currentFishing.id`
+    // without us having to think about `secure: true` decoding.
+    const activeGroups: ToolsGroup<'tools' | 'buildEvent'>[] = await ctx.call('toolsGroups.find', {
+      query: { removeEvent: { $exists: false } },
+      populate: ['tools', 'buildEvent'],
+    });
+
+    // Scope siblings by fishing + bar/location + tool type. Each bar is a
+    // self-contained checking session — a net weighed with fish in bar 2
+    // doesn't account for an empty "Patikrinta" sibling in bar 1.
+    const siblings = activeGroups.filter((g) => {
+      const sameFishing = g.buildEvent?.fishing?.id === currentFishing.id;
+      const sameLocation = String(g.buildEvent?.location?.id ?? '') === String(ownLocationId);
+      const sameType = (g.tools as Tool<'toolType'>[] | undefined)?.some(
+        (t) => t?.toolType?.id === toolTypeId,
+      );
+      return sameFishing && sameLocation && sameType;
+    });
+
+    if (!siblings.length) return;
+
+    const siblingIds = siblings.map((g) => g.id);
+    const sibWeights: WeightEvent[] = await ctx.call('weightEvents.find', {
+      query: { fishing: currentFishing.id, toolsGroup: { $in: siblingIds } },
+    });
+
+    const checkedGroupIds = new Set(sibWeights.map((w) => w.toolsGroup).filter((id) => id != null));
+    if (checkedGroupIds.has(group.id)) return; // self already weighed/checked — allow
+
+    const anyWithFish = sibWeights.some((w) => w.data && Object.keys(w.data).length > 0);
+    const unchecked = siblings.length - checkedGroupIds.size;
+
+    // We're the last unchecked of this type AND siblings only have empty
+    // "Patikrinta" events → returning now would lose the catch.
+    if (unchecked === 1 && checkedGroupIds.size > 0 && !anyWithFish) {
+      throw new moleculer.Errors.ValidationError(
+        'Negalima grąžinti įrankio į sandėlį, kol nepasvertos žuvys: kiti to paties tipo įrankiai pažymėti kaip patikrinti, bet žuvies svoris dar neįrašytas.',
+      );
+    }
   }
 }

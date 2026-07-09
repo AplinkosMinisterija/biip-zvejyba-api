@@ -19,49 +19,38 @@ import { UserAuthMeta } from './api.service';
 const Cron = require('@r2d2bzh/moleculer-cron');
 
 const data = [
-  { label: 'karšiai', priority: 26 },
-  { label: 'žiobriai', priority: 25 },
-  { label: 'kuojos', priority: 24 },
-  { label: 'sterkai', priority: 23 },
-  { label: 'ešeriai', priority: 22 },
-  { label: 'strintos', priority: 21 },
-  { label: 'perpelės', priority: 20 },
-  { label: 'karosai, auksiniai', priority: 19 },
-  { label: 'karosai, sidabriniai', priority: 18 },
-  { label: 'unguriai', priority: 17 },
-  { label: 'lydekos', priority: 16 },
-  { label: 'salačiai', priority: 15 },
-  { label: 'vėgėlės', priority: 14 },
-  { label: 'ožkos', priority: 13 },
-  { label: 'karpiai', priority: 12 },
-  { label: 'plakiai', priority: 11 },
-  { label: 'šamai', priority: 10 },
-  { label: 'nėgės', priority: 9 },
-  { label: 'pūgžliai', priority: 8 },
-  { label: 'lynai', priority: 7 },
-  { label: 'meknės', priority: 6 },
-  { label: 'plekšnės', priority: 5 },
-  { label: 'sykai', priority: 4 },
-  { label: 'strimelės', priority: 3 },
-  { label: 'plačiakačiai', priority: 2 },
-  { label: 'aukšlės', priority: 1 },
-  { label: 'seliavos', priority: 0 },
-  { label: 'sterkai', priority: 0 },
-  { label: 'vaivorykštiniai upėtakiai', priority: 0 },
-  { label: 'vėžiai, plačiažnypliai', priority: 0 },
-  { label: 'margieji plačiakačiai', priority: 0 },
-  { label: 'lašišos', priority: 0 },
-  { label: 'šlakiai', priority: 0 },
-  { label: 'margieji upėtakiai', priority: 0 },
-  { label: 'aštriašnipiai eršketai', priority: 0 },
-  { label: 'kiršliai', priority: 0 },
-  { label: 'ūsoriai', priority: 0 },
-  { label: 'skersnukiai', priority: 0 },
-  { label: 'plačiakakčiai', priority: 0 },
-  { label: 'margieji plačiakakčiai', priority: 0 },
-  { label: 'baltieji amūrai', priority: 0 },
-];
+  { label: 'Karšis', priority: 99999999999 },
+  { label: 'Sterkas', priority: 99999999998 },
+  { label: 'Sterkas (neverslinio dydžio)', priority: 99999999997 },
+  { label: 'Kuoja', priority: 99999999996 },
+  { label: 'Ešerys', priority: 99999999995 },
+  { label: 'Žiobris', priority: 99999999994 },
+  { label: 'Perpelė', priority: 99999999993 },
+  { label: 'Karosas', priority: 99999999992 },
+  { label: 'Ožka', priority: 99999999991 },
+  { label: 'Lydeka', priority: 99999999990 },
+  { label: 'Ungurys', priority: 99999999989 },
+  { label: 'Stinta', priority: 99999999988 },
+  { label: 'Nėgė', priority: 99999999987 },
+  { label: 'Karpis', priority: 99999999986 },
+  { label: 'Vėgėlė', priority: 99999999985 },
+  { label: 'Šamas', priority: 99999999984 },
 
+  { label: 'Karosas, auksinis', priority: 0 },
+  { label: 'Karosas, sidabrinis', priority: 0 },
+  { label: 'Lašiša', priority: 0 },
+  { label: 'Lynas', priority: 0 },
+  { label: 'Plakis', priority: 0 },
+  { label: 'Plekšnė', priority: 0 },
+  { label: 'Pūgžlys', priority: 0 },
+  { label: 'Raudė', priority: 0 },
+  { label: 'Strimelė', priority: 0 },
+  { label: 'Sykas', priority: 0 },
+  { label: 'Šlakis', priority: 0 },
+  { label: 'Vėžys, plačiažnyplis', priority: 0 },
+  { label: 'Seliava', priority: -1 },
+  { label: 'Kita rūšis', priority: -1 },
+];
 interface Fields extends CommonFields {
   id: number;
   label: string;
@@ -139,7 +128,11 @@ export type FishType<
       async onTick() {
         // There is no data yet, so the sort would be inaccurate if sorted now.
         if (new Date() >= new Date('2025-01-01T00:00:00')) {
-          const fishTypes: FishType[] = await this.call('fishTypes.find');
+          const fishTypes: FishType[] = await this.call('fishTypes.find', {
+            query: {
+              priority: { $lt: 999999000 },
+            },
+          });
           for (const fishType of fishTypes) {
             const weightEventsCount: number = await this.call('weightEvents.count', {
               query: {
@@ -170,9 +163,15 @@ export default class FishTypesService extends moleculer.Service {
       busboyConfig: {
         limits: {
           files: 1,
+          // 5 MB cap for fish-type photo (PNG/JPEG); bounds storage abuse.
+          fileSize: 5 * 1024 * 1024,
         },
       },
     },
+    // Catalogue images are managed by biip-admin-web operators, never by
+    // the žvejybos mobile app. Was implicitly DEFAULT (any authenticated
+    // caller) — see security audit #H4.
+    auth: RestrictionType.ADMIN,
   })
   async upload(ctx: Context<{}, UserAuthMeta>) {
     const folder = getFolderName(ctx.meta?.user, ctx.meta?.profile);

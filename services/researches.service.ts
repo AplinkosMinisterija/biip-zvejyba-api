@@ -15,7 +15,6 @@ import {
   Table,
 } from '../types';
 
-import _ from 'lodash';
 import ProfileMixin from '../mixins/profile.mixin';
 import { GeomFeatureCollection } from '../modules/geometry';
 import { getFolderName } from '../utils';
@@ -39,6 +38,8 @@ const publicFields = [
   'files',
   'previousResearchData',
   'fishes',
+  'totalFishesAbundance',
+  'totalBiomass',
 ];
 
 interface Fields extends CommonFields {
@@ -63,6 +64,8 @@ interface Fields extends CommonFields {
     totalAbundance: number;
     totalBiomass: number;
   };
+  totalFishesAbundance?: number;
+  totalBiomass?: number;
   fishes?: ResearchFish[];
   tenant: Tenant['id'];
   user: User['id'];
@@ -82,6 +85,7 @@ export type Research<
     DbConnection(),
     PostgisMixin({
       srid: 3346,
+      geojson: { maxDecimalDigits: 2 },
     }),
 
     ProfileMixin,
@@ -121,6 +125,8 @@ export type Research<
       },
       predatoryFishesRelativeAbundance: 'number|required',
       predatoryFishesRelativeBiomass: 'number|required',
+      totalFishesAbundance: 'number|optional',
+      totalBiomass: 'number|optional',
       averageWeight: 'number|required',
       valuableFishesRelativeBiomass: 'number|required',
       conditionIndex: 'number|required',
@@ -172,6 +178,8 @@ export type Research<
         type: 'number',
         columnType: 'integer',
         columnName: 'tenantId',
+        // Locked post-create — see security audit #H2.
+        immutable: true,
         populate: {
           action: 'tenants.resolve',
           params: {
@@ -183,6 +191,7 @@ export type Research<
         type: 'number',
         columnType: 'integer',
         columnName: 'userId',
+        immutable: true,
         populate: {
           action: 'users.resolve',
           params: {
@@ -215,6 +224,11 @@ export type Research<
   hooks: {
     before: {
       create: ['beforeCreate', 'handleMunicipality'],
+      // The generic remove (and the rest:null update reachable via the
+      // mappingPolicy fallback) had no scope — a USER could delete another
+      // tenant's research by id. Pin both to the caller.
+      update: ['beforeMutate'],
+      remove: ['beforeMutate'],
       list: ['beforeSelect'],
       find: ['beforeSelect'],
       count: ['beforeSelect'],
@@ -232,9 +246,18 @@ export default class ResearchesService extends moleculer.Service {
       busboyConfig: {
         limits: {
           files: 1,
+          // 10 MB cap — research PDFs are usually a few hundred KB; this
+          // bounds storage abuse via a single oversized upload (see
+          // security audit #H4). Pair with the INVESTIGATOR auth below.
+          fileSize: 10 * 1024 * 1024,
         },
       },
     },
+    // Was implicitly DEFAULT (USER+ADMIN), which let any authenticated
+    // mobile-app user POST arbitrary PDFs into MinIO. Research uploads
+    // are only legitimate from biip-admin-web operating as an
+    // INVESTIGATOR account.
+    auth: RestrictionType.INVESTIGATOR,
   })
   async upload(ctx: Context<{}, UserAuthMeta>) {
     const folder = getFolderName(ctx.meta?.user, ctx.meta?.profile);
@@ -292,17 +315,19 @@ export default class ResearchesService extends moleculer.Service {
       };
     }
 
-    return ctx.call(
-      'researches.list',
-      _.merge({}, ctx.params || {}, {
-        query: {
-          cadastralId: research.cadastralId,
-          id: {
-            $ne: research.id,
-          },
-        },
-      }),
-    );
+    // Pin `fields` to the public allowlist and ignore any caller-supplied
+    // `fields`/`populate`/`scope` — otherwise a public caller can
+    // `?fields=user,tenant&populate=user` to dereference the investigator's
+    // PII. The sibling `listPublic`/`getPublic` already pin `publicFields`.
+    return ctx.call('researches.list', {
+      fields: publicFields,
+      page: ctx.params?.page || 1,
+      pageSize: ctx.params?.pageSize || 10,
+      query: {
+        cadastralId: research.cadastralId,
+        id: { $ne: research.id },
+      },
+    });
   }
 
   @Action({
@@ -323,6 +348,7 @@ export default class ResearchesService extends moleculer.Service {
     });
 
     const researches: Research[] = [];
+
     Object.entries(researchesById).forEach(([cadastralId, items]) => {
       if (cadastralId) {
         researches.push(items[0]);

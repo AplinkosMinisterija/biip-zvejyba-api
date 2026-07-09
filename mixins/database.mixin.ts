@@ -83,7 +83,13 @@ export default function (opts: any = {}) {
     enabled: false,
   };
 
-  opts = _.defaultsDeep(opts, { adapter }, { cache: opts.cache || cache });
+  // @moleculer/database default is `maxLimit: -1` (unbounded). With
+  // `populate` chains that fan-out to N nested ctx.calls, a single
+  // `GET /fishings?pageSize=10000&populate=weightEvents,toolsGroup`
+  // can stall the worker and blow DB connection budget (audit security
+  // #M14). Cap to 100 by default; individual services can override
+  // by passing `maxLimit` through opts.
+  opts = _.defaultsDeep(opts, { adapter, maxLimit: 100 }, { cache: opts.cache || cache });
 
   const removeRestActions: any = {};
 
@@ -103,8 +109,18 @@ export default function (opts: any = {}) {
         return this.findEntity(ctx);
       },
 
-      async removeAllEntities(ctx: any) {
-        return await this.clearEntities(ctx);
+      // `clearEntities` is an unscoped hard `DELETE FROM <table>` (bypasses
+      // soft-delete and tenant scope). It must NEVER be HTTP-reachable: the
+      // gateway runs `mappingPolicy: 'all'`, so without `protected` any
+      // authenticated USER could `POST /<service>/removeAllEntities` and wipe
+      // every tenant's rows (security audit — mass deletion). `protected`
+      // keeps internal `broker.call`/`ctx.call` (tests, seeds) working while
+      // moleculer-web refuses to serve it (mirrors `users.resolve`).
+      removeAllEntities: {
+        visibility: 'protected',
+        handler(ctx: any) {
+          return this.clearEntities(ctx);
+        },
       },
 
       async populateByProp(
@@ -158,10 +174,10 @@ export default function (opts: any = {}) {
 
         return ids.filter((id) => queryIds.indexOf(id) >= 0);
       },
-      async rawQuery(ctx: Context, sql: string) {
-        const adapter = await this.getAdapter(ctx);
+      async rawQuery(ctx: Context, sql: string, bindings?: readonly any[]): Promise<any[]> {
+        const adapter = await (this as any).getAdapter(ctx);
         const knex = adapter.client;
-        const result = await knex.raw(sql);
+        const result = await knex.raw(sql, (bindings ?? []) as any[]);
         return result.rows;
       },
     },

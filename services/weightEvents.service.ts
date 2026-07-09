@@ -30,15 +30,21 @@ interface Fields extends CommonFields {
   date: string;
   geom: any;
   location: Location;
+  locationManual: boolean;
   fishing: Fishing['id'];
   toolsGroup: ToolsGroup['id'];
   tenant: Tenant['id'];
   user: User['id'];
 }
 
+export interface GetFishByFishingResponse {
+  fishOnShore: WeightEvent<'toolsGroup' | 'createdBy' | 'tenant'> | null;
+  fishOnBoat: Record<number, WeightEvent<'toolsGroup'>>;
+}
+
 interface Populates extends CommonPopulates {
   toolType: ToolType;
-  toolsGroup: ToolsGroup;
+  toolsGroup: ToolsGroup<'buildEvent' | 'tools'>;
   fishing: Fishing;
   tenant: Tenant;
   user: User;
@@ -55,6 +61,7 @@ export type WeightEvent<
     DbConnection(),
     PostgisMixin({
       srid: 3346,
+      geojson: { maxDecimalDigits: 2 },
     }),
     ProfileMixin,
   ],
@@ -113,10 +120,16 @@ export type WeightEvent<
         ...LocationProp,
         required: false,
       },
+      locationManual: {
+        type: 'boolean',
+        default: false,
+      },
       tenant: {
         type: 'number',
         columnType: 'integer',
         columnName: 'tenantId',
+        // Locked post-create — see security audit #H2.
+        immutable: true,
         populate: {
           action: 'tenants.resolve',
           params: {
@@ -128,6 +141,7 @@ export type WeightEvent<
         type: 'number',
         columnType: 'integer',
         columnName: 'userId',
+        immutable: true,
         populate: {
           action: 'users.resolve',
           params: {
@@ -141,11 +155,15 @@ export type WeightEvent<
       ...COMMON_SCOPES,
     },
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
-    defaultPopulates: ['toolType', 'geom'],
+    defaultPopulates: ['toolsGroup', 'geom'],
   },
   hooks: {
     before: {
       createWeightEvent: ['beforeCreate', 'beforeFishWeigh'],
+      // Scope id-based mutations to the caller — the generic update/remove
+      // are otherwise an unscoped cross-tenant edit/delete of catch records.
+      update: ['beforeMutate'],
+      remove: ['beforeMutate'],
       list: ['beforeSelect'],
       find: ['beforeSelect'],
       count: ['beforeSelect'],
@@ -173,17 +191,35 @@ export default class ToolTypesService extends moleculer.Service {
   })
   async getFishByToolsGroup(ctx: Context<{ toolsGroup: number }>) {
     const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
-    if (!currentFishing) {
-      throw new moleculer.Errors.ValidationError('Fishing not started');
+
+    // The angler app scopes the catch to the active session. Admin / journal
+    // views reach here through the toolsGroups `weightEvent` virtual populate
+    // and have no current fishing — they must NOT be rejected with
+    // "Fishing not started" (that 422'd the whole `toolsGroups/all` list in
+    // the admin įrankiai page). Fall back to the tool group's own weight
+    // history: a tools_group id is tied to a single fishing (returning a net
+    // spawns a fresh group), so the latest weight event is unambiguous with
+    // or without the fishing filter. `removeTools` still guards currentFishing
+    // before calling, so its behaviour is unchanged.
+    const query: { toolsGroup: number; fishing?: number } = {
+      toolsGroup: ctx.params.toolsGroup,
+    };
+    if (currentFishing) {
+      query.fishing = currentFishing.id;
     }
 
-    const weights = await this.findEntities(ctx, {
-      query: {
-        fishing: currentFishing.id,
-        toolsGroup: ctx.params.toolsGroup,
-      },
+    // Go through the scoped `find` (ProfileMixin `beforeSelect`) rather than
+    // the unscoped `findEntities`, so the action defends itself: it returns
+    // only weight events the caller's tenant/user may see (admins bypass the
+    // scope and see all) regardless of whether the caller pre-scoped the
+    // toolsGroup id. Dropping the in-session `fishing` filter above otherwise
+    // removed the only implicit tenant constraint (security audit follow-up).
+    // `populate: []` keeps the previous raw shape (no defaultPopulates).
+    const weights: WeightEvent[] = await ctx.call('weightEvents.find', {
+      query,
       sort: '-createdAt',
       limit: 1,
+      populate: [],
     });
     return weights[0];
   }
@@ -199,7 +235,7 @@ export default class ToolTypesService extends moleculer.Service {
         fishing: ctx.params.fishingId,
       },
       sort: 'createdAt',
-      populate: ['toolsGroup', 'geom'],
+      populate: ['toolsGroup', 'geom', 'tenant', 'createdBy'],
     });
 
     return weights?.reduce(
@@ -218,7 +254,7 @@ export default class ToolTypesService extends moleculer.Service {
           },
         };
       },
-      { fishOnShore: null, fishOnBoat: {} },
+      { fishOnShore: null, fishOnBoat: null },
     );
   }
 
@@ -231,6 +267,7 @@ export default class ToolTypesService extends moleculer.Service {
         ...LocationProp,
         optional: true,
       },
+      locationManual: { type: 'boolean', optional: true, convert: true },
       data: 'object',
     },
   })
@@ -240,6 +277,7 @@ export default class ToolTypesService extends moleculer.Service {
       coordinates: Coordinates;
       data: { [key: FishType['id']]: number };
       location?: Location;
+      locationManual?: boolean;
     }>,
   ) {
     return this.createEntity(ctx, { ...ctx.params });
@@ -263,19 +301,8 @@ export default class ToolTypesService extends moleculer.Service {
       throw new moleculer.Errors.ValidationError('Invalid fishTypes');
     }
 
-    if (!ctx.params.id) {
-      //validate if fish is already weighted
-      const fishWeight = await this.findEntity(ctx, {
-        query: {
-          fishing: currentFishing.id,
-          toolsGroup: { $exists: false },
-        },
-      });
-      if (fishWeight) {
-        throw new moleculer.Errors.ValidationError('Fish already weighted');
-      }
-    } else {
-      //toolsGroup validation
+    //toolsGroup validation
+    if (ctx.params.id) {
       const group: ToolsGroup = await ctx.call('toolsGroups.get', {
         id: ctx.params.id,
       });
@@ -283,6 +310,7 @@ export default class ToolTypesService extends moleculer.Service {
         throw new moleculer.Errors.ValidationError('Invalid group');
       }
     }
+
     ctx.params.fishing = currentFishing.id;
     const geom = coordinatesToGeometry(ctx.params.coordinates);
     ctx.params.geom = geom;
@@ -299,9 +327,13 @@ export default class ToolTypesService extends moleculer.Service {
   async getStatistics(ctx: Context<any>) {
     const data = await this.rawQuery(
       ctx,
+      // `deleted_at IS NULL` mirrors COMMON_SCOPES.notDeleted — without
+      // it the public statistics aggregated soft-deleted rows, leaking
+      // numbers from records the user (or admin) had explicitly removed
+      // (audit security #M6).
       `SELECT SUM((fish_data.value)::numeric) AS total_weight, COUNT(DISTINCT fish_data.key) AS fish_types
         FROM weight_events, LATERAL jsonb_each_text(data) AS fish_data
-        WHERE tools_group_id IS NULL;`,
+        WHERE tools_group_id IS NULL AND deleted_at IS NULL;`,
     );
 
     const locationsCount: number = await ctx.call('toolsGroups.getUniqueToolsLocationsCount');
@@ -320,35 +352,60 @@ export default class ToolTypesService extends moleculer.Service {
       path: '/uetk/statistics',
     },
     params: {
+      // Accept either an ISO date string OR an explicit {from, to} window —
+      // never an arbitrary Mongo-style operator object. The previous
+      // signature ran `JSON.parse(date)` on caller input and used the
+      // result as `query.createdAt`, which let an unauthenticated caller
+      // smuggle `{"$ne":null}` / `{"$gt":"…"}` and scrape the full
+      // weight_events dataset by cadastralId. See /cso audit Finding #7.
       date: [
         {
           type: 'string',
           optional: true,
+          // ISO-8601 prefix is enough — Postgres parses the rest.
+          pattern: '^\\d{4}-\\d{2}-\\d{2}',
         },
         {
           type: 'object',
           optional: true,
+          strict: 'remove',
+          props: {
+            from: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}', optional: true },
+            to: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}', optional: true },
+          },
         },
       ],
+      // Was `type: number, convert: true, optional: true`, which let
+      // `?fish=foo` slip through as `NaN`; the handler condition
+      // `if (fishId && Number(key) !== fishId)` then read `NaN` as
+      // falsy and skipped the per-fish filter entirely — public
+      // statistics callers got the full unfiltered dataset back. Pin
+      // the param to a positive-integer regex so the gateway rejects
+      // garbage before the handler runs (audit security #M16).
       fish: {
-        type: 'number',
-        convert: true,
+        type: 'string',
         optional: true,
+        pattern: '^[1-9][0-9]*$',
       },
     },
     auth: RestrictionType.PUBLIC,
   })
-  async getStatisticsForUETK(ctx: Context<{ date: any; fish: number }>) {
-    const { fish: fishId, date } = ctx.params;
+  async getStatisticsForUETK(
+    ctx: Context<{ date: string | { from?: string; to?: string }; fish?: string }>,
+  ) {
+    const { fish, date } = ctx.params;
+    const fishId = fish ? Number(fish) : null;
     const query: any = {
       toolsGroup: { $exists: false },
     };
 
-    if (date) {
+    if (typeof date === 'string') {
       query.createdAt = date;
-      try {
-        query.createdAt = JSON.parse(date);
-      } catch (err) {}
+    } else if (date && typeof date === 'object') {
+      const range: Record<string, string> = {};
+      if (date.from) range.$gte = date.from;
+      if (date.to) range.$lte = date.to;
+      if (Object.keys(range).length > 0) query.createdAt = range;
     }
     const events: WeightEvent<'fishing'>[] = await ctx.call('weightEvents.find', {
       query,

@@ -32,6 +32,12 @@ export const BUCKET_NAME = () => process.env.MINIO_BUCKET || 'zvejyba';
 })
 export default class MinioService extends Moleculer.Service {
   @Action({
+    // Internal helper — never expose over HTTP. Without `rest: null`,
+    // `mappingPolicy: 'all'` on the api gateway would auto-publish this
+    // at `/minio/get-url` and any authenticated USER could enumerate
+    // signed/private URLs for arbitrary objects.
+    rest: null,
+    auth: RestrictionType.ADMIN,
     params: {
       bucketName: {
         type: 'string',
@@ -58,6 +64,13 @@ export default class MinioService extends Moleculer.Service {
   }
 
   @Action({
+    // Wrapping callers (`researches.upload`, `fishTypes.upload`) reach
+    // this via internal `ctx.call`, which bypasses the gateway auth
+    // boundary — so locking the HTTP surface to ADMIN does NOT break
+    // those flows. It only prevents authenticated USERs from POSTing
+    // raw multipart bodies straight at `/minio/upload-file`.
+    rest: null,
+    auth: RestrictionType.ADMIN,
     params: {
       folder: 'string',
       types: {
@@ -158,7 +171,14 @@ export default class MinioService extends Moleculer.Service {
         },
       },
     },
-    auth: RestrictionType.PUBLIC,
+    // Was PUBLIC — let any unauthenticated caller read any private
+    // object via the service's MinIO root credentials (see /cso audit
+    // Finding #2). Now requires an authenticated USER (or higher);
+    // truly public assets (e.g. fishType photos in `uploads/fishTypes/*`)
+    // should be served via the direct MinIO URL returned by
+    // `minio.getObjectUrl()` — the bucket policy in `started()` already
+    // allows anonymous S3 GET on that prefix.
+    auth: RestrictionType.USER,
     rest: 'GET /:bucket/:name+',
   })
   async getFile(
@@ -173,6 +193,27 @@ export default class MinioService extends Moleculer.Service {
     >,
   ) {
     const { bucket, name } = ctx.params;
+
+    // Bucket allowlist: the service-root MinIO credentials can reach
+    // every bucket on the cluster (alis, biip-*, etc.). Without this
+    // check, an authenticated USER could fetch arbitrary objects from
+    // any sibling app's bucket via `GET /minio/<other-bucket>/<path>`
+    // (see security audit #C5).
+    if (bucket !== BUCKET_NAME()) {
+      return throwNotFoundError('File not found.');
+    }
+
+    // Path safety: all legit objects live under `uploads/…`. Reject
+    // anything else, and explicitly reject path-traversal segments —
+    // `..` cannot reach the parent in S3 semantics, but a future
+    // proxy/storage rewrite could, so fail closed at the boundary.
+    if (
+      !name?.length ||
+      name[0] !== 'uploads' ||
+      name.some((seg) => seg === '..' || seg === '' || seg.includes('/') || seg.includes('\\'))
+    ) {
+      return throwNotFoundError('File not found.');
+    }
 
     try {
       const reader: NodeJS.ReadableStream = await ctx.call('minio.getObject', {
@@ -193,6 +234,9 @@ export default class MinioService extends Moleculer.Service {
   }
 
   @Action({
+    // Internal-only — see `getUrl`/`uploadFile` for the rationale.
+    rest: null,
+    auth: RestrictionType.ADMIN,
     params: {
       objectName: 'string',
       bucketName: {
@@ -231,6 +275,13 @@ export default class MinioService extends Moleculer.Service {
   }
 
   @Action({
+    // Was auto-exposed at `POST /minio/remove-file` with `auth: DEFAULT`,
+    // letting any authenticated USER pass `{ path: "<bucket>/<other-user-file>" }`
+    // and delete arbitrary objects (no ownership check). See /cso audit
+    // Finding #3. Lock to ADMIN over HTTP; internal callers (if any)
+    // still reach it via `ctx.call`.
+    rest: null,
+    auth: RestrictionType.ADMIN,
     params: {
       path: 'string',
     },
@@ -239,6 +290,15 @@ export default class MinioService extends Moleculer.Service {
     const { path } = ctx.params;
 
     const [bucket, ...paths] = path.split('/');
+
+    // Bucket allowlist — same reason as `getFile` above: the service's
+    // MinIO root credentials can touch every bucket on the cluster, so a
+    // pathological caller (or future bug that lowers this action's auth
+    // tier) could delete objects in sibling biip apps' buckets (see
+    // security audit #H9). Fail closed at the boundary.
+    if (bucket !== BUCKET_NAME()) {
+      return { sucess: false };
+    }
 
     try {
       const result = await ctx.call('minio.removeObject', {

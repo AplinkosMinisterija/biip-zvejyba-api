@@ -1,9 +1,16 @@
 'use strict';
 
 import moleculer, { Context } from 'moleculer';
-import { Action, Method, Service } from 'moleculer-decorators';
-import { COMMON_DEFAULT_SCOPES, COMMON_FIELDS, COMMON_SCOPES, INNER_AUTH_GROUP_IDS, RestrictionType } from '../types';
-import { TenantUser, TenantUserRole } from './tenantUsers.service';
+import { Action, Event, Method, Service } from 'moleculer-decorators';
+import {
+  COMMON_DEFAULT_SCOPES,
+  COMMON_FIELDS,
+  COMMON_SCOPES,
+  EntityChangedParams,
+  INNER_AUTH_GROUP_IDS,
+  RestrictionType,
+} from '../types';
+import { TenantUserRole } from './tenantUsers.service';
 
 import DbConnection, { PopulateHandlerFn } from '../mixins/database.mixin';
 import { UserAuthMeta } from './api.service';
@@ -13,6 +20,8 @@ export interface Tenant {
   id: string;
   name: string;
   authGroup: string;
+  code?: string;
+  isInvestigator: boolean;
 }
 
 @Service({
@@ -21,6 +30,7 @@ export interface Tenant {
   mixins: [
     DbConnection({
       collection: 'tenants',
+      entityChangedOldEntity: true,
       createActions: {
         createMany: false,
       },
@@ -49,11 +59,21 @@ export interface Tenant {
           );
         },
         required: true,
+        // Pinned at creation time — a tenant's identity is its auth group.
+        // Without `immutable`, any ADMIN-role user could re-point an existing
+        // tenant at another company's auth group via `PUT /tenants/:id` and
+        // siphon all of that company's future E-vartai logins into this row
+        // (see security audit #C3).
+        immutable: true,
       },
       name: 'string',
       email: 'string',
       phone: 'string',
       code: 'string|required',
+      isInvestigator: {
+        type: 'boolean',
+        default: false,
+      },
       tenantUsers: {
         type: 'array',
         readonly: true,
@@ -88,6 +108,12 @@ export interface Tenant {
       rest: null,
     },
     update: {},
+    // `tenants.remove` stays at the service-level `auth: ADMIN`.
+    // An earlier hardening pass (PR #129, M4) escalated this to
+    // SUPER_ADMIN, but routine tenant lifecycle (onboarding,
+    // suspension, removal) is admin's daily job through biip-admin-web.
+    // SUPER_ADMIN tier is reserved for platform-level operations
+    // (impersonation, deep auth tools).
     remove: {},
   },
 })
@@ -100,20 +126,23 @@ export default class TenantsService extends moleculer.Service {
       companyPhone: 'string',
       companyEmail: 'string',
       companyAddress: 'string',
-
       ownerRequired: {
         type: 'boolean',
         default: false,
         required: false,
       },
-
+      isInvestigator: {
+        type: 'boolean',
+        default: false,
+        required: false,
+      },
       firstName: 'string|optional',
       lastName: 'string|optional',
       email: 'string|optional',
       phone: 'string|optional',
       personalCode: 'string|optional',
     },
-    types: UserType.ADMIN,
+    auth: UserType.ADMIN,
   })
   async invite(
     ctx: Context<
@@ -128,6 +157,7 @@ export default class TenantsService extends moleculer.Service {
         lastName?: string;
         email?: string;
         phone?: string;
+        isInvestigator?: boolean;
         personalCode?: string;
       },
       UserAuthMeta
@@ -139,18 +169,19 @@ export default class TenantsService extends moleculer.Service {
       companyPhone,
       companyEmail,
       companyAddress,
-
       ownerRequired,
-
       firstName,
       lastName,
       email,
       phone,
+      isInvestigator,
       personalCode,
     } = ctx.params;
 
-    // it will throw error if tenant aleady exists
-    const authGroup: any = await ctx.call('auth.users.invite', { companyCode });
+    // it will throw error if tenant already exists
+    const authGroup: any = await ctx.call('auth.users.invite', {
+      companyCode,
+    });
 
     const tenant: Tenant = await this.createEntity(ctx, {
       authGroup: authGroup.id,
@@ -159,6 +190,7 @@ export default class TenantsService extends moleculer.Service {
       name: companyName,
       address: companyAddress,
       code: companyCode,
+      isInvestigator,
     });
 
     if (ownerRequired) {
@@ -176,44 +208,53 @@ export default class TenantsService extends moleculer.Service {
     return tenant;
   }
 
-  @Method
-  async createAuthGroup(ctx: any) {
-    const inviteData: any = {
-      companyCode: ctx.params.companyCode,
-    };
+  // `tenants.removed` two-step cleanup:
+  //   1) tenantUsers.service.ts removes the local membership rows (`tenants.removed` handler there)
+  //   2) we remove the auth-side group here, so the auth API doesn't accumulate orphaned groups
+  //      whose IDs could later be silently reused (see security audit #L6).
+  @Event()
+  async 'tenants.removed'(ctx: Context<{ data: Tenant }>) {
+    const tenant = ctx.params.data;
+    if (!tenant?.authGroup) return;
+    try {
+      await ctx.call('auth.groups.remove', { id: tenant.authGroup });
+    } catch (err: any) {
+      this.logger.warn(
+        `[tenants.removed] auth.groups.remove failed for tenant=${tenant.id} authGroup=${tenant.authGroup}: ${err?.message}`,
+      );
+    }
+  }
 
-    if (!ctx.params.authGroup) {
-      if (ctx.params.email) {
-        inviteData.notify = [ctx.params.email];
-      }
-
-      const authGroup = await ctx.call('auth.users.invite', inviteData);
-
-      ctx.params.authGroup = authGroup.id;
+  @Event()
+  async 'tenants.created'(ctx: Context<{ data: Tenant }>) {
+    const tenant = ctx.params.data;
+    const { isInvestigator, authGroup } = tenant;
+    if (isInvestigator) {
+      await ctx.call('auth.permissions.modifyAccessForGroup', {
+        access: 'INVESTIGATOR',
+        action: 'assign',
+        group: authGroup,
+      });
     }
 
     return ctx;
   }
+  @Event()
+  async 'tenants.updated'(ctx: Context<EntityChangedParams<Tenant>, UserAuthMeta>) {
+    const { oldData: prevTenant, data: tenant } = ctx.params;
 
-  @Method
-  async removeAuthGroup(ctx: any) {
-    const tenant: Tenant = await ctx.call('tenants.resolve', {
-      id: ctx.params.id,
+    const wasInvestigator = !!prevTenant.isInvestigator;
+    const isInvestigator = !!(tenant as Tenant).isInvestigator;
+
+    if (wasInvestigator === isInvestigator) return ctx;
+
+    const action = isInvestigator ? 'assign' : 'unassign';
+
+    await ctx.call('auth.permissions.modifyAccessForGroup', {
+      access: 'INVESTIGATOR',
+      action,
+      group: (tenant as Tenant).authGroup,
     });
-
-    const tenantUsers: TenantUser[] = await ctx.call('tenantUsers.find', {
-      query: {
-        tenant: ctx.params.id,
-      },
-    });
-
-    await Promise.all(tenantUsers.map((tu) => ctx.call('tenantUsers.remove', { id: tu.id })));
-
-    const authGroup = await ctx.call('auth.groups.remove', {
-      id: tenant.authGroup,
-    });
-
-    ctx.params.authGroup = authGroup.id;
 
     return ctx;
   }
@@ -253,7 +294,16 @@ export default class TenantsService extends moleculer.Service {
     }
   }
 
-  @Action()
+  // Internal-only — used by seed/import flows that need to bypass the
+  // readonly/onCreate field hooks (e.g. setting `createdBy` from a
+  // synthetic actor). `visibility: 'protected'` hides the action from
+  // moleculer-web's `mappingPolicy: 'all'` fallback URL, where
+  // `permissive: true` would otherwise let any ADMIN forge tenant rows
+  // with arbitrary `authGroup` / `createdBy` (see security audit #H12).
+  @Action({
+    rest: null as any,
+    visibility: 'protected',
+  })
   createPermissive(ctx: Context) {
     return this.createEntity(ctx, ctx.params, {
       permissive: true,

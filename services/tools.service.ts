@@ -99,12 +99,12 @@ async function validateData({ ctx, params, entity, value }: FieldHookCallback) {
     throwIfNotExist: true,
   });
 
-  if (!value?.eyeSize) throwValidationError('Invalid tool data - no eyeSize', params);
+  //if (!value?.eyeSize) throwValidationError('Invalid tool data - no eyeSize', params);
 
   if (toolType.type === ToolCategory.NET && !value?.netLength) {
     throwValidationError('Invalid tool data - no netLength', params);
   } else if (toolType.type !== ToolCategory.NET && !value?.eyeSize2) {
-    throwValidationError('Invalid tool data - no eyeSize2', params);
+    //  throwValidationError('Invalid tool data - no eyeSize2', params);
   }
 
   return value;
@@ -154,14 +154,33 @@ async function validateData({ ctx, params, entity, value }: FieldHookCallback) {
         readonly: true,
         virtual: true,
         async populate(ctx: any, _values: any, tools: Tool[]) {
+          const user = ctx?.params?.query?.user;
+          const tenant = ctx?.params?.query?.tenant;
+
+          const query: any = {};
+
+          if (user) {
+            query.user = user;
+          }
+
+          if (tenant) {
+            query.tenant = tenant;
+          }
+
           return Promise.all(
             tools.map(async (tool: Tool) => {
               return await ctx.call('toolsGroups.findOne', {
                 query: {
-                  ...ctx.params.query,
-                  $raw: `${tool.id} = ANY(tools)`,
-                  removeEvent: { $exists: false },
+                  ...query,
+                  // Parameterized form — the template-literal version
+                  // (`${tool.id} = ANY(tools)`) was safe today because
+                  // `tool.id` is a DB-side integer, but it's the same
+                  // shape that turns into SQL injection the day anyone
+                  // copies the idiom and inlines a user-supplied value
+                  // (audit security #H11).
+                  $raw: { condition: '? = ANY(tools)', bindings: [Number(tool.id)] },
                 },
+                sort: ['-createdAt'],
                 populate: ['buildEvent'],
               });
             }),
@@ -172,6 +191,8 @@ async function validateData({ ctx, params, entity, value }: FieldHookCallback) {
         type: 'number',
         columnType: 'integer',
         columnName: 'tenantId',
+        // Locked post-create — see security audit #H2.
+        immutable: true,
         populate: {
           action: 'tenants.resolve',
           params: {
@@ -183,6 +204,7 @@ async function validateData({ ctx, params, entity, value }: FieldHookCallback) {
         type: 'number',
         columnType: 'integer',
         columnName: 'userId',
+        immutable: true,
         populate: {
           action: 'users.resolve',
           params: {
@@ -196,18 +218,25 @@ async function validateData({ ctx, params, entity, value }: FieldHookCallback) {
       ...COMMON_SCOPES,
     },
     defaultScopes: [...COMMON_DEFAULT_SCOPES],
-    defaultPopulates: ['toolType'],
+    defaultPopulates: ['toolsGroup', 'toolType'],
   },
   hooks: {
     before: {
       create: ['beforeCreate'],
       remove: ['beforeDelete'],
+      // `remove` has its own ownership check (`beforeDelete`); the generic
+      // `update` had none, so a USER could overwrite another tenant's sealed
+      // tool by id. `beforeMutate` scopes it to the caller.
+      update: ['beforeMutate'],
       availableTools: ['beforeSelect'],
       list: ['beforeSelect'],
       find: ['beforeSelect'],
       count: ['beforeSelect'],
       get: ['beforeSelect'],
       all: ['beforeSelect'],
+    },
+    after: {
+      create: ['afterCreate'],
     },
   },
 })
@@ -217,11 +246,11 @@ export default class ToolTypesService extends moleculer.Service {
     auth: RestrictionType.USER,
   })
   async availableTools(ctx: Context<any, UserAuthMeta>) {
-    const tools: Tool[] = await this.findEntities(ctx, {
+    const tools: Tool<'toolsGroup'>[] = await this.findEntities(ctx, {
       ...ctx.params,
       populate: ['toolsGroup', 'toolType'],
     });
-    return tools?.filter((tool) => !tool.toolsGroup);
+    return tools?.filter((tool) => !tool.toolsGroup.buildEvent);
   }
 
   @Method
@@ -240,9 +269,22 @@ export default class ToolTypesService extends moleculer.Service {
         throw new moleculer.Errors.ValidationError('Cannot delete tool');
       }
       //validate if tool is in the water
-      if (tool.toolsGroup) {
+      if (!!tool.toolsGroup?.buildEvent) {
         throw new moleculer.Errors.ValidationError('Tools is in use');
       }
     }
+  }
+
+  @Method
+  async afterCreate(ctx: Context<any, UserAuthMeta>, entity: any) {
+    const toolId = entity?.id;
+    const userId = ctx.meta.user.id;
+    const tenantId = ctx.meta.profile;
+
+    await ctx.call('toolsGroups.create', {
+      tools: [toolId],
+      user: userId,
+      tenant: tenantId,
+    });
   }
 }

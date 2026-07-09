@@ -1,6 +1,6 @@
 'use strict';
 
-import moleculer from 'moleculer';
+import moleculer, { Context } from 'moleculer';
 import { Service } from 'moleculer-decorators';
 import PostgisMixin from 'moleculer-postgis';
 import DbConnection from '../mixins/database.mixin';
@@ -44,6 +44,7 @@ export type FishingEvent<
     DbConnection(),
     PostgisMixin({
       srid: 3346,
+      geojson: { maxDecimalDigits: 2 },
     }),
     ProfileMixin,
   ],
@@ -71,6 +72,8 @@ export type FishingEvent<
         type: 'number',
         columnType: 'integer',
         columnName: 'tenantId',
+        // Locked post-create — see security audit #H2.
+        immutable: true,
         populate: {
           action: 'tenants.resolve',
           params: {
@@ -82,11 +85,23 @@ export type FishingEvent<
         type: 'number',
         columnType: 'integer',
         columnName: 'userId',
-        populate: {
-          action: 'users.resolve',
-          params: {
-            scope: false,
-          },
+        // Locked post-create — see security audit #H2.
+        immutable: true,
+        // NULL user_id reiškia, kad event'ą sukūrė sistema (pvz., midnight
+        // cron'as uždarinėjantis nepataikytas žvejybas) — populate grąžina
+        // sintetinį Sistema actor'ą, kad UI galėtų atskirti nuo realaus
+        // vartotojo be magic id reikšmės.
+        async populate(ctx: Context, values: Array<number | null>) {
+          const realIds = Array.from(new Set(values.filter((v): v is number => v != null)));
+          const users: User[] = realIds.length
+            ? await ctx.call('users.resolve', { id: realIds, scope: false })
+            : [];
+          const byId = new Map(users.map((u) => [u.id, u]));
+          return values.map((v) =>
+            v == null
+              ? { id: null, firstName: 'Sistema', lastName: '', isSystem: true }
+              : byId.get(v),
+          );
         },
       },
       ...COMMON_FIELDS,
@@ -111,6 +126,10 @@ export type FishingEvent<
   hooks: {
     before: {
       create: ['beforeCreate'],
+      // Cross-tenant IDOR guard for id-based mutations (the read scope in
+      // `beforeSelect` does not run on update/remove).
+      update: ['beforeMutate'],
+      remove: ['beforeMutate'],
       list: ['beforeSelect'],
       find: ['beforeSelect'],
       count: ['beforeSelect'],

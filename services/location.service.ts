@@ -1,12 +1,22 @@
 'use strict';
 
-import { find, isEmpty, map } from 'lodash';
+import centroid from '@turf/centroid';
 import moleculer, { Context } from 'moleculer';
 import { Action, Method, Service } from 'moleculer-decorators';
 import { GeomFeatureCollection, coordinatesToGeometry } from '../modules/geometry';
-import { LocationType } from '../types';
+import { LocationType, throwNotFoundError } from '../types';
 import { UserAuthMeta } from './api.service';
 import { FishingType } from './fishings.service';
+
+// External GIS / UETK calls must not block the Node event loop
+// indefinitely. Without a per-request timeout, a slow upstream (UETK
+// outage, network partition) chews through worker capacity until the
+// whole API serializes behind the dead socket (see security audit #H5).
+const EXTERNAL_FETCH_TIMEOUT_MS = 10_000;
+const externalFetch = (
+  input: Parameters<typeof fetch>[0],
+  init: Parameters<typeof fetch>[1] = {},
+) => fetch(input, { ...init, signal: AbortSignal.timeout(EXTERNAL_FETCH_TIMEOUT_MS) });
 
 export const CoordinatesProp = {
   type: 'object',
@@ -26,6 +36,11 @@ export const LocationProp = {
   properties: {
     id: 'string',
     name: 'string',
+    // `type` is what lets `toolsGroupsByLocation` differentiate between a
+    // polder and an estuary bar that happen to share an id; without listing
+    // it here moleculer's validator (`strict: 'remove'`) silently drops it
+    // before the location lands in the JSONB column.
+    type: { type: 'string', optional: true },
     municipality: {
       type: 'object',
       properties: {
@@ -44,12 +59,6 @@ export type Location = {
     name: string;
   };
 };
-
-interface LocationResult {
-  cadastral_id: string;
-  name: string;
-  municipality: string;
-}
 
 const getBox = (geom: GeomFeatureCollection, tolerance: number = 0.001) => {
   const coordinates: any = geom.features[0].geometry.coordinates;
@@ -76,7 +85,14 @@ export default class LocationsService extends moleculer.Service {
     let query = ctx.params.query;
 
     if (typeof query === 'string') {
-      query = JSON.parse(query);
+      // Earlier `JSON.parse(query)` ran unguarded — a malformed string
+      // bubbled up as an opaque 500. Convert parse failures into a clean
+      // 422 (audit security #M12).
+      try {
+        query = JSON.parse(query);
+      } catch {
+        throw new moleculer.Errors.ValidationError('Invalid query JSON');
+      }
     }
 
     if (!query?.coordinates) {
@@ -86,7 +102,7 @@ export default class LocationsService extends moleculer.Service {
 
     const geom = coordinatesToGeometry({ x: Number(x), y: Number(y) });
     if (query.type === FishingType.ESTUARY) {
-      return this.getBarFromPoint(geom);
+      return this.getFishingSectionFromPoint(geom);
     } else if (query.type === FishingType.INLAND_WATERS) {
       return this.getRiverOrLakeFromPoint(geom);
     } else if (query.type === FishingType.POLDERS) {
@@ -96,21 +112,51 @@ export default class LocationsService extends moleculer.Service {
     }
   }
 
-  @Action()
-  async getLocationsByCadastralIds(ctx: Context<{ locations: string[] }>) {
-    const promises = map(ctx.params.locations, (location) =>
-      ctx.call('locations.search', { search: location }),
-    );
-
-    const result: any = await Promise.all(promises);
-
-    const data: LocationResult[] = [];
-    for (const item of result) {
-      if (!isEmpty(item)) {
-        data.push(item[0]);
-      }
+  @Action({
+    params: {
+      cadastralId: [{ type: 'string' }, { type: 'array', items: 'string' }],
+    },
+  })
+  async uetkSearchByCadastralId(
+    ctx: Context<
+      {
+        cadastralId: string | string[];
+      },
+      UserAuthMeta
+    >,
+  ) {
+    const targetUrl = `${process.env.UETK_URL}/objects`;
+    const searchParams = new URLSearchParams();
+    const multi = typeof ctx.params.cadastralId !== 'string';
+    let query;
+    if (multi) {
+      query = { cadastralId: { $in: ctx.params.cadastralId } };
+    } else {
+      query = { cadastralId: ctx.params.cadastralId };
     }
-    return data;
+    if (!query) return multi ? [] : undefined;
+
+    searchParams.set('query', JSON.stringify(query));
+    searchParams.set(
+      'fields',
+      ['id', 'cadastralId', 'name', 'municipality', 'municipalityCode'].join(','),
+    );
+    const queryString = searchParams.toString();
+
+    const url = `${targetUrl}?${queryString}`;
+
+    const data = await externalFetch(url).then((r) => r.json());
+    const locations = data?.rows;
+    if (!locations || !locations.length) return multi ? [] : undefined;
+    const mappedLocations = locations.map((location: any) => {
+      const municipality = { name: location.municipality, id: location.municipalityCode };
+      return {
+        id: location.cadastralId,
+        name: location.name,
+        municipality: municipality,
+      };
+    });
+    return multi ? mappedLocations : mappedLocations[0];
   }
 
   @Action({
@@ -119,8 +165,8 @@ export default class LocationsService extends moleculer.Service {
       ttl: 24 * 60 * 60,
     },
   })
-  async getMunicipalities(ctx: Context) {
-    const res = await fetch(
+  async getMunicipalities() {
+    const res = await externalFetch(
       `${process.env.GEO_SERVER}/qgisserver/uetk_zuvinimas?SERVICE=WFS&REQUEST=GetFeature&TYPENAME=municipalities&OUTPUTFORMAT=application/json&propertyName=pavadinimas,kodas`,
       {
         method: 'GET',
@@ -150,15 +196,49 @@ export default class LocationsService extends moleculer.Service {
   }
 
   @Action({
-    params: {
-      id: 'number',
+    rest: 'GET /fishing_sections',
+    cache: {
+      ttl: 24 * 60 * 60,
     },
   })
-  async findMunicipalityById(ctx: Context<{ id: number }>) {
-    const municipalities = await this.actions.getMunicipalities(null, {
-      parentCtx: ctx,
+  async getFishingSections() {
+    const url = `${process.env.GEO_SERVER}/api/zuvinimas_barai/collections/fishing_sections/items.json?limit=1000`;
+    const fishingSections = await externalFetch(url, {
+      headers: {
+        'Content-Type': 'application/json',
+      },
     });
-    return find(municipalities?.rows, { id: ctx.params.id });
+    const { features } = await fishingSections.json();
+    const sorted = features.sort((a: any, b: any) => {
+      const numA = parseInt(a.properties.name.match(/\d+/)[0], 10);
+      const numB = parseInt(b.properties.name.match(/\d+/)[0], 10);
+
+      if (numA !== numB) {
+        return numA - numB;
+      } else {
+        return a.properties.name.localeCompare(b.properties.name);
+      }
+    });
+
+    return await Promise.all(
+      sorted.map(async (item: any) => {
+        const centerFeature = centroid(item?.geometry);
+        const geometry = coordinatesToGeometry({
+          x: centerFeature?.geometry?.coordinates[0],
+          y: centerFeature?.geometry?.coordinates[1],
+        });
+        const municipality = await this.getMunicipalityFromPoint(geometry);
+        const coordinates = centerFeature?.geometry?.coordinates;
+        return {
+          x: coordinates[0],
+          y: coordinates[1],
+          id: item?.properties?.id,
+          name: item?.properties?.name,
+          type: LocationType.ESTUARY,
+          municipality,
+        };
+      }),
+    );
   }
 
   @Method
@@ -168,7 +248,7 @@ export default class LocationsService extends moleculer.Service {
         const box = getBox(geom, 200);
 
         const bodyOfWatersUrl = `${process.env.GEO_SERVER}/qgisserver/uetk_public?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetFeatureInfo&QUERY_LAYERS=upes%2Cezerai_tvenkiniai&INFO_FORMAT=application%2Fjson&FEATURE_COUNT=1000&X=50&Y=50&SRS=EPSG%3A3346&STYLES=&WIDTH=101&HEIGHT=101&BBOX=${box}`;
-        const bodyOfWatersData = await fetch(bodyOfWatersUrl, {
+        const bodyOfWatersData = await externalFetch(bodyOfWatersUrl, {
           headers: {
             'Content-Type': 'application/json',
           },
@@ -181,7 +261,7 @@ export default class LocationsService extends moleculer.Service {
 
         const municipality = await this.getMunicipalityFromPoint(geom);
 
-        const mappedList = map(features, (item) => {
+        const mappedList = features?.map((item: any) => {
           const { properties } = item;
           return {
             id: properties['2. Kadastro identifikavimo kodas'],
@@ -201,51 +281,52 @@ export default class LocationsService extends moleculer.Service {
   }
 
   @Method
-  async getBarFromPoint(geom: GeomFeatureCollection) {
+  async getFishingSectionFromPoint(geom: GeomFeatureCollection) {
     if (geom?.features?.length) {
-      try {
-        const box = getBox(geom);
-        const bars = `${process.env.GEO_SERVER}/qgisserver/zuvinimas_barai?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetFeatureInfo&QUERY_LAYERS=fishing_sections&INFO_FORMAT=application%2Fjson&FEATURE_COUNT=1000&X=50&Y=50&SRS=EPSG%3A3346&STYLES=&WIDTH=101&HEIGHT=101&BBOX=${box}`;
-        const barsData = await fetch(bars, {
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        });
-        const { features } = await barsData.json();
-        if (!features?.length) {
-          return null;
-        }
-        const municipality = await this.getMunicipalityFromPoint(geom);
-
-        const mappedList = map(features, (feature) => {
-          return {
-            id: feature.properties.id,
-            name: feature.properties.name,
-            type: LocationType.ESTUARY,
-            municipality: municipality,
-          };
-        });
-
-        return mappedList[0];
-      } catch (err) {
-        throw new moleculer.Errors.ValidationError(err.message);
+      const box = getBox(geom);
+      const bars = `${process.env.GEO_SERVER}/qgisserver/zuvinimas_barai?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetFeatureInfo&QUERY_LAYERS=fishing_sections&INFO_FORMAT=application%2Fjson&FEATURE_COUNT=1000&X=50&Y=50&SRS=EPSG%3A3346&STYLES=&WIDTH=101&HEIGHT=101&BBOX=${box}`;
+      const barsData = await externalFetch(bars, {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      const { features } = await barsData.json();
+      if (!features?.length) {
+        throwNotFoundError('Location not found');
       }
+      const municipality = await this.getMunicipalityFromPoint(geom);
+
+      const mappedList = features?.map((feature: any) => {
+        return {
+          id: feature.properties.id,
+          name: feature.properties.name,
+          type: LocationType.ESTUARY,
+          municipality: municipality,
+        };
+      });
+      const location = mappedList[0];
+
+      if (!location) {
+        throwNotFoundError('Location not found');
+      }
+
+      return location;
     } else {
-      throw new moleculer.Errors.ValidationError('Invalid geometry');
+      throwNotFoundError('Location not found');
     }
   }
 
   @Method
   async getMunicipalityFromPoint(geom: GeomFeatureCollection) {
     const box = getBox(geom);
-
     const endPoint = `${process.env.GEO_SERVER}/qgisserver/administrative_boundaries?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetFeatureInfo&QUERY_LAYERS=municipalities&INFO_FORMAT=application%2Fjson&FEATURE_COUNT=1000&X=50&Y=50&SRS=EPSG%3A3346&STYLES=&WIDTH=101&HEIGHT=101&BBOX=${box}`;
-    const data = await fetch(endPoint, {
+    const response = await externalFetch(endPoint, {
       headers: {
         'Content-Type': 'application/json',
       },
-    });
-    const { features } = await data.json();
+    }).then((r) => r.json());
+
+    const features = response.features;
     if (!features.length) {
       return null;
     }
