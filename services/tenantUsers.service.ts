@@ -248,7 +248,9 @@ export default class TenantUsersService extends moleculer.Service {
       });
 
       const authRole =
-        role === TenantUserRole.USER_ADMIN ? AuthGroupRole.ADMIN : AuthGroupRole.USER;
+        role === TenantUserRole.OWNER || role === TenantUserRole.USER_ADMIN
+          ? AuthGroupRole.ADMIN
+          : AuthGroupRole.USER;
 
       await ctx.call('auth.users.assignToGroup', {
         id: currentUser.authUser,
@@ -327,7 +329,10 @@ export default class TenantUsersService extends moleculer.Service {
       id: tenantId,
     });
 
-    const authRole = role === TenantUserRole.OWNER ? AuthGroupRole.ADMIN : AuthGroupRole.USER;
+    const authRole =
+      role === TenantUserRole.OWNER || role === TenantUserRole.USER_ADMIN
+        ? AuthGroupRole.ADMIN
+        : AuthGroupRole.USER;
 
     const inviteData: any = {
       personalCode,
