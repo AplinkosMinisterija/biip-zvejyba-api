@@ -24,6 +24,7 @@ import { FishType } from './fishTypes.service';
 import { Coordinates, CoordinatesProp, Location } from './location.service';
 import { Polder } from './polders.service';
 import { Tenant } from './tenants.service';
+import { ToolCategory } from './toolTypes.service';
 import { User } from './users.service';
 import { GetFishByFishingResponse, WeightEvent } from './weightEvents.service';
 
@@ -69,7 +70,7 @@ interface Fields extends CommonFields {
   user: User['id'];
   weightEvents: any;
   hasManualLocation: boolean;
-  toolTypes: string[];
+  toolCategories: ToolCategory[];
 }
 
 interface Populates extends CommonPopulates {
@@ -225,35 +226,36 @@ export type Fishing<
           return fishings.map((f) => flaggedSet.has(Number(f.id)));
         },
       },
-      toolTypes: {
+      toolCategories: {
         type: 'array',
         items: 'string',
         readonly: true,
         virtual: true,
         async populate(ctx: any, _values: any, fishings: Fishing[]) {
-          // Distinct tool-type labels used during the fishing, so the admin
-          // journal can show "which gear" per row without opening the
-          // fishing. Same source as the detail page's tools list
-          // (`toolsGroupsEvents` of this fishing -> toolsGroup.tools).
+          // Which KINDS of gear the fishing used — NET / CATCHER, not the
+          // `toolTypes.label` taxonomy. The labels carry mesh sizes
+          // ("Statomieji tinklaičiai 45-50 mm"); the admin journal wants the
+          // bare category, so the column stays scannable.
           //
-          // Raw SQL via a dedicated action for the same reason as
-          // `hasManualLocation` above (see CLAUDE.md -> "Virtual-field
-          // populate gotchas").
+          // Same source as the detail page's tools list (`toolsGroupsEvents`
+          // of this fishing -> toolsGroup.tools). Raw SQL via a dedicated
+          // action for the same reason as `hasManualLocation` above (see
+          // CLAUDE.md -> "Virtual-field populate gotchas").
           if (!fishings.length) return [];
           const ids = fishings.map((f) => Number(f.id)).filter(Number.isFinite);
           if (!ids.length) return fishings.map(() => []);
-          const rows: Array<{ fishingId: number; label: string }> = await ctx.call(
-            'fishings.getToolTypeLabels',
+          const rows: Array<{ fishingId: number; category: ToolCategory }> = await ctx.call(
+            'fishings.getToolCategories',
             { fishingIds: ids },
           );
-          const labelsByFishing = new Map<number, string[]>();
+          const categoriesByFishing = new Map<number, ToolCategory[]>();
           for (const row of rows) {
             const key = Number(row.fishingId);
-            const labels = labelsByFishing.get(key) || [];
-            labels.push(row.label);
-            labelsByFishing.set(key, labels);
+            const categories = categoriesByFishing.get(key) || [];
+            categories.push(row.category);
+            categoriesByFishing.set(key, categories);
           }
-          return fishings.map((f) => labelsByFishing.get(Number(f.id)) || []);
+          return fishings.map((f) => categoriesByFishing.get(Number(f.id)) || []);
         },
       },
       location: {
@@ -872,9 +874,9 @@ export default class FishTypesService extends moleculer.Service {
     return rows.map((r) => Number(r.fishing_id)).filter(Number.isFinite);
   }
 
-  // Internal helper for the `toolTypes` virtual field on Fishing. Returns one
-  // row per (fishing, distinct tool type) pair, alphabetical, so the caller
-  // can group without a second pass.
+  // Internal helper for the `toolCategories` virtual field on Fishing. Returns
+  // one row per (fishing, distinct gear category) pair, alphabetical, so the
+  // caller can group without a second pass.
   //
   // Two shapes matter here: a tools group points AT its events
   // (`tools_groups.build_event_id` / `remove_event_id`) — the events table has
@@ -886,14 +888,14 @@ export default class FishTypesService extends moleculer.Service {
       fishingIds: { type: 'array', items: 'number|convert', min: 1 },
     },
   })
-  async getToolTypeLabels(
+  async getToolCategories(
     ctx: Context<{ fishingIds: number[] }>,
-  ): Promise<Array<{ fishingId: number; label: string }>> {
+  ): Promise<Array<{ fishingId: number; category: ToolCategory }>> {
     const ids = (ctx.params.fishingIds || []).map(Number).filter(Number.isFinite);
     if (!ids.length) return [];
-    const rows: Array<{ fishing_id: number; label: string }> = await this.rawQuery(
+    const rows: Array<{ fishing_id: number; type: ToolCategory }> = await this.rawQuery(
       ctx,
-      `SELECT DISTINCT tge.fishing_id, tt.label
+      `SELECT DISTINCT tge.fishing_id, tt.type
          FROM tools_groups_events tge
          JOIN tools_groups tg
            ON (tg.build_event_id = tge.id OR tg.remove_event_id = tge.id)
@@ -901,10 +903,10 @@ export default class FishTypesService extends moleculer.Service {
          JOIN tools t ON t.id = ANY(tg.tools) AND t.deleted_at IS NULL
          JOIN tool_types tt ON tt.id = t.tool_type_id AND tt.deleted_at IS NULL
         WHERE tge.fishing_id = ANY(?) AND tge.deleted_at IS NULL
-        ORDER BY tt.label`,
+        ORDER BY tt.type`,
       [ids],
     );
-    return rows.map((r) => ({ fishingId: Number(r.fishing_id), label: r.label }));
+    return rows.map((r) => ({ fishingId: Number(r.fishing_id), category: r.type }));
   }
 
   @Action({

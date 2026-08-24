@@ -5,9 +5,9 @@ import request from 'supertest';
 import { ApiHelper, serviceBrokerConfig } from '../../helpers/api';
 
 // The admin journal shows one "Žvejybos įrankių tipas" column per fishing, fed
-// by the `toolTypes` virtual field. It must list each tool type used in the
-// fishing exactly once (a fishing usually deploys several groups of the same
-// type) and stay empty for a fishing with no tools in the water.
+// by the `toolCategories` virtual field. It carries the gear KIND (NET /
+// CATCHER) — never the `toolTypes.label` taxonomy, whose names bake in mesh
+// sizes. A fishing may show one category, both, or none.
 const broker = new ServiceBroker(serviceBrokerConfig);
 const apiHelper = new ApiHelper(broker);
 const apiService = apiHelper.initializeServices();
@@ -22,8 +22,6 @@ const sampleLocation = {
 
 let ownerMeta: any;
 let fishingId: any;
-let labelA: string;
-let labelB: string;
 
 beforeAll(async () => {
   await broker.start();
@@ -31,14 +29,15 @@ beforeAll(async () => {
   ownerMeta = apiHelper.meta(apiHelper.ownerA, apiHelper.tenantA.tenant.id);
 
   const toolTypes: any[] = await broker.call('toolTypes.find');
-  labelA = toolTypes[0].label;
-  labelB = toolTypes[1].label;
+  const nets = toolTypes.filter((t) => t.type === 'NET');
+  const catcher = toolTypes.find((t) => t.type === 'CATCHER');
 
-  // Two tools of type A and one of type B — the duplicate proves de-duplication.
+  // Two DIFFERENT net types plus one catcher: proves the column collapses to
+  // the category, so the two nets show up as a single "NET".
   const seals = [
-    { sealNr: 'S-TT-1', toolType: toolTypes[0].id },
-    { sealNr: 'S-TT-2', toolType: toolTypes[0].id },
-    { sealNr: 'S-TT-3', toolType: toolTypes[1].id },
+    { sealNr: 'S-TC-1', toolType: nets[0].id },
+    { sealNr: 'S-TC-2', toolType: nets[1].id },
+    { sealNr: 'S-TC-3', toolType: catcher.id },
   ];
   for (const tool of seals) {
     await broker.call(
@@ -70,17 +69,26 @@ afterAll(() => broker.stop());
 
 const rowOf = (res: any, id: any) => (res.body.rows ?? []).find((r: any) => r.id === id);
 
-describe('fishings — toolTypes virtual field', () => {
-  it('lists each deployed tool type once, alphabetically', async () => {
-    const res = await request(apiService.server)
-      .get('/zvejyba/api/fishings')
-      .set(apiHelper.getHeaders(apiHelper.ownerA.token, apiHelper.tenantA.tenant.id))
-      .query({ populate: 'toolTypes' })
-      .expect(200);
+const journal = () =>
+  request(apiService.server)
+    .get('/zvejyba/api/fishings')
+    .set(apiHelper.getHeaders(apiHelper.ownerA.token, apiHelper.tenantA.tenant.id))
+    .query({ populate: 'toolCategories' })
+    .expect(200);
 
-    const row = rowOf(res, fishingId);
+describe('fishings — toolCategories virtual field', () => {
+  it('collapses tool types to their category, once each', async () => {
+    const row = rowOf(await journal(), fishingId);
     expect(row).toBeTruthy();
-    expect(row.toolTypes).toEqual([labelA, labelB].sort());
+    // Two distinct NET types + one CATCHER -> exactly two categories.
+    expect(row.toolCategories).toEqual(['CATCHER', 'NET']);
+  });
+
+  it('never leaks the tool-type label (which carries mesh sizes)', async () => {
+    const row = rowOf(await journal(), fishingId);
+    for (const value of row.toolCategories) {
+      expect(['NET', 'CATCHER']).toContain(value);
+    }
   });
 
   it('is an empty array for a fishing with no tools in the water', async () => {
@@ -94,12 +102,6 @@ describe('fishings — toolTypes virtual field', () => {
       { meta: { authToken: apiHelper.superAdmin.token } },
     );
 
-    const res = await request(apiService.server)
-      .get('/zvejyba/api/fishings')
-      .set(apiHelper.getHeaders(apiHelper.ownerA.token, apiHelper.tenantA.tenant.id))
-      .query({ populate: 'toolTypes' })
-      .expect(200);
-
-    expect(rowOf(res, bare.id)?.toolTypes).toEqual([]);
+    expect(rowOf(await journal(), bare.id)?.toolCategories).toEqual([]);
   });
 });
