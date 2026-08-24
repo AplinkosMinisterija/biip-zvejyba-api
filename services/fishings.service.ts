@@ -69,6 +69,7 @@ interface Fields extends CommonFields {
   user: User['id'];
   weightEvents: any;
   hasManualLocation: boolean;
+  toolTypes: string[];
 }
 
 interface Populates extends CommonPopulates {
@@ -222,6 +223,37 @@ export type Fishing<
           });
           const flaggedSet = new Set(flagged.map(Number));
           return fishings.map((f) => flaggedSet.has(Number(f.id)));
+        },
+      },
+      toolTypes: {
+        type: 'array',
+        items: 'string',
+        readonly: true,
+        virtual: true,
+        async populate(ctx: any, _values: any, fishings: Fishing[]) {
+          // Distinct tool-type labels used during the fishing, so the admin
+          // journal can show "which gear" per row without opening the
+          // fishing. Same source as the detail page's tools list
+          // (`toolsGroupsEvents` of this fishing -> toolsGroup.tools).
+          //
+          // Raw SQL via a dedicated action for the same reason as
+          // `hasManualLocation` above (see CLAUDE.md -> "Virtual-field
+          // populate gotchas").
+          if (!fishings.length) return [];
+          const ids = fishings.map((f) => Number(f.id)).filter(Number.isFinite);
+          if (!ids.length) return fishings.map(() => []);
+          const rows: Array<{ fishingId: number; label: string }> = await ctx.call(
+            'fishings.getToolTypeLabels',
+            { fishingIds: ids },
+          );
+          const labelsByFishing = new Map<number, string[]>();
+          for (const row of rows) {
+            const key = Number(row.fishingId);
+            const labels = labelsByFishing.get(key) || [];
+            labels.push(row.label);
+            labelsByFishing.set(key, labels);
+          }
+          return fishings.map((f) => labelsByFishing.get(Number(f.id)) || []);
         },
       },
       location: {
@@ -838,6 +870,41 @@ export default class FishTypesService extends moleculer.Service {
       [ids, ids],
     );
     return rows.map((r) => Number(r.fishing_id)).filter(Number.isFinite);
+  }
+
+  // Internal helper for the `toolTypes` virtual field on Fishing. Returns one
+  // row per (fishing, distinct tool type) pair, alphabetical, so the caller
+  // can group without a second pass.
+  //
+  // Two shapes matter here: a tools group points AT its events
+  // (`tools_groups.build_event_id` / `remove_event_id`) — the events table has
+  // no `tools_group_id` (dropped in 20231110203315) — and `tools_groups.tools`
+  // is an int[] of tool ids, hence the `= ANY(...)` join. Raw SQL for the same
+  // reason as `getManualLocationFlags`. No `rest` — internal-only.
+  @Action({
+    params: {
+      fishingIds: { type: 'array', items: 'number|convert', min: 1 },
+    },
+  })
+  async getToolTypeLabels(
+    ctx: Context<{ fishingIds: number[] }>,
+  ): Promise<Array<{ fishingId: number; label: string }>> {
+    const ids = (ctx.params.fishingIds || []).map(Number).filter(Number.isFinite);
+    if (!ids.length) return [];
+    const rows: Array<{ fishing_id: number; label: string }> = await this.rawQuery(
+      ctx,
+      `SELECT DISTINCT tge.fishing_id, tt.label
+         FROM tools_groups_events tge
+         JOIN tools_groups tg
+           ON (tg.build_event_id = tge.id OR tg.remove_event_id = tge.id)
+          AND tg.deleted_at IS NULL
+         JOIN tools t ON t.id = ANY(tg.tools) AND t.deleted_at IS NULL
+         JOIN tool_types tt ON tt.id = t.tool_type_id AND tt.deleted_at IS NULL
+        WHERE tge.fishing_id = ANY(?) AND tge.deleted_at IS NULL
+        ORDER BY tt.label`,
+      [ids],
+    );
+    return rows.map((r) => ({ fishingId: Number(r.fishing_id), label: r.label }));
   }
 
   @Action({
