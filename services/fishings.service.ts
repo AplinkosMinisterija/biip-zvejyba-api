@@ -226,36 +226,38 @@ export type Fishing<
           return fishings.map((f) => flaggedSet.has(Number(f.id)));
         },
       },
+      // Gear KIND (NET / CATCHER), never the `toolTypes.label` taxonomy — those
+      // names bake in mesh sizes ("Statomieji tinklaičiai 45-50 mm").
       toolCategories: {
         type: 'array',
         items: 'string',
         readonly: true,
         virtual: true,
-        async populate(ctx: any, _values: any, fishings: Fishing[]) {
-          // Which KINDS of gear the fishing used — NET / CATCHER, not the
-          // `toolTypes.label` taxonomy. The labels carry mesh sizes
-          // ("Statomieji tinklaičiai 45-50 mm"); the admin journal wants the
-          // bare category, so the column stays scannable.
-          //
-          // Same source as the detail page's tools list (`toolsGroupsEvents`
-          // of this fishing -> toolsGroup.tools). Raw SQL via a dedicated
-          // action for the same reason as `hasManualLocation` above (see
-          // CLAUDE.md -> "Virtual-field populate gotchas").
-          if (!fishings.length) return [];
+        async populate(this: moleculer.Service, ctx: Context, _values: any, fishings: Fishing[]) {
           const ids = fishings.map((f) => Number(f.id)).filter(Number.isFinite);
           if (!ids.length) return fishings.map(() => []);
-          const rows: Array<{ fishingId: number; category: ToolCategory }> = await ctx.call(
-            'fishings.getToolCategories',
-            { fishingIds: ids },
+
+          // A tools group points AT its events (`build_event_id` /
+          // `remove_event_id`); `tools_groups_events` has no `tools_group_id`
+          // (dropped in 20231110203315). `tools_groups.tools` is an int[].
+          // Raw SQL — see CLAUDE.md -> "Virtual-field populate gotchas".
+          const rows: Array<{ fishing_id: number; type: ToolCategory }> = await this.rawQuery(
+            ctx,
+            `SELECT DISTINCT tge.fishing_id, tt.type
+               FROM tools_groups_events tge
+               JOIN tools_groups tg
+                 ON (tg.build_event_id = tge.id OR tg.remove_event_id = tge.id)
+                AND tg.deleted_at IS NULL
+               JOIN tools t ON t.id = ANY(tg.tools) AND t.deleted_at IS NULL
+               JOIN tool_types tt ON tt.id = t.tool_type_id AND tt.deleted_at IS NULL
+              WHERE tge.fishing_id = ANY(?) AND tge.deleted_at IS NULL
+              ORDER BY tt.type`,
+            [ids],
           );
-          const categoriesByFishing = new Map<number, ToolCategory[]>();
-          for (const row of rows) {
-            const key = Number(row.fishingId);
-            const categories = categoriesByFishing.get(key) || [];
-            categories.push(row.category);
-            categoriesByFishing.set(key, categories);
-          }
-          return fishings.map((f) => categoriesByFishing.get(Number(f.id)) || []);
+
+          return fishings.map((f) =>
+            rows.filter((r) => Number(r.fishing_id) === Number(f.id)).map((r) => r.type),
+          );
         },
       },
       location: {
@@ -872,41 +874,6 @@ export default class FishTypesService extends moleculer.Service {
       [ids, ids],
     );
     return rows.map((r) => Number(r.fishing_id)).filter(Number.isFinite);
-  }
-
-  // Internal helper for the `toolCategories` virtual field on Fishing. Returns
-  // one row per (fishing, distinct gear category) pair, alphabetical, so the
-  // caller can group without a second pass.
-  //
-  // Two shapes matter here: a tools group points AT its events
-  // (`tools_groups.build_event_id` / `remove_event_id`) — the events table has
-  // no `tools_group_id` (dropped in 20231110203315) — and `tools_groups.tools`
-  // is an int[] of tool ids, hence the `= ANY(...)` join. Raw SQL for the same
-  // reason as `getManualLocationFlags`. No `rest` — internal-only.
-  @Action({
-    params: {
-      fishingIds: { type: 'array', items: 'number|convert', min: 1 },
-    },
-  })
-  async getToolCategories(
-    ctx: Context<{ fishingIds: number[] }>,
-  ): Promise<Array<{ fishingId: number; category: ToolCategory }>> {
-    const ids = (ctx.params.fishingIds || []).map(Number).filter(Number.isFinite);
-    if (!ids.length) return [];
-    const rows: Array<{ fishing_id: number; type: ToolCategory }> = await this.rawQuery(
-      ctx,
-      `SELECT DISTINCT tge.fishing_id, tt.type
-         FROM tools_groups_events tge
-         JOIN tools_groups tg
-           ON (tg.build_event_id = tge.id OR tg.remove_event_id = tge.id)
-          AND tg.deleted_at IS NULL
-         JOIN tools t ON t.id = ANY(tg.tools) AND t.deleted_at IS NULL
-         JOIN tool_types tt ON tt.id = t.tool_type_id AND tt.deleted_at IS NULL
-        WHERE tge.fishing_id = ANY(?) AND tge.deleted_at IS NULL
-        ORDER BY tt.type`,
-      [ids],
-    );
-    return rows.map((r) => ({ fishingId: Number(r.fishing_id), category: r.type }));
   }
 
   @Action({
