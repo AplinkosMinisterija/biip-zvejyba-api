@@ -32,12 +32,16 @@ beforeAll(async () => {
   const nets = toolTypes.filter((t) => t.type === 'NET');
   const catcher = toolTypes.find((t) => t.type === 'CATCHER');
 
-  // Two DIFFERENT net types plus one catcher: proves the column collapses to
-  // the category, so the two nets show up as a single "NET".
+  // Five tools, two categories. Deliberately covers both ways a duplicate can
+  // arise: two tools of the SAME tool type (S-TC-1 / S-TC-2, S-TC-4 / S-TC-5)
+  // and two DIFFERENT net types (S-TC-1 / S-TC-3). The column must still read
+  // "Gaudyklė, Tinklas" — never "Tinklas, Tinklas, Gaudyklė, Gaudyklė".
   const seals = [
     { sealNr: 'S-TC-1', toolType: nets[0].id },
-    { sealNr: 'S-TC-2', toolType: nets[1].id },
-    { sealNr: 'S-TC-3', toolType: catcher.id },
+    { sealNr: 'S-TC-2', toolType: nets[0].id },
+    { sealNr: 'S-TC-3', toolType: nets[1].id },
+    { sealNr: 'S-TC-4', toolType: catcher.id },
+    { sealNr: 'S-TC-5', toolType: catcher.id },
   ];
   for (const tool of seals) {
     await broker.call(
@@ -77,11 +81,12 @@ const journal = () =>
     .expect(200);
 
 describe('fishings — toolCategories virtual field', () => {
-  it('collapses tool types to their category, once each', async () => {
+  it('lists each category once, however many tools share it', async () => {
     const row = rowOf(await journal(), fishingId);
     expect(row).toBeTruthy();
-    // Two distinct NET types + one CATCHER -> exactly two categories.
+    // Five tools -> exactly two entries, no repeats.
     expect(row.toolCategories).toEqual(['CATCHER', 'NET']);
+    expect(new Set(row.toolCategories).size).toBe(row.toolCategories.length);
   });
 
   it('never leaks the tool-type label (which carries mesh sizes)', async () => {
