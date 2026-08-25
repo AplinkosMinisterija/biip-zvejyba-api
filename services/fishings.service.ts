@@ -24,6 +24,7 @@ import { FishType } from './fishTypes.service';
 import { Coordinates, CoordinatesProp, Location } from './location.service';
 import { Polder } from './polders.service';
 import { Tenant } from './tenants.service';
+import { ToolCategory } from './toolTypes.service';
 import { User } from './users.service';
 import { GetFishByFishingResponse, WeightEvent } from './weightEvents.service';
 
@@ -69,6 +70,7 @@ interface Fields extends CommonFields {
   user: User['id'];
   weightEvents: any;
   hasManualLocation: boolean;
+  toolCategories: ToolCategory[];
 }
 
 interface Populates extends CommonPopulates {
@@ -222,6 +224,40 @@ export type Fishing<
           });
           const flaggedSet = new Set(flagged.map(Number));
           return fishings.map((f) => flaggedSet.has(Number(f.id)));
+        },
+      },
+      // Gear KIND (NET / CATCHER), never the `toolTypes.label` taxonomy — those
+      // names bake in mesh sizes ("Statomieji tinklaičiai 45-50 mm").
+      toolCategories: {
+        type: 'array',
+        items: 'string',
+        readonly: true,
+        virtual: true,
+        async populate(this: moleculer.Service, ctx: Context, _values: any, fishings: Fishing[]) {
+          const ids = fishings.map((f) => Number(f.id)).filter(Number.isFinite);
+          if (!ids.length) return fishings.map(() => []);
+
+          // A tools group points AT its events (`build_event_id` /
+          // `remove_event_id`); `tools_groups_events` has no `tools_group_id`
+          // (dropped in 20231110203315). `tools_groups.tools` is an int[].
+          // Raw SQL — see CLAUDE.md -> "Virtual-field populate gotchas".
+          const rows: Array<{ fishing_id: number; type: ToolCategory }> = await this.rawQuery(
+            ctx,
+            `SELECT DISTINCT tge.fishing_id, tt.type
+               FROM tools_groups_events tge
+               JOIN tools_groups tg
+                 ON (tg.build_event_id = tge.id OR tg.remove_event_id = tge.id)
+                AND tg.deleted_at IS NULL
+               JOIN tools t ON t.id = ANY(tg.tools) AND t.deleted_at IS NULL
+               JOIN tool_types tt ON tt.id = t.tool_type_id AND tt.deleted_at IS NULL
+              WHERE tge.fishing_id = ANY(?) AND tge.deleted_at IS NULL
+              ORDER BY tt.type`,
+            [ids],
+          );
+
+          return fishings.map((f) =>
+            rows.filter((r) => Number(r.fishing_id) === Number(f.id)).map((r) => r.type),
+          );
         },
       },
       location: {
