@@ -260,6 +260,23 @@ appear without the `call` prefix (e.g. `mol $ tenants-import --dry`).
 
 ## Recent fix log (worth knowing)
 
+- **admin catch corrections (Taisyklės §211)** — AAD officers can amend a
+  fisher's mistaken catch entry (wrong kg, or mixed-up species) through
+  `POST /weightEvents/:id/correct` (`weightEvents.correctWeights`,
+  `auth: ADMIN`). It rewrites `weight_events.data` and appends
+  `{ previousData, reportNumber, note?, correctedAt, correctedBy }` to the new
+  append-only `weight_events.corrections` JSONB column — `reportNumber` is the
+  mandatory AAD PPT message number the rules require the officer to record.
+  `corrections` is a `readonly` field, so `updateEntity(..., { permissive: true })`
+  in that action is the only writer. `fishings.getHistory` echoes `corrections`
+  on WEIGHT_ON_BOAT / WEIGHT_ON_SHORE so the admin journal can flag corrected
+  rows. Same change locked the generic `weightEvents.update`/`remove` to
+  `auth: ADMIN` — via the `mappingPolicy: 'all'` fallback URL a fisher could
+  otherwise rewrite their own catch and leave no trail, which is exactly what
+  §211 forbids. Tests: `weightEvents-correct.spec.ts`. Note for future
+  migrations: `knex.schema.hasColumn()` compares information_schema *values*,
+  which `knexSnakeCaseMappers` does NOT rewrite — probe with the physical
+  `weight_events` name, not the camelCase one used by `alterTable`.
 - **endFishings cron gates on onshore weight** — the midnight `endFishings`
   cron (`0 0 * * *`, Europe/Vilnius) used to close EVERY open fishing
   (`endEvent: { $exists: false }`) unconditionally. Now it only auto-closes

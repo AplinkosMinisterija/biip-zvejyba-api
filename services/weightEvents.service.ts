@@ -13,9 +13,12 @@ import {
   CommonFields,
   CommonPopulates,
   FieldHookCallback,
+  MAX_CORRECTION_NOTE_LENGTH,
+  MAX_CORRECTION_REPORT_NUMBER_LENGTH,
   RestrictionType,
   Table,
 } from '../types';
+import { UserAuthMeta } from './api.service';
 import { FishType } from './fishTypes.service';
 import { Fishing } from './fishings.service';
 import { Coordinates, CoordinatesProp, Location, LocationProp } from './location.service';
@@ -24,9 +27,27 @@ import { ToolType } from './toolTypes.service';
 import { ToolsGroup } from './toolsGroups.service';
 import { User } from './users.service';
 
+type FishWeights = { [fishTypeId: string]: number };
+
+/**
+ * One AAD-officer correction of a fisher's catch entry. `data` is overwritten
+ * in place, so this append-only trail is the only surviving record of what the
+ * fisher originally reported — never rewrite or drop entries.
+ */
+export interface WeightEventCorrection {
+  previousData: FishWeights;
+  // AAD PPT report number that authorised the correction (Žvejybos žurnalų
+  // pildymo taisyklės §211 — the officer must record it in BĮIS).
+  reportNumber: string;
+  note?: string;
+  correctedAt: string;
+  correctedBy: { authUserId: number; name: string };
+}
+
 interface Fields extends CommonFields {
   id: number;
-  data: any;
+  data: FishWeights;
+  corrections: WeightEventCorrection[];
   date: string;
   geom: any;
   location: Location;
@@ -124,6 +145,15 @@ export type WeightEvent<
         type: 'boolean',
         default: false,
       },
+      corrections: {
+        type: 'array',
+        columnType: 'json',
+        items: { type: 'object' },
+        // Written only by `correctWeights`, through
+        // `updateEntity(..., { permissive: true })`.
+        readonly: true,
+        get: ({ value }: FieldHookCallback) => value || [],
+      },
       tenant: {
         type: 'number',
         columnType: 'integer',
@@ -175,11 +205,19 @@ export type WeightEvent<
     create: {
       rest: null,
     },
+    // `mappingPolicy: 'all'` publishes these at the fallback URL regardless of
+    // `rest: null`, and their only guard was ProfileMixin's tenant scope — so a
+    // fisher could silently rewrite or delete their own catch record. The whole
+    // point of `correctWeights` is that only an AAD officer may amend an entry,
+    // and only with a PPT report number, so the generic verbs are ADMIN-only.
+    // No service calls them internally; `ctx.call` bypasses the gateway anyway.
     update: {
       rest: null,
+      auth: RestrictionType.ADMIN,
     },
     remove: {
       rest: null,
+      auth: RestrictionType.ADMIN,
     },
   },
 })
@@ -283,15 +321,86 @@ export default class ToolTypesService extends moleculer.Service {
     return this.createEntity(ctx, { ...ctx.params });
   }
 
-  @Method
-  async beforeFishWeigh(ctx: Context<any>) {
-    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
-    if (!currentFishing) {
-      throw new moleculer.Errors.ValidationError('Fishing not started');
-    }
+  @Action({
+    // POST rather than PATCH: PATCH is absent from the gateway's CORS
+    // `methods` allow-list (api.service.ts), so a browser preflight would
+    // fail before the action is ever reached.
+    rest: 'POST /:id/correct',
+    auth: RestrictionType.ADMIN,
+    params: {
+      id: 'number|convert',
+      // An empty object is a valid correction — it means the reported catch
+      // never happened, leaving the event as a plain "checked, nothing caught".
+      data: {
+        type: 'record',
+        key: { type: 'string', pattern: '^[1-9][0-9]*$' },
+        value: { type: 'number', convert: true, positive: true },
+      },
+      reportNumber: {
+        type: 'string',
+        trim: true,
+        min: 1,
+        max: MAX_CORRECTION_REPORT_NUMBER_LENGTH,
+      },
+      note: {
+        type: 'string',
+        trim: true,
+        max: MAX_CORRECTION_NOTE_LENGTH,
+        optional: true,
+      },
+    },
+  })
+  async correctWeights(
+    ctx: Context<
+      {
+        id: number;
+        data: FishWeights;
+        reportNumber: string;
+        note?: string;
+      },
+      UserAuthMeta
+    >,
+  ) {
+    const { id, data, reportNumber, note } = ctx.params;
 
-    //fishTypes validation
-    const fishTypesIds = Object.keys(ctx.params.data);
+    const weightEvent: WeightEvent = await this.resolveEntities(
+      ctx,
+      { id },
+      { throwIfNotExist: true },
+    );
+
+    await this.assertKnownFishTypes(ctx, data);
+
+    const { authUser } = ctx.meta;
+    const correction: WeightEventCorrection = {
+      previousData: weightEvent.data || {},
+      reportNumber,
+      ...(note ? { note } : {}),
+      correctedAt: new Date().toISOString(),
+      correctedBy: {
+        authUserId: authUser.id,
+        name: `${authUser.firstName || ''} ${authUser.lastName || ''}`.trim(),
+      },
+    };
+
+    return this.updateEntity(
+      ctx,
+      {
+        id,
+        data,
+        corrections: [...(weightEvent.corrections || []), correction],
+      },
+      // `corrections` is a readonly field precisely so no other write path can
+      // touch the audit trail; this action is the one sanctioned writer.
+      { permissive: true },
+    );
+  }
+
+  @Method
+  async assertKnownFishTypes(ctx: Context, data: FishWeights) {
+    const fishTypesIds = Object.keys(data);
+    if (!fishTypesIds.length) return;
+
     const fishTypes: FishType[] = await ctx.call('fishTypes.find', {
       query: {
         id: { $in: fishTypesIds },
@@ -300,6 +409,16 @@ export default class ToolTypesService extends moleculer.Service {
     if (fishTypesIds.length !== fishTypes.length) {
       throw new moleculer.Errors.ValidationError('Invalid fishTypes');
     }
+  }
+
+  @Method
+  async beforeFishWeigh(ctx: Context<any>) {
+    const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
+    if (!currentFishing) {
+      throw new moleculer.Errors.ValidationError('Fishing not started');
+    }
+
+    await this.assertKnownFishTypes(ctx, ctx.params.data);
 
     //toolsGroup validation
     if (ctx.params.id) {
