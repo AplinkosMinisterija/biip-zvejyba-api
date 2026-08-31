@@ -126,6 +126,13 @@ export enum LocationType {
   INLAND_WATERS = 'INLAND_WATERS',
 }
 
+// Bounds for the AAD PPT report number (and optional remark) an officer must
+// record when correcting a fisher's catch entry — Žvejybos žurnalų pildymo
+// taisyklės §211. Wide enough for any documented PPT numbering, tight enough
+// that the column stays a reference, not free-form storage.
+export const MAX_CORRECTION_REPORT_NUMBER_LENGTH = 50;
+export const MAX_CORRECTION_NOTE_LENGTH = 500;
+
 export function throwUnauthorizedError(message?: string): Errors.MoleculerError {
   throw new Moleculer.Errors.MoleculerClientError(message || `Unauthorized.`, 401, 'UNAUTHORIZED');
 }

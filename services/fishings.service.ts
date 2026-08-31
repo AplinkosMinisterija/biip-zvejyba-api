@@ -26,7 +26,11 @@ import { Polder } from './polders.service';
 import { Tenant } from './tenants.service';
 import { ToolCategory } from './toolTypes.service';
 import { User } from './users.service';
-import { GetFishByFishingResponse, WeightEvent } from './weightEvents.service';
+import {
+  GetFishByFishingResponse,
+  WeightEvent,
+  WeightEventCorrection,
+} from './weightEvents.service';
 
 const Cron = require('@r2d2bzh/moleculer-cron');
 
@@ -55,6 +59,8 @@ type Event = {
   location?: any;
   locationManual?: boolean;
   data?: any;
+  // Only weight events carry these — the AAD-officer corrections trail.
+  corrections?: WeightEventCorrection[];
 };
 
 interface Fields extends CommonFields {
@@ -1104,6 +1110,7 @@ export default class FishTypesService extends moleculer.Service {
         locationManual: !!w.locationManual,
         date: w.createdAt,
         data: { fish: w.data, toolsGroup: w.toolsGroup },
+        corrections: w.corrections || [],
       });
     }
     if (fishingWeights.fishOnShore) {
@@ -1116,6 +1123,7 @@ export default class FishTypesService extends moleculer.Service {
         locationManual: !!fishingWeights.fishOnShore.locationManual,
         date: fishingWeights.fishOnShore.createdAt,
         data: fishingWeights.fishOnShore.data,
+        corrections: fishingWeights.fishOnShore.corrections || [],
       });
     }
 
