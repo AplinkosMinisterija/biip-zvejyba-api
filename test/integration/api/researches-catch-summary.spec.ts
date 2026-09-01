@@ -91,6 +91,16 @@ describe('researches.catchSummary — auth', () => {
     expect([401, 403]).toContain(res.status);
   });
 
+  // Gateway'us sukasi su `mappingPolicy: 'all'`, tad veiksmas pasiekiamas ir
+  // per fallback URL'ą — rolė turi galioti ir ten (CLAUDE.md → „Action
+  // exposure").
+  it('applies the same gate on the mappingPolicy fallback URL', async () => {
+    const res = await request(apiService.server)
+      .post('/zvejyba/api/researches/catchSummary')
+      .set(apiHelper.getHeaders(apiHelper.ownerA.token, apiHelper.tenantA.tenant.id));
+    expect([401, 403]).toContain(res.status);
+  });
+
   it('lets an INVESTIGATOR download the xlsx', async () => {
     const res = await request(apiService.server)
       .get(url)
