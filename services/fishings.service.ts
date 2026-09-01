@@ -243,22 +243,39 @@ export type Fishing<
           const ids = fishings.map((f) => Number(f.id)).filter(Number.isFinite);
           if (!ids.length) return fishings.map(() => []);
 
+          // Two ways a fishing touches gear, and BOTH have to count. Build /
+          // remove events (`tools_groups_events.fishing_id`) only exist on the
+          // trip that deployed or pulled the group — gear stays in the water
+          // across trips, so a fishing that merely weighed it has no event row
+          // and used to render "-" in the admin journal. `weight_events`
+          // (weigh + empty "Patikrinta") carry `tools_group_id` and pin the
+          // gear to the trip it was actually fished on.
+          //
           // A tools group points AT its events (`build_event_id` /
           // `remove_event_id`); `tools_groups_events` has no `tools_group_id`
           // (dropped in 20231110203315). `tools_groups.tools` is an int[].
           // Raw SQL — see CLAUDE.md -> "Virtual-field populate gotchas".
           const rows: Array<{ fishing_id: number; type: ToolCategory }> = await this.rawQuery(
             ctx,
-            `SELECT DISTINCT tge.fishing_id, tt.type
-               FROM tools_groups_events tge
-               JOIN tools_groups tg
-                 ON (tg.build_event_id = tge.id OR tg.remove_event_id = tge.id)
-                AND tg.deleted_at IS NULL
-               JOIN tools t ON t.id = ANY(tg.tools) AND t.deleted_at IS NULL
-               JOIN tool_types tt ON tt.id = t.tool_type_id AND tt.deleted_at IS NULL
-              WHERE tge.fishing_id = ANY(?) AND tge.deleted_at IS NULL
-              ORDER BY tt.type`,
-            [ids],
+            `SELECT fishing_id, type FROM (
+               SELECT tge.fishing_id, tt.type
+                 FROM tools_groups_events tge
+                 JOIN tools_groups tg
+                   ON (tg.build_event_id = tge.id OR tg.remove_event_id = tge.id)
+                  AND tg.deleted_at IS NULL
+                 JOIN tools t ON t.id = ANY(tg.tools) AND t.deleted_at IS NULL
+                 JOIN tool_types tt ON tt.id = t.tool_type_id AND tt.deleted_at IS NULL
+                WHERE tge.fishing_id = ANY(?) AND tge.deleted_at IS NULL
+               UNION
+               SELECT we.fishing_id, tt.type
+                 FROM weight_events we
+                 JOIN tools_groups tg ON tg.id = we.tools_group_id AND tg.deleted_at IS NULL
+                 JOIN tools t ON t.id = ANY(tg.tools) AND t.deleted_at IS NULL
+                 JOIN tool_types tt ON tt.id = t.tool_type_id AND tt.deleted_at IS NULL
+                WHERE we.fishing_id = ANY(?) AND we.deleted_at IS NULL
+             ) categories
+             ORDER BY type`,
+            [ids, ids],
           );
 
           return fishings.map((f) =>
