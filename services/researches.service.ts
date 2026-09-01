@@ -87,7 +87,7 @@ const SUMMARY_OTHER_COLUMNS: SummaryColumn[] = [
   { header: 'Meknė', labels: ['Meknė'] },
   { header: 'Raudė', labels: ['Raudė'] },
   { header: 'Strimelė', labels: ['Strimelė'] },
-  { header: 'Auklė', labels: ['Auklė'] },
+  { header: 'Aukšlė', labels: ['Aukšlė'] },
   { header: 'Šlakis', labels: ['Šlakis'] },
   { header: 'Lašiša', labels: ['Lašiša'] },
 ];

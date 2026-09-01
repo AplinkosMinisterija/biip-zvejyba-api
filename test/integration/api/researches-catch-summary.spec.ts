@@ -131,13 +131,47 @@ describe('researches.catchSummary — sheet', () => {
 
     expect(header[0]).toBe('Eil. Nr.');
     expect(header[1]).toBe('ĮMONĖS (ORGANIZACIJOS) PAVADINIMAS');
-    // Pirmieji ir paskutinis pagrindiniai stulpeliai etalonine tvarka.
-    expect(header.slice(2, 6)).toEqual(['Karšis', 'Starkis', 'Kuoja', 'Lydeka']);
-    expect(header[18]).toBe('Karpis');
+
+    // Visas sąrašas, ne pavyzdys. Etalono CSV `Š`/`Ž` numeta visai
+    // (`KURŠIŲ` → `KURI?`), tad iš jo skaitomi pavadinimai lengvai iškraipomi —
+    // taip `Aukšlė` buvo virtusi `Auklė` ir aukšlės krisdavo į „Kitos".
+    expect(header.slice(2, 19)).toEqual([
+      'Karšis',
+      'Starkis',
+      'Kuoja',
+      'Lydeka',
+      'Ešerys',
+      'Ungurys',
+      'Karosas',
+      'Vėgėlė',
+      'Stinta',
+      'Lynas',
+      'Nėgė',
+      'Žiobris',
+      'Plakis',
+      'Salatis',
+      'Šamas',
+      'Ožka',
+      'Karpis',
+    ]);
     expect(header[19]).toBe('Kitos žuvys');
     expect(header[20]).toBe('IŠ VISO');
     expect(header[22]).toBe('Kontrolinė suma (iš viso)');
-    expect(header[23]).toBe('Perpelė');
+    expect(header.slice(23, 36)).toEqual([
+      'Perpelė',
+      'Plačiakaktis',
+      'Plekšnė',
+      'Šapalas',
+      'Sykas',
+      'Pūgžlys',
+      'Dyglė',
+      'Meknė',
+      'Raudė',
+      'Strimelė',
+      'Aukšlė',
+      'Šlakis',
+      'Lašiša',
+    ]);
     expect(header[36]).toBe('Kitos');
     expect(header[37]).toBe('IŠ VISO');
   });
