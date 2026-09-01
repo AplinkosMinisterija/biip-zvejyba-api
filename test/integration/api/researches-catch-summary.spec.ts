@@ -247,6 +247,57 @@ describe('researches.catchSummary — sheet', () => {
     expect(findRow(await loadSheet(buffer), 'IŠ VISO:')![20]).toBe(0);
   });
 
+  // Dev registre rūšys vadinosi `karpiai`/`ešeriai`, prod — `Karpis`/`Ešerys`,
+  // ir visa suvestinė tyliai virsdavo „Kitos žuvys". Registro rašyba per
+  // aplinkas skiriasi, tad sutapdinimas privalo būti atsparus, o nesutapimas
+  // matomas.
+  describe('registro rašybos atsparumas', () => {
+    const buildSheet = async (labelById: Map<number, string>, data: Record<string, number>) => {
+      const service: any = broker.getLocalService('researches');
+      const workbook = service.buildCatchSummaryWorkbook(
+        [
+          {
+            fishing_type: 'ESTUARY',
+            tenant_name: 'Rašybos UAB',
+            first_name: null,
+            last_name: null,
+            data,
+          },
+        ],
+        { labelById, selectedLabels: null, from: null, to: null },
+      );
+      return workbook;
+    };
+
+    it('sutapdina nepaisant raidžių registro ir tarpų', async () => {
+      const workbook = await buildSheet(new Map([[1, '  KARPIS ']]), { '1': 5 });
+      const sheet = workbook.getWorksheet('Suvestinė');
+
+      const row = findRow(sheet, 'Rašybos UAB')!;
+      expect(row[18]).toBe(5); // Karpis, ne „Kitos žuvys"
+      expect(row[19]).toBe(0);
+      expect(workbook.getWorksheet('Nepriskirtos rūšys')).toBeUndefined();
+    });
+
+    it('nepriskirtą rūšį suskaičiuoja į „Kitos" IR išveda atskirame lape', async () => {
+      const workbook = await buildSheet(new Map([[1, 'karpiai']]), { '1': 7 });
+
+      const row = findRow(workbook.getWorksheet('Suvestinė'), 'Rašybos UAB')!;
+      expect(row[18]).toBe(0); // į Karpis stulpelį nepateko
+      expect(row[19]).toBe(7); // bet bendra suma nenukentėjo
+      expect(row[20]).toBe(7);
+
+      const diagnostics = workbook.getWorksheet('Nepriskirtos rūšys')!;
+      expect(diagnostics).toBeDefined();
+      expect(cellValues(diagnostics, 4)).toEqual(['karpiai', 7]);
+    });
+
+    it('ištrintą rūšį išveda pagal id', async () => {
+      const workbook = await buildSheet(new Map(), { '999': 3 });
+      expect(cellValues(workbook.getWorksheet('Nepriskirtos rūšys')!, 4)).toEqual(['ID 999', 3]);
+    });
+  });
+
   it('rejects an unparseable date', async () => {
     await expect(
       broker.call(

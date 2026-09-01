@@ -139,6 +139,12 @@ const addTotals = (target: SummaryTotals, source: SummaryTotals) => {
 // Kilogramai suvedami su dešimtainėmis dalimis, tad sumos kaupia float paklaidą.
 const round2 = (value: number) => Math.round(value * 100) / 100;
 
+// Rūšys sutapdinamos pagal `label`, o registro rašyba per aplinkas skiriasi
+// (dev turėjo `karpiai`, prod — `Karpis`). Normalizavimas padengia raidžių
+// registrą ir tarpus; skirtingi žodžiai lieka nesutapę ir atsiduria
+// diagnostiniame lape, o ne tyliai „Kitose".
+const normalizeLabel = (label: string) => label.trim().toLowerCase().replace(/\s+/g, ' ');
+
 type CatchSummaryRow = {
   fishing_type: string;
   tenant_name: string | null;
@@ -749,14 +755,19 @@ export default class ResearchesService extends moleculer.Service {
   ) {
     const mainIndexByLabel = new Map<string, number>();
     SUMMARY_MAIN_COLUMNS.forEach((column, index) =>
-      column.labels.forEach((label) => mainIndexByLabel.set(label, index)),
+      column.labels.forEach((label) => mainIndexByLabel.set(normalizeLabel(label), index)),
     );
 
     const otherIndexByLabel = new Map<string, number>();
     SUMMARY_OTHER_COLUMNS.forEach((column, index) =>
-      column.labels.forEach((label) => otherIndexByLabel.set(label, index)),
+      column.labels.forEach((label) => otherIndexByLabel.set(normalizeLabel(label), index)),
     );
     const otherRestIndex = SUMMARY_OTHER_COLUMNS.length;
+
+    // Rūšys, kurių nepavyko priskirti nė vienam stulpeliui. Skaičiuoti jos
+    // skaičiuojamos kaip „Kitos" (sumos nesikeičia), bet atskirai išvedamos,
+    // kad pervadinta ar nauja rūšis nedingtų nepastebėta.
+    const unmapped = new Map<string, number>();
 
     const byZone = new Map<string, Map<string, SummaryTotals>>();
     SUMMARY_ZONES.forEach((zone) => byZone.set(zone.type, new Map()));
@@ -785,29 +796,40 @@ export default class ResearchesService extends moleculer.Service {
         // Ištrinta rūšis etiketės nebeturi — su aktyviu filtru ją praleidžiam,
         // be filtro sumuojam į „Kitos", kad bendra suma nesumažėtų.
         if (!label) {
-          if (!opts.selectedLabels) totals.other[otherRestIndex] += kg;
+          if (!opts.selectedLabels) {
+            totals.other[otherRestIndex] += kg;
+            unmapped.set(`ID ${fishTypeId}`, (unmapped.get(`ID ${fishTypeId}`) || 0) + kg);
+          }
           continue;
         }
 
         if (opts.selectedLabels && !opts.selectedLabels.has(label)) continue;
 
-        const mainIndex = mainIndexByLabel.get(label);
+        const normalized = normalizeLabel(label);
+
+        const mainIndex = mainIndexByLabel.get(normalized);
         if (mainIndex !== undefined) {
           totals.main[mainIndex] += kg;
           continue;
         }
 
-        totals.other[otherIndexByLabel.get(label) ?? otherRestIndex] += kg;
+        const otherIndex = otherIndexByLabel.get(normalized);
+        if (otherIndex === undefined) {
+          unmapped.set(label, (unmapped.get(label) || 0) + kg);
+        }
+
+        totals.other[otherIndex ?? otherRestIndex] += kg;
       }
     }
 
-    return this.renderCatchSummarySheet(byZone, opts);
+    return this.renderCatchSummarySheet(byZone, opts, unmapped);
   }
 
   @Method
   renderCatchSummarySheet(
     byZone: Map<string, Map<string, SummaryTotals>>,
     opts: { from: Date | null; to: Date | null },
+    unmapped: Map<string, number>,
   ) {
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Suvestinė');
@@ -880,6 +902,8 @@ export default class ResearchesService extends moleculer.Service {
       sheet.getColumn(column).width = column === SUMMARY_TOTAL_COL + 1 ? 3 : 12;
     }
 
+    this.appendUnmappedSheet(workbook, unmapped);
+
     return workbook;
   }
 
@@ -902,6 +926,33 @@ export default class ResearchesService extends moleculer.Service {
       round2(totals.other[SUMMARY_OTHER_COLUMNS.length]),
       other,
     ];
+  }
+
+  // Antras lapas atsiranda TIK tada, kai kažko nepavyko priskirti. Švarioje
+  // aplinkoje suvestinė lieka lygiai tokia, kokia yra AAD etalonas.
+  @Method
+  appendUnmappedSheet(workbook: ExcelJS.Workbook, unmapped: Map<string, number>) {
+    if (!unmapped.size) return;
+
+    const sheet = workbook.addWorksheet('Nepriskirtos rūšys');
+
+    sheet.getRow(1).values = [
+      'Šios rūšys nepateko į nė vieną suvestinės stulpelį ir suskaičiuotos kaip „Kitos žuvys“.',
+    ];
+    sheet.getRow(1).font = { bold: true };
+
+    const header = sheet.getRow(3);
+    header.values = ['Rūšis registre', 'Kiekis, kg'];
+    header.font = { bold: true };
+
+    Array.from(unmapped.entries())
+      .sort((a, b) => b[1] - a[1])
+      .forEach(([label, kg], index) => {
+        sheet.getRow(4 + index).values = [label, round2(kg)];
+      });
+
+    sheet.getColumn(1).width = 48;
+    sheet.getColumn(2).width = 16;
   }
 
   @Method
