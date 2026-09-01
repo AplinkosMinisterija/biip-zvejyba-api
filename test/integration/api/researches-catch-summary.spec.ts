@@ -205,10 +205,10 @@ describe('researches.catchSummary — sheet', () => {
     );
     const sheet = await loadSheet(buffer);
 
-    expect(findRow(sheet, 'I VISO (Kuršių mariose):')![20]).toBe(20);
-    expect(findRow(sheet, 'I viso polderiuose:')![20]).toBe(5);
+    expect(findRow(sheet, 'IŠ VISO (Kuršių mariose):')![20]).toBe(20);
+    expect(findRow(sheet, 'Iš viso polderiuose:')![20]).toBe(5);
     // Company-B žvejojo polderiuose, tad į Kuršių marių bloką patekti negali.
-    expect(findRow(sheet, 'I viso Nemuno žemupyje, Šventosios upėje:')![20]).toBe(0);
+    expect(findRow(sheet, 'Iš viso Nemuno žemupyje, Šventosios upėje:')![20]).toBe(0);
     expect(findRow(sheet, 'IŠ VISO:')![20]).toBe(25);
   });
 

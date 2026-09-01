@@ -99,17 +99,17 @@ const SUMMARY_ZONES: Array<{ type: FishingType; title: string; totalLabel: strin
   {
     type: FishingType.ESTUARY,
     title: 'KURŠIŲ MARIOSE:',
-    totalLabel: 'I VISO (Kuršių mariose):',
+    totalLabel: 'IŠ VISO (Kuršių mariose):',
   },
   {
     type: FishingType.INLAND_WATERS,
     title: 'NEMUNO ŽEMUPYJE, ŠVENTOSIOS UPĖJE:',
-    totalLabel: 'I viso Nemuno žemupyje, Šventosios upėje:',
+    totalLabel: 'Iš viso Nemuno žemupyje, Šventosios upėje:',
   },
   {
     type: FishingType.POLDERS,
     title: 'POLDERIUOSE:',
-    totalLabel: 'I viso polderiuose:',
+    totalLabel: 'Iš viso polderiuose:',
   },
 ];
 
@@ -937,7 +937,7 @@ export default class ResearchesService extends moleculer.Service {
     const sheet = workbook.addWorksheet('Nepriskirtos rūšys');
 
     sheet.getRow(1).values = [
-      'Šios rūšys nepateko į nė vieną suvestinės stulpelį ir suskaičiuotos kaip „Kitos žuvys“.',
+      'Šios rūšys nepateko į nė vieną suvestinės stulpelį ir buvo priskaičiuotos prie „Kitos žuvys“.',
     ];
     sheet.getRow(1).font = { bold: true };
 

@@ -74,10 +74,10 @@ Lapas „Suvestinė":
 2  UŽ <laikotarpis>
 3  [grupės antraštė]                                  Kitos žuvys :
 4  Eil.Nr. | PAVADINIMAS | <17 rūšių> | Kitos žuvys | IŠ VISO | | Kontrolinė suma | <13 rūšių> | Kitos | IŠ VISO
-5+ KURŠIŲ MARIOSE       — įmonių eilutės + „I VISO (Kuršių mariose)"
+5+ KURŠIŲ MARIOSE       — įmonių eilutės + „IŠ VISO (Kuršių mariose)"
    santrauka            — Nemuno žemupys / Polderiai / bendra suma
-   NEMUNO ŽEMUPYJE...   — įmonių eilutės + „I viso"
-   POLDERIUOSE          — įmonių eilutės + „I viso"
+   NEMUNO ŽEMUPYJE...   — įmonių eilutės + „Iš viso"
+   POLDERIUOSE          — įmonių eilutės + „Iš viso"
 ```
 
 Stulpelių tvarka (3–19): Karšis, Starkis, Kuoja, Lydeka, Ešerys, Ungurys,
