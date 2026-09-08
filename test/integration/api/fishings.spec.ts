@@ -239,8 +239,36 @@ describe('fishings — weighFish payload guards', () => {
       .set(apiHelper.getHeaders(apiHelper.ownerA.token, apiHelper.tenantA.tenant.id))
       .send({
         coordinates: sampleCoords,
-        data: { [fishId]: 10 },
+        data: { [fishId]: 30 },
+        preliminaryData: { [fishId]: 20 },
+      });
+    expect(res.status).toBe(422);
+    expect(res.body.message).toMatch(/Weight difference/i);
+  });
+
+  it('accepts any onshore weight when the preliminary weight is under 10 kg', async () => {
+    const fishId = await seedFishType();
+    const res = await request(apiService.server)
+      .post('/zvejyba/api/fishings/weight')
+      .set(apiHelper.getHeaders(apiHelper.ownerA.token, apiHelper.tenantA.tenant.id))
+      .send({
+        coordinates: sampleCoords,
+        data: { [fishId]: 9 },
         preliminaryData: { [fishId]: 5 },
+      })
+      .expect(200);
+    expect(res.body.success).toBe(true);
+  });
+
+  it('still applies the 20% check at exactly 10 kg preliminary weight', async () => {
+    const fishId = await seedFishType();
+    const res = await request(apiService.server)
+      .post('/zvejyba/api/fishings/weight')
+      .set(apiHelper.getHeaders(apiHelper.ownerA.token, apiHelper.tenantA.tenant.id))
+      .send({
+        coordinates: sampleCoords,
+        data: { [fishId]: 13 },
+        preliminaryData: { [fishId]: 10 },
       });
     expect(res.status).toBe(422);
     expect(res.body.message).toMatch(/Weight difference/i);

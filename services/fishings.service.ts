@@ -34,6 +34,8 @@ import {
 
 const Cron = require('@r2d2bzh/moleculer-cron');
 
+const WEIGHT_DIFFERENCE_MIN_KG = 10;
+
 export enum FishingType {
   ESTUARY = 'ESTUARY',
   POLDERS = 'POLDERS',
@@ -850,7 +852,7 @@ export default class FishTypesService extends moleculer.Service {
       const finalValue = data[key];
       const preliminaryValue = preliminaryData[key];
 
-      if (preliminaryValue === undefined || preliminaryValue === 0) continue;
+      if (preliminaryValue === undefined || preliminaryValue < WEIGHT_DIFFERENCE_MIN_KG) continue;
 
       const error = Math.abs(finalValue - preliminaryValue) / preliminaryValue;
 
