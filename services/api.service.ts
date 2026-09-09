@@ -220,7 +220,16 @@ export default class ApiService extends moleculer.Service {
       return accesses.includes(access) || accesses.includes('*');
     }
 
-    if (restrictionType === RestrictionType.INVESTIGATOR && !hasAccess('INVESTIGATOR', accesses)) {
+    // Administratorius yra mokslininko supersetas: AAD pareigūnas turi matyti
+    // viską, ką mato mokslininkas (pvz. verslinių sugavimų suvestinę), o
+    // atskiro INVESTIGATOR prieigos flag'o admin paskyros neturi.
+    const isAdmin = [AuthUserRole.ADMIN, AuthUserRole.SUPER_ADMIN].includes(authUser?.type);
+
+    if (
+      restrictionType === RestrictionType.INVESTIGATOR &&
+      !isAdmin &&
+      !hasAccess('INVESTIGATOR', accesses)
+    ) {
       throw new ApiGateway.Errors.UnAuthorizedError('NO_RIGHTS', {
         error: 'Unauthorized',
       });
