@@ -260,6 +260,16 @@ appear without the `call` prefix (e.g. `mol $ tenants-import --dry`).
 
 ## Recent fix log (worth knowing)
 
+- **gear spans fishings — aggregate from weight events too** — a tools group
+  stays in the water between trips, and `tools_groups_events.fishing_id` only
+  marks the trip that BUILT or REMOVED it. So the next day's fishing, where the
+  angler only weighs the catch, owns no event row: `Fishing.toolCategories`
+  came back `[]` and the admin journal's "Žvejybos įrankių tipas" column
+  rendered `-`. `weight_events.tools_group_id` (set on every weigh and on the
+  empty "Patikrinta" check) is what pins gear to the trip it was actually
+  fished on — `UNION`ed into the same raw aggregation. Any future per-fishing
+  gear aggregation needs BOTH sources. Test:
+  `fishings-tool-categories-weighed.spec.ts`.
 - **admin catch corrections (Taisyklės §211)** — AAD officers can amend a
   fisher's mistaken catch entry (wrong kg, or mixed-up species) through
   `POST /weightEvents/:id/correct` (`weightEvents.correctWeights`,
