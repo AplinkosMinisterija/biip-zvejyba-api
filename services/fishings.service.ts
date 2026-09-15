@@ -379,28 +379,39 @@ export default class FishTypesService extends moleculer.Service {
     visibility: 'protected',
   })
   async endFishings(ctx: Context) {
-    // Auto-close only fishings that already have an onshore weigh-in
-    // (`weight_events.tools_group_id IS NULL`). A fishing with no shore
-    // weight is an incomplete catch report — silently ending it would
-    // freeze it with no landed catch, so leave it open for the fisher to
-    // finish. Raw SQL for the "has any shore weight" aggregation dodges the
-    // secure-id / ProfileMixin-scope layering (see CLAUDE.md → "Virtual-field
-    // populate gotchas").
-    const rows: Array<{ fishing_id: number }> = await this.rawQuery(
+    // A fishing is auto-closed unless it still owes a landing: fish recorded on
+    // the boat (`weight_events.tools_group_id` set) that never reached an
+    // onshore weigh-in (`tools_group_id IS NULL`). Everything else has nothing
+    // left to report — the catch was landed, or the trip only set gear and every
+    // check came up empty — and leaving those open costs the fisher the next
+    // trip, since `startFishing` allows one at a time. Skip rows carry no start
+    // event and are left alone. Raw SQL for the aggregation dodges the secure-id
+    // / ProfileMixin-scope layering (see CLAUDE.md → "Virtual-field populate
+    // gotchas").
+    // `we.id IS NOT NULL` keeps the LEFT JOIN's empty row honest: without it
+    // `we.tools_group_id IS NULL` reads as TRUE for a fishing that has no
+    // weight events at all, i.e. "landed its catch".
+    const rows: Array<{ id: number }> = await this.rawQuery(
       ctx,
-      `SELECT DISTINCT fishing_id FROM weight_events
-         WHERE tools_group_id IS NULL AND fishing_id IS NOT NULL AND deleted_at IS NULL`,
+      `SELECT f.id
+         FROM fishings f
+         LEFT JOIN weight_events we ON we.fishing_id = f.id AND we.deleted_at IS NULL
+        WHERE f.end_event_id IS NULL
+          AND f.start_event_id IS NOT NULL
+          AND f.deleted_at IS NULL
+        GROUP BY f.id
+       HAVING NOT bool_or(we.data IS NOT NULL AND we.data <> '{}'::jsonb)
+           OR bool_or(we.id IS NOT NULL AND we.tools_group_id IS NULL)`,
     );
-    const fishingIdsWithShoreWeight = rows
-      .map((r) => Number(r.fishing_id))
-      .filter(Number.isFinite);
 
-    if (!fishingIdsWithShoreWeight.length) return [];
+    const closableIds = rows.map((row) => Number(row.id)).filter(Number.isFinite);
+
+    if (!closableIds.length) return [];
 
     const fishings: Fishing[] = await ctx.call('fishings.find', {
       query: {
         endEvent: { $exists: false },
-        id: { $in: fishingIdsWithShoreWeight },
+        id: { $in: closableIds },
       },
     });
 

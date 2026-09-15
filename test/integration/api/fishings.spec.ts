@@ -118,18 +118,40 @@ describe('fishings.service — start/skip/current/end flow', () => {
     expect(res.body.skipEvent).toBeTruthy();
   });
 
-  it('endFishings closes only fishings weighed on shore; boat-only or empty ones stay open', async () => {
+  it('endFishings closes trips with nothing left to report; boat-only catches stay open', async () => {
     const ownerAMeta = apiHelper.meta(apiHelper.ownerA, apiHelper.tenantA.tenant.id);
     const ownerBMeta = apiHelper.meta(apiHelper.ownerB, apiHelper.tenantB.tenant.id);
     const userAMeta = apiHelper.meta(apiHelper.userA, apiHelper.tenantA.tenant.id);
+    const freelancerMeta = apiHelper.meta(apiHelper.freelancerA);
     const fishId = await seedFishType();
 
-    // ownerA: an open fishing with NO weigh-in at all → must stay open.
+    // ownerA: a trip that only set gear — no weigh-in at all. Nothing to
+    // report, and holding it open would cost the fisher the next trip.
     await seedToolForOwner(apiHelper.ownerA, apiHelper.tenantA.tenant.id);
-    const withoutShore: any = await broker.call(
+    const setOnly: any = await broker.call(
       'fishings.startFishing',
       { type: 'INLAND_WATERS', coordinates: sampleCoords },
       { meta: ownerAMeta },
+    );
+
+    // freelancerA: every tool checked, nothing in them (`data: {}`) — the same
+    // empty report, so it closes too.
+    const emptyCheckToolId = await seedToolForOwner(apiHelper.freelancerA, undefined);
+    const emptyCheckTool: any = await broker.call(
+      'tools.get',
+      { id: emptyCheckToolId, populate: ['toolsGroup'] },
+      { meta: freelancerMeta },
+    );
+    const emptyCheckGroupId = emptyCheckTool.toolsGroup?.id ?? emptyCheckTool.toolsGroup;
+    const emptyChecksOnly: any = await broker.call(
+      'fishings.startFishing',
+      { type: 'INLAND_WATERS', coordinates: sampleCoords },
+      { meta: freelancerMeta },
+    );
+    await broker.call(
+      'weightEvents.createWeightEvent',
+      { toolsGroup: emptyCheckGroupId, coordinates: sampleCoords, data: {} },
+      { meta: freelancerMeta },
     );
 
     // userA: an open fishing with ONLY a boat (preliminary) weigh-in — the
@@ -172,16 +194,12 @@ describe('fishings.service — start/skip/current/end flow', () => {
     const closedIds = closed.map((f) => String(f.id));
 
     expect(closedIds).toContain(String(withShore.id));
-    expect(closedIds).not.toContain(String(withoutShore.id));
+    expect(closedIds).toContain(String(setOnly.id));
+    expect(closedIds).toContain(String(emptyChecksOnly.id));
     expect(closedIds).not.toContain(String(boatOnly.id));
     closed.forEach((f) => expect(f.endEvent).toBeTruthy());
-
-    const stillOpen: any = await broker.call(
-      'fishings.get',
-      { id: withoutShore.id },
-      { meta: ownerAMeta },
-    );
-    expect(stillOpen.endEvent).toBeFalsy();
+    // Skip rows carry no start event and must never be touched.
+    closed.forEach((f) => expect(f.startEvent).toBeTruthy());
 
     const boatStillOpen: any = await broker.call(
       'fishings.get',
