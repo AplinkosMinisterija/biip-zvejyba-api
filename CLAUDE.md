@@ -287,19 +287,22 @@ appear without the `call` prefix (e.g. `mol $ tenants-import --dry`).
   migrations: `knex.schema.hasColumn()` compares information_schema *values*,
   which `knexSnakeCaseMappers` does NOT rewrite — probe with the physical
   `weight_events` name, not the camelCase one used by `alterTable`.
-- **endFishings cron gates on onshore weight** — the midnight `endFishings`
-  cron (`0 0 * * *`, Europe/Vilnius) used to close EVERY open fishing
-  (`endEvent: { $exists: false }`) unconditionally. Now it only auto-closes
-  fishings that already have an onshore weigh-in (a `weight_events` row with
-  `tools_group_id IS NULL` = fishOnShore). Shore-less fishings stay open —
-  including ones weighed only on the boat (`tools_group_id` set = preliminary
-  "laive" catch), incomplete reports, and skip-only rows — for the fisher to
-  finish. The "has any
-  shore weight" set comes from raw SQL (numeric ids), intersected with the
-  moleculer `endEvent: { $exists: false }` query via `id: { $in }` — same
-  raw-SQL-for-aggregation pattern as `applyLocationFilter` /
-  `getManualLocationFlags`. Test: `fishings.spec.ts` → "endFishings closes
-  fishings with an onshore weigh-in but leaves shore-less ones open".
+- **endFishings cron closes trips with nothing left to report** — the midnight
+  `endFishings` cron (`0 0 * * *`, Europe/Vilnius) keeps a fishing open only
+  when it still owes a landing: fish recorded on the boat
+  (`weight_events.tools_group_id` set) with no onshore weigh-in
+  (`tools_group_id IS NULL`) yet. Everything else auto-closes — the catch was
+  landed, or the trip only set gear / every check came up empty, which is the
+  ordinary "drop nets and go home" trip. An earlier version required an onshore
+  weigh-in to close anything, so those set-only trips stayed open forever and
+  cost the fisher the next one (`startFishing` allows a single open fishing).
+  Skip rows carry no `start_event_id` and are excluded. The whole decision lives
+  in one raw SQL `HAVING` over `fishings LEFT JOIN weight_events` (numeric ids;
+  the shore test needs `we.id IS NOT NULL`, or the LEFT JOIN's empty row reads
+  as "landed"), intersected with the moleculer `endEvent: { $exists: false }`
+  query via `id: { $in }` — same raw-SQL-for-aggregation pattern as
+  `applyLocationFilter` / `getManualLocationFlags`. Test: `fishings.spec.ts` →
+  "endFishings closes trips with nothing left to report".
 - **mass-delete/privesc/SQLi batch** — closed three systemic holes from a
   security audit: (1) `removeAllEntities` → `visibility: 'protected'` so the
   `mappingPolicy: 'all'` fallback URL can't wipe tables; (2) nested `$raw`
