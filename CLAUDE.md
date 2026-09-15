@@ -260,6 +260,18 @@ appear without the `call` prefix (e.g. `mol $ tenants-import --dry`).
 
 ## Recent fix log (worth knowing)
 
+- **set-only trips could not be ended** — `assertEveryToolTypeHasFishLogged`
+  counted EVERY weight event of the fishing, so an empty "Patikrinta" on a net
+  left in the water by an earlier trip (mandatory before dropping new gear in
+  the same bar) blocked `POST /fishings/end` with 422 and disabled the FE button
+  via `hasUncompletedTools`. The midnight cron leaves shore-less fishings open
+  by design and `startFishing` allows one fishing at a time, so the fisher could
+  neither finish nor start the next trip — while skipping the check would have
+  let them finish, i.e. the guard punished the tidy behaviour. The guard now
+  only arms when a checked tools group was BUILT during the same fishing (the
+  shortcut cddb77c targeted); "any fish logged anywhere in the trip" still
+  clears it, so no new blocks. Test:
+  `fishings-end-after-leftover-check.spec.ts`.
 - **gear spans fishings — aggregate from weight events too** — a tools group
   stays in the water between trips, and `tools_groups_events.fishing_id` only
   marks the trip that BUILT or REMOVED it. So the next day's fishing, where the

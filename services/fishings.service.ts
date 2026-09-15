@@ -24,6 +24,7 @@ import { FishType } from './fishTypes.service';
 import { Coordinates, CoordinatesProp, Location } from './location.service';
 import { Polder } from './polders.service';
 import { Tenant } from './tenants.service';
+import { ToolsGroup } from './toolsGroups.service';
 import { ToolCategory } from './toolTypes.service';
 import { User } from './users.service';
 import {
@@ -560,13 +561,20 @@ export default class FishTypesService extends moleculer.Service {
   // having logged "checked" but never recording catch. Returned tools'
   // events still count — see the related PR for the rationale (return
   // is not a sanctioned escape hatch out of the report).
+  //
+  // Only tools BUILT during this fishing arm the guard. Checking a net left by
+  // an earlier trip is mandatory before new gear goes into the same bar and
+  // says nothing about today's catch; counting it left set-only trips
+  // impossible to end — and, with one fishing at a time, impossible to replace.
   @Method
   async assertEveryToolTypeHasFishLogged(
-    _ctx: Context,
-    _fishing: Fishing,
+    ctx: Context,
+    fishing: Fishing,
     fishWeightEvents: WeightEvent<'toolsGroup'>[],
   ) {
     if (!fishWeightEvents.length) return;
+
+    if (!(await this.hasCheckedToolsBuiltInFishing(ctx, fishing, fishWeightEvents))) return;
 
     const hasAnyFishLogged = fishWeightEvents.some((w) => w.data && Object.keys(w.data).length > 0);
     if (!hasAnyFishLogged) {
@@ -574,6 +582,36 @@ export default class FishTypesService extends moleculer.Service {
         'Negalima baigti žvejybos: yra įrankių, pažymėtų kaip patikrinti, bet žuvies svoris dar neįrašytas. Pirmiausia įrašykite žuvis arba grąžinkite įrankius į sandėlį.',
       );
     }
+  }
+
+  // Same find + JS filter shape as `toolsGroups.assertSiblingsHaveFishLogged`:
+  // ids come back encoded on both sides, so comparing them needs no secure-id
+  // decoding. Returned groups stay in the query — returning is not an escape
+  // hatch out of the report.
+  @Method
+  async hasCheckedToolsBuiltInFishing(
+    ctx: Context,
+    fishing: Fishing,
+    fishWeightEvents: WeightEvent<'toolsGroup'>[],
+  ): Promise<boolean> {
+    const checkedGroupIds = new Set(
+      fishWeightEvents
+        .map((w) => w.toolsGroup?.id)
+        .filter((id) => id != null)
+        .map(String),
+    );
+    if (!checkedGroupIds.size) return false;
+
+    const groups: ToolsGroup<'buildEvent'>[] = await ctx.call('toolsGroups.find', {
+      query: { buildEvent: { $exists: true } },
+      populate: ['buildEvent'],
+    });
+
+    return groups.some(
+      (group) =>
+        checkedGroupIds.has(String(group.id)) &&
+        String(group.buildEvent?.fishing?.id ?? '') === String(fishing.id),
+    );
   }
 
   // Boolean twin of `assertEveryToolTypeHasFishLogged` — used by
