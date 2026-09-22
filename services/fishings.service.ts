@@ -873,7 +873,25 @@ export default class FishTypesService extends moleculer.Service {
     }
 
     if (invalidKeys.length > 0) {
-      throw new moleculer.Errors.ValidationError('Weight difference greater than 20%');
+      // The species have to travel with the error: the app shows the fisher
+      // WHICH fish broke the 20% rule, and it only knows the ids it sent.
+      const fishTypes: FishType[] = await ctx.call('fishTypes.find', {
+        query: { id: { $in: invalidKeys.map(Number) } },
+      });
+      const labelById = new Map(fishTypes.map((fishType) => [Number(fishType.id), fishType.label]));
+
+      throw new moleculer.Errors.ValidationError(
+        'Weight difference greater than 20%',
+        'WEIGHT_DIFFERENCE',
+        {
+          invalidFish: invalidKeys.map((key) => ({
+            id: Number(key),
+            label: labelById.get(Number(key)),
+            preliminaryAmount: preliminaryData[key],
+            amount: data[key],
+          })),
+        },
+      );
     }
 
     await ctx.call('weightEvents.createWeightEvent', {
