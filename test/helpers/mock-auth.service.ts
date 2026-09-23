@@ -43,10 +43,14 @@ const tokenToUserId = new Map<string, number>();
 let nextAuthUserId = 1000;
 let nextAuthGroupId = 2000;
 
+// Company groups the auth server would keep between invites, keyed by company code.
+const companyGroups = new Map<string, { id: number; name: string; companyCode: string }>();
+
 export const MockAuthState = {
   reset() {
     usersById.clear();
     tokenToUserId.clear();
+    companyGroups.clear();
     nextAuthUserId = 1000;
     nextAuthGroupId = 2000;
   },
@@ -135,6 +139,23 @@ export default class MockAuthService extends moleculer.Service {
       role?: 'ADMIN' | 'USER';
     }>,
   ) {
+    // biip-auth-api looks a company group up by company code and hands back the SAME
+    // group when the company is invited again (usersEvartai.service.ts `invite`), and
+    // `groups.remove` keeps company groups alive (groups.service.ts `removeGroup` only
+    // drops the calling app). Mirror that: a re-invite must not mint a new group id.
+    if (ctx.params.companyCode) {
+      const existingGroup = companyGroups.get(ctx.params.companyCode);
+      if (existingGroup) return existingGroup;
+
+      const group = {
+        id: MockAuthState.nextGroupId(),
+        name: `Company: ${ctx.params.companyCode}`,
+        companyCode: ctx.params.companyCode,
+      };
+      companyGroups.set(ctx.params.companyCode, group);
+      return group;
+    }
+
     const id = nextAuthUserId++;
     const full: MockAuthUser = {
       id,
