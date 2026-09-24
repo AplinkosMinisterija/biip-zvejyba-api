@@ -262,6 +262,12 @@ describe('fishings — weighFish payload guards', () => {
       });
     expect(res.status).toBe(422);
     expect(res.body.message).toMatch(/Weight difference/i);
+    // The app names the offending species in the toast — it can only do that
+    // if the error carries them.
+    expect(res.body.type).toBe('WEIGHT_DIFFERENCE');
+    expect(res.body.data.invalidFish).toEqual([
+      { id: fishId, label: expect.any(String), preliminaryAmount: 20, amount: 30 },
+    ]);
   });
 
   it('accepts any onshore weight when the preliminary weight is under 10 kg', async () => {
