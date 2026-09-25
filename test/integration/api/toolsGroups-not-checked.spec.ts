@@ -22,6 +22,7 @@ let fishId: number;
 let trap1: number;
 let trap2: number;
 let net1: number;
+let net2: number;
 
 async function createTool(sealNr: string, toolType: number): Promise<number> {
   await broker.call(
@@ -52,14 +53,13 @@ const weigh = (id: number, data: Record<number, number>) =>
     .send({ coordinates, location: bar, data })
     .expect(200);
 
-const getWeights = () =>
-  request(apiService.server).get('/zvejyba/api/fishings/weights').set(headers).expect(200);
-
-const weighOnShore = () =>
-  request(apiService.server)
-    .post('/zvejyba/api/fishings/weight')
-    .set(headers)
-    .send({ coordinates, data: { [fishId]: 5 }, preliminaryData: { [fishId]: 5 } });
+const getNotChecked = async () =>
+  (
+    await request(apiService.server)
+      .get('/zvejyba/api/toolsGroups/notChecked')
+      .set(headers)
+      .expect(200)
+  ).body;
 
 const endFishing = () =>
   request(apiService.server).post('/zvejyba/api/fishings/end').set(headers).send({ coordinates });
@@ -79,7 +79,7 @@ beforeAll(async () => {
   trap1 = await createTool('UC-TRAP-1', trapType);
   trap2 = await createTool('UC-TRAP-2', trapType);
   net1 = await createTool('UC-NET-1', netType);
-  const net2 = await createTool('UC-NET-2', netType);
+  net2 = await createTool('UC-NET-2', netType);
 
   await broker.call('fishings.startFishing', { type: 'ESTUARY', coordinates }, { meta: ownerMeta });
   await build(trap1);
@@ -96,17 +96,14 @@ afterAll(() => broker.stop());
 
 const barWarning = [{ id: bar.id, name: bar.name }];
 
-describe('fishings/weights — unfinishedCheckLocations', () => {
-  it('reports nothing before any tool is checked', async () => {
-    const res = await getWeights();
-    expect(res.body.unfinishedCheckLocations).toEqual([]);
+describe('toolsGroups/notChecked', () => {
+  it('ignores untouched gear and gear set during this fishing', async () => {
+    expect(await getNotChecked()).toEqual([]);
   });
 
   it('reports the bar once one tool of a type is checked and another is not', async () => {
     await weigh(trap1, { [fishId]: 5 });
-
-    const res = await getWeights();
-    expect(res.body.unfinishedCheckLocations).toEqual(barWarning);
+    expect(await getNotChecked()).toEqual(barWarning);
   });
 
   it('keeps reporting after the checked tool is returned to the warehouse', async () => {
@@ -116,23 +113,20 @@ describe('fishings/weights — unfinishedCheckLocations', () => {
       .send({ coordinates, location: bar })
       .expect(200);
 
-    const res = await getWeights();
-    expect(res.body.unfinishedCheckLocations).toEqual(barWarning);
+    expect(await getNotChecked()).toEqual(barWarning);
   });
 
-  it('clears once the type is fully checked, ignoring untouched types and gear set this trip', async () => {
+  it('clears once the type is checked with fish, ignoring gear set this fishing and untouched types', async () => {
     await weigh(trap2, {});
-
-    const res = await getWeights();
-    expect(res.body.unfinishedCheckLocations).toEqual([]);
+    expect(await getNotChecked()).toEqual([]);
   });
 
-  it('is only a warning: shore weighing and ending still succeed', async () => {
+  it('reports a type whose tools are all checked but none weighed with fish', async () => {
     await weigh(net1, {});
-    const res = await getWeights();
-    expect(res.body.unfinishedCheckLocations).toEqual(barWarning);
+    await weigh(net2, {});
+    expect(await getNotChecked()).toEqual(barWarning);
 
-    await weighOnShore().expect(200);
-    await endFishing().expect(200);
+    await weigh(net2, { [fishId]: 2 });
+    expect(await getNotChecked()).toEqual([]);
   });
 });

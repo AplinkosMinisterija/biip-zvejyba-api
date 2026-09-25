@@ -604,48 +604,6 @@ export default class FishTypesService extends moleculer.Service {
     }
   }
 
-  // Gear set this trip cannot be checked yet; gear returned this trip still counts as started.
-  @Method
-  async getUnfinishedCheckLocations(
-    ctx: Context,
-    fishing: Fishing,
-  ): Promise<Array<{ id: string; name: string }>> {
-    const fishingId = Number(fishing.id);
-    return this.rawQuery(
-      ctx,
-      `WITH gear AS (
-         SELECT tg.id, tg.remove_event_id, t.tool_type_id,
-                be.location->>'id' AS location_id, be.location->>'name' AS location_name
-           FROM fishings cur
-           JOIN tools_groups tg
-             ON tg.deleted_at IS NULL
-            AND CASE WHEN cur.tenant_id IS NULL
-                     THEN tg.tenant_id IS NULL AND tg.user_id = cur.user_id
-                     ELSE tg.tenant_id = cur.tenant_id END
-           JOIN tools_groups_events be ON be.id = tg.build_event_id AND be.deleted_at IS NULL
-           JOIN fishings bf ON bf.id = be.fishing_id AND bf.type = cur.type AND bf.id <> cur.id
-           LEFT JOIN tools_groups_events re ON re.id = tg.remove_event_id
-           JOIN tools t ON t.id = ANY(tg.tools) AND t.deleted_at IS NULL
-          WHERE cur.id = ?
-            AND be.location->>'id' IS NOT NULL
-            AND (tg.remove_event_id IS NULL OR re.fishing_id = cur.id)
-       ), unfinished AS (
-         SELECT g.location_id, MIN(g.location_name) AS location_name
-           FROM gear g
-           LEFT JOIN weight_events we
-             ON we.tools_group_id = g.id AND we.fishing_id = ? AND we.deleted_at IS NULL
-          GROUP BY g.location_id, g.tool_type_id
-         HAVING bool_or(we.id IS NOT NULL)
-            AND bool_or(we.id IS NULL AND g.remove_event_id IS NULL)
-       )
-       SELECT location_id AS id, MIN(location_name) AS name
-         FROM unfinished
-        GROUP BY location_id
-        ORDER BY name`,
-      [fishingId, fishingId],
-    );
-  }
-
   // Journal-list scoping. ProfileMixin.beforeSelect strips `user` from caller
   // queries (a FORBIDDEN key) to block horizontal escalation. For the fishing
   // journal a company (tenant-profile) member is allowed to narrow the
@@ -847,15 +805,11 @@ export default class FishTypesService extends moleculer.Service {
     const hasUncompletedTools = toolsGroup
       ? false
       : await this.fishingHasUncompletedTools(ctx, currentFishing);
-    const unfinishedCheckLocations = toolsGroup
-      ? []
-      : await this.getUnfinishedCheckLocations(ctx, currentFishing);
 
     return {
       total: totalWeightEvent?.data,
       preliminary: data.fishWeights,
       hasUncompletedTools,
-      unfinishedCheckLocations,
     };
   }
 

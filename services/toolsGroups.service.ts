@@ -572,71 +572,50 @@ export default class ToolsGroupsService extends moleculer.Service {
     },
     auth: RestrictionType.USER,
   })
-  async getNotCheckedToolsGroups(ctx: Context<{ toolsGroup?: number }>) {
+  async getNotCheckedToolsGroups(
+    ctx: Context<{ toolsGroup?: number }>,
+  ): Promise<Array<{ id: string; name: string }>> {
     const currentFishing: Fishing = await ctx.call('fishings.currentFishing');
     if (!currentFishing) {
       throw new moleculer.Errors.ValidationError('Fishing not started');
     }
 
-    const notRemovedToolsGroups: ToolsGroup<'buildEvent'>[] = await ctx.call('toolsGroups.find', {
-      query: { removeEvent: { $exists: false } },
-      populate: ['buildEvent'],
-    });
-
-    const weightEvents: WeightEvent<'toolsGroup'>[] = await ctx.call('weightEvents.find', {
-      query: { fishing: currentFishing.id },
-    });
-
-    // Map<toolsGroup.id, hasAnyFishLogged> — a "Patikrinta" press writes a
-    // weight_event with `data: {}`, so we need to look at the payload to
-    // tell apart "checked-with-fish" from "checked-empty".
-    const weightByGroup = new Map<number, boolean>();
-    for (const w of weightEvents) {
-      const groupId = w.toolsGroup?.id;
-      if (groupId == null) continue;
-      const hasFish = !!w.data && Object.keys(w.data).length > 0;
-      weightByGroup.set(groupId, weightByGroup.get(groupId) || hasFish);
-    }
-
-    const locationStats = new Map<
-      string,
-      { name: string; checked: number; unchecked: number; withFish: number }
-    >();
-    for (const group of notRemovedToolsGroups) {
-      const buildFishing = group.buildEvent?.fishing;
-      // Different fishing type → not our concern (e.g. ESTUARY vs INLAND).
-      // Previously also skipped the current fishing entirely, but the user
-      // needs to be warned when they cross over to a new bar leaving an
-      // earlier bar of the same trip half-finished.
-      if (buildFishing?.type !== currentFishing.type) continue;
-      const location = group.buildEvent?.location;
-      if (!location?.id) continue;
-      const key = String(location.id);
-      const entry = locationStats.get(key) ?? {
-        name: location.name ?? '',
-        checked: 0,
-        unchecked: 0,
-        withFish: 0,
-      };
-      if (weightByGroup.has(group.id)) {
-        entry.checked += 1;
-        if (weightByGroup.get(group.id)) entry.withFish += 1;
-      } else {
-        entry.unchecked += 1;
-      }
-      locationStats.set(key, entry);
-    }
-
-    return Array.from(locationStats.entries())
-      .filter(([, stats]) => {
-        // Surface bars that are still "in progress": either some tools are
-        // unchecked, or every checked one is an empty Patikrinta (no fish
-        // logged yet). Fully-weighed bars with no leftover tools fall out.
-        if (stats.unchecked > 0 && stats.checked > 0) return true;
-        if (stats.checked > 0 && stats.withFish === 0) return true;
-        return false;
-      })
-      .map(([id, stats]) => ({ id, name: stats.name }));
+    // Gear set this fishing can't be checked yet; the last tool of a type can only be weighed.
+    const fishingId = Number(currentFishing.id);
+    return this.rawQuery(
+      ctx,
+      `WITH gear AS (
+         SELECT tg.id, tg.remove_event_id, t.tool_type_id,
+                be.location->>'id' AS location_id, be.location->>'name' AS location_name
+           FROM fishings cur
+           JOIN tools_groups tg
+             ON tg.deleted_at IS NULL
+            AND CASE WHEN cur.tenant_id IS NULL
+                     THEN tg.tenant_id IS NULL AND tg.user_id = cur.user_id
+                     ELSE tg.tenant_id = cur.tenant_id END
+           JOIN tools_groups_events be ON be.id = tg.build_event_id AND be.deleted_at IS NULL
+           JOIN fishings bf ON bf.id = be.fishing_id AND bf.type = cur.type AND bf.id <> cur.id
+           LEFT JOIN tools_groups_events re ON re.id = tg.remove_event_id
+           JOIN tools t ON t.id = ANY(tg.tools) AND t.deleted_at IS NULL
+          WHERE cur.id = ?
+            AND be.location->>'id' IS NOT NULL
+            AND (tg.remove_event_id IS NULL OR re.fishing_id = cur.id)
+       ), unfinished AS (
+         SELECT g.location_id, MIN(g.location_name) AS location_name
+           FROM gear g
+           LEFT JOIN weight_events we
+             ON we.tools_group_id = g.id AND we.fishing_id = ? AND we.deleted_at IS NULL
+          GROUP BY g.location_id, g.tool_type_id
+         HAVING bool_or(we.id IS NOT NULL)
+            AND (bool_or(we.id IS NULL AND g.remove_event_id IS NULL)
+                 OR NOT bool_or(we.data IS NOT NULL AND we.data <> '{}'::jsonb))
+       )
+       SELECT location_id AS id, MIN(location_name) AS name
+         FROM unfinished
+        GROUP BY location_id
+        ORDER BY name`,
+      [fishingId, fishingId],
+    );
   }
 
   @Action({
