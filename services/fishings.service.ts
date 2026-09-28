@@ -34,6 +34,8 @@ import {
 
 const Cron = require('@r2d2bzh/moleculer-cron');
 
+const WEIGHT_DIFFERENCE_MIN_KG = 10;
+
 export enum FishingType {
   ESTUARY = 'ESTUARY',
   POLDERS = 'POLDERS',
@@ -243,22 +245,39 @@ export type Fishing<
           const ids = fishings.map((f) => Number(f.id)).filter(Number.isFinite);
           if (!ids.length) return fishings.map(() => []);
 
+          // Two ways a fishing touches gear, and BOTH have to count. Build /
+          // remove events (`tools_groups_events.fishing_id`) only exist on the
+          // trip that deployed or pulled the group — gear stays in the water
+          // across trips, so a fishing that merely weighed it has no event row
+          // and used to render "-" in the admin journal. `weight_events`
+          // (weigh + empty "Patikrinta") carry `tools_group_id` and pin the
+          // gear to the trip it was actually fished on.
+          //
           // A tools group points AT its events (`build_event_id` /
           // `remove_event_id`); `tools_groups_events` has no `tools_group_id`
           // (dropped in 20231110203315). `tools_groups.tools` is an int[].
           // Raw SQL — see CLAUDE.md -> "Virtual-field populate gotchas".
           const rows: Array<{ fishing_id: number; type: ToolCategory }> = await this.rawQuery(
             ctx,
-            `SELECT DISTINCT tge.fishing_id, tt.type
-               FROM tools_groups_events tge
-               JOIN tools_groups tg
-                 ON (tg.build_event_id = tge.id OR tg.remove_event_id = tge.id)
-                AND tg.deleted_at IS NULL
-               JOIN tools t ON t.id = ANY(tg.tools) AND t.deleted_at IS NULL
-               JOIN tool_types tt ON tt.id = t.tool_type_id AND tt.deleted_at IS NULL
-              WHERE tge.fishing_id = ANY(?) AND tge.deleted_at IS NULL
-              ORDER BY tt.type`,
-            [ids],
+            `SELECT fishing_id, type FROM (
+               SELECT tge.fishing_id, tt.type
+                 FROM tools_groups_events tge
+                 JOIN tools_groups tg
+                   ON (tg.build_event_id = tge.id OR tg.remove_event_id = tge.id)
+                  AND tg.deleted_at IS NULL
+                 JOIN tools t ON t.id = ANY(tg.tools) AND t.deleted_at IS NULL
+                 JOIN tool_types tt ON tt.id = t.tool_type_id AND tt.deleted_at IS NULL
+                WHERE tge.fishing_id = ANY(?) AND tge.deleted_at IS NULL
+               UNION
+               SELECT we.fishing_id, tt.type
+                 FROM weight_events we
+                 JOIN tools_groups tg ON tg.id = we.tools_group_id AND tg.deleted_at IS NULL
+                 JOIN tools t ON t.id = ANY(tg.tools) AND t.deleted_at IS NULL
+                 JOIN tool_types tt ON tt.id = t.tool_type_id AND tt.deleted_at IS NULL
+                WHERE we.fishing_id = ANY(?) AND we.deleted_at IS NULL
+             ) categories
+             ORDER BY type`,
+            [ids, ids],
           );
 
           return fishings.map((f) =>
@@ -360,28 +379,39 @@ export default class FishTypesService extends moleculer.Service {
     visibility: 'protected',
   })
   async endFishings(ctx: Context) {
-    // Auto-close only fishings that already have an onshore weigh-in
-    // (`weight_events.tools_group_id IS NULL`). A fishing with no shore
-    // weight is an incomplete catch report — silently ending it would
-    // freeze it with no landed catch, so leave it open for the fisher to
-    // finish. Raw SQL for the "has any shore weight" aggregation dodges the
-    // secure-id / ProfileMixin-scope layering (see CLAUDE.md → "Virtual-field
-    // populate gotchas").
-    const rows: Array<{ fishing_id: number }> = await this.rawQuery(
+    // A fishing is auto-closed unless it still owes a landing: fish recorded on
+    // the boat (`weight_events.tools_group_id` set) that never reached an
+    // onshore weigh-in (`tools_group_id IS NULL`). Everything else has nothing
+    // left to report — the catch was landed, or the trip only set gear and every
+    // check came up empty — and leaving those open costs the fisher the next
+    // trip, since `startFishing` allows one at a time. Skip rows carry no start
+    // event and are left alone. Raw SQL for the aggregation dodges the secure-id
+    // / ProfileMixin-scope layering (see CLAUDE.md → "Virtual-field populate
+    // gotchas").
+    // `we.id IS NOT NULL` keeps the LEFT JOIN's empty row honest: without it
+    // `we.tools_group_id IS NULL` reads as TRUE for a fishing that has no
+    // weight events at all, i.e. "landed its catch".
+    const rows: Array<{ id: number }> = await this.rawQuery(
       ctx,
-      `SELECT DISTINCT fishing_id FROM weight_events
-         WHERE tools_group_id IS NULL AND fishing_id IS NOT NULL AND deleted_at IS NULL`,
+      `SELECT f.id
+         FROM fishings f
+         LEFT JOIN weight_events we ON we.fishing_id = f.id AND we.deleted_at IS NULL
+        WHERE f.end_event_id IS NULL
+          AND f.start_event_id IS NOT NULL
+          AND f.deleted_at IS NULL
+        GROUP BY f.id
+       HAVING NOT bool_or(we.data IS NOT NULL AND we.data <> '{}'::jsonb)
+           OR bool_or(we.id IS NOT NULL AND we.tools_group_id IS NULL)`,
     );
-    const fishingIdsWithShoreWeight = rows
-      .map((r) => Number(r.fishing_id))
-      .filter(Number.isFinite);
 
-    if (!fishingIdsWithShoreWeight.length) return [];
+    const closableIds = rows.map((row) => Number(row.id)).filter(Number.isFinite);
+
+    if (!closableIds.length) return [];
 
     const fishings: Fishing[] = await ctx.call('fishings.find', {
       query: {
         endEvent: { $exists: false },
-        id: { $in: fishingIdsWithShoreWeight },
+        id: { $in: closableIds },
       },
     });
 
@@ -833,7 +863,7 @@ export default class FishTypesService extends moleculer.Service {
       const finalValue = data[key];
       const preliminaryValue = preliminaryData[key];
 
-      if (preliminaryValue === undefined || preliminaryValue === 0) continue;
+      if (preliminaryValue === undefined || preliminaryValue < WEIGHT_DIFFERENCE_MIN_KG) continue;
 
       const error = Math.abs(finalValue - preliminaryValue) / preliminaryValue;
 
@@ -843,7 +873,25 @@ export default class FishTypesService extends moleculer.Service {
     }
 
     if (invalidKeys.length > 0) {
-      throw new moleculer.Errors.ValidationError('Weight difference greater than 20%');
+      // The species have to travel with the error: the app shows the fisher
+      // WHICH fish broke the 20% rule, and it only knows the ids it sent.
+      const fishTypes: FishType[] = await ctx.call('fishTypes.find', {
+        query: { id: { $in: invalidKeys.map(Number) } },
+      });
+      const labelById = new Map(fishTypes.map((fishType) => [Number(fishType.id), fishType.label]));
+
+      throw new moleculer.Errors.ValidationError(
+        'Weight difference greater than 20%',
+        'WEIGHT_DIFFERENCE',
+        {
+          invalidFish: invalidKeys.map((key) => ({
+            id: Number(key),
+            label: labelById.get(Number(key)),
+            preliminaryAmount: preliminaryData[key],
+            amount: data[key],
+          })),
+        },
+      );
     }
 
     await ctx.call('weightEvents.createWeightEvent', {
