@@ -46,10 +46,12 @@ Parametrai (visi optional):
 
 | Param | Reikšmė |
 |---|---|
-| `dateFrom`, `dateTo` | laikotarpis (`weight_events.date`) |
-| `type` | `ESTUARY` / `INLAND_WATERS` / `POLDERS` |
+| `dateFrom`, `dateTo` | laikotarpis (`weight_events.date`, Vilniaus kalendorinė diena) |
+| `types` | `ESTUARY` / `INLAND_WATERS` / `POLDERS` masyvas |
 | `locationId` + `locationName` | konkretus kvadratas / telkinys / polderis |
 | `fishTypes` | rūšių id masyvas |
+| `toolTypes` | įrankių tipų id masyvas |
+| `byMonths`, `byToolTypes` | mėnesių lapai / įrankių eilutės po įmone |
 
 Imami **tik krantiniai svėrimai** (`tools_group_id IS NULL`) — tai oficialus
 tiksliai pasvertas kiekis, kurį etaloninė lentelė ir raportuoja.
@@ -133,3 +135,22 @@ užrakinta `RestrictionType.INVESTIGATOR`.
 
 - Etalono migracijos blokai (stintų / upinių nėgių) — nemodeliuojam laikotarpio
 - Fizinių asmenų nuasmeninimas — etalone jie vardais, paliekam taip pat
+
+## Stage 2 — split by month, tool type and bar (biip-zvejyba-api#162)
+
+- **Attribution.** Only boat weigh-ins (`weight_events.tools_group_id` set)
+  know the gear (`tools_groups.tools` → `tool_types`) and the bar (the group's
+  build-event `location`). Each species' shore kg is split over the same
+  fishing's boat weigh-ins in proportion to their kg for that species, in whole
+  cents so the parts add back up. A species never weighed on the boat stays
+  unattributed → row „Įrankis nenurodytas", and it drops out under a bar or
+  tool-type filter.
+- **Months.** Bucketed by the shore weigh-in's Vilnius calendar day. Every
+  month of the period gets a sheet (`01`…, or `YYYY-MM` when the period crosses
+  a year); more than 120 sheets is rejected.
+- **Blocks.** Only the picked zones are drawn; none picked = all three.
+- **Header.** Row 3 lists every filter, unset ones as „visi" / „visos".
+- Pure logic lives in `modules/catchSummary.ts`; the service keeps the SQL.
+- FE: `DynamicFilter` cannot show, hide or clear a field from another field's
+  draft value, so `/suvestine` uses its own filter popup built from
+  design-system fields.

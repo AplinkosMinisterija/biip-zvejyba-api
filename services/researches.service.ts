@@ -1,6 +1,5 @@
 'use strict';
 
-import ExcelJS from 'exceljs';
 import moleculer, { Context, RestSchema } from 'moleculer';
 import { Action, Method, Service } from 'moleculer-decorators';
 import PostgisMixin, { GeometryType } from 'moleculer-postgis';
@@ -18,6 +17,20 @@ import {
 } from '../types';
 
 import ProfileMixin from '../mixins/profile.mixin';
+import {
+  allocateShoreCatch,
+  BoatCatchRow,
+  buildCatchSummaryWorkbook,
+  CatchLocation,
+  describeSummaryFilters,
+  filterCatchEntries,
+  ShoreCatchRow,
+  summarizeCatch,
+  SUMMARY_MAX_MONTH_SHEETS,
+  summaryMonths,
+  SummaryPeriod,
+  toVilniusDate,
+} from '../modules/catchSummary';
 import { GeomFeatureCollection } from '../modules/geometry';
 import { getFolderName } from '../utils';
 import { UserAuthMeta } from './api.service';
@@ -45,112 +58,19 @@ const publicFields = [
   'totalBiomass',
 ];
 
-// Verslinių sugavimų suvestinės stulpeliai. Tvarka ir sudėtis pakartoja AAD
-// rankomis pildytą etaloninę lentelę („Versliniai sugavimai … (Suvestinė)"),
-// todėl sąmoningai NEGENERUOJAMA iš `fish_types`: adminui pridėjus rūšį
-// stulpeliai pasislinktų ir suvestinė nustotų sutapti su istoriniais failais.
-// `labels` — `fish_types.label` reikšmės, krentančios į tą patį stulpelį.
-type SummaryColumn = { header: string; labels: string[] };
+// Caught-on day as the fisher lives it; FE sends Vilnius day bounds.
+const SHORE_CATCH_DAY_SQL = `(COALESCE(we.date, we.created_at) AT TIME ZONE 'Europe/Vilnius')::date`;
 
-const SUMMARY_MAIN_COLUMNS: SummaryColumn[] = [
-  { header: 'Karšis', labels: ['Karšis'] },
-  // Etalone „Starkis", registre „Sterkas". Neverslinio dydžio sterkas
-  // etalone atskiro stulpelio neturi, tad sumuojamas čia pat.
-  { header: 'Starkis', labels: ['Sterkas', 'Sterkas (neverslinio dydžio)'] },
-  { header: 'Kuoja', labels: ['Kuoja'] },
-  { header: 'Lydeka', labels: ['Lydeka'] },
-  { header: 'Ešerys', labels: ['Ešerys'] },
-  { header: 'Ungurys', labels: ['Ungurys'] },
-  { header: 'Karosas', labels: ['Karosas', 'Karosas, auksinis', 'Karosas, sidabrinis'] },
-  { header: 'Vėgėlė', labels: ['Vėgėlė'] },
-  { header: 'Stinta', labels: ['Stinta'] },
-  { header: 'Lynas', labels: ['Lynas'] },
-  { header: 'Nėgė', labels: ['Nėgė'] },
-  { header: 'Žiobris', labels: ['Žiobris'] },
-  { header: 'Plakis', labels: ['Plakis'] },
-  { header: 'Salatis', labels: ['Salatis'] },
-  { header: 'Šamas', labels: ['Šamas'] },
-  { header: 'Ožka', labels: ['Ožka'] },
-  { header: 'Karpis', labels: ['Karpis'] },
-];
-
-// „Kitos žuvys" detalizacija (etalono dešinysis blokas). Rūšis, nepatekusi nei
-// čia, nei į pagrindinius stulpelius, sumuojama į paskutinį „Kitos" stulpelį.
-const SUMMARY_OTHER_COLUMNS: SummaryColumn[] = [
-  { header: 'Perpelė', labels: ['Perpelė'] },
-  { header: 'Plačiakaktis', labels: ['Plačiakaktis'] },
-  { header: 'Plekšnė', labels: ['Plekšnė'] },
-  { header: 'Šapalas', labels: ['Šapalas'] },
-  { header: 'Sykas', labels: ['Sykas'] },
-  { header: 'Pūgžlys', labels: ['Pūgžlys'] },
-  { header: 'Dyglė', labels: ['Dyglė'] },
-  { header: 'Meknė', labels: ['Meknė'] },
-  { header: 'Raudė', labels: ['Raudė'] },
-  { header: 'Strimelė', labels: ['Strimelė'] },
-  { header: 'Aukšlė', labels: ['Aukšlė'] },
-  { header: 'Šlakis', labels: ['Šlakis'] },
-  { header: 'Lašiša', labels: ['Lašiša'] },
-];
-
-// Etalone kiekviena zona turi savo bloką. `INLAND_WATERS` blokas pakeičia
-// etalono „stintų / upinių nėgių migracijos metu" lenteles — migracijos
-// laikotarpio duomenų modelyje neturim, tad rodom visą zoną be skaidymo.
-const SUMMARY_ZONES: Array<{ type: FishingType; title: string; totalLabel: string }> = [
-  {
-    type: FishingType.ESTUARY,
-    title: 'KURŠIŲ MARIOSE:',
-    totalLabel: 'IŠ VISO (Kuršių mariose):',
-  },
-  {
-    type: FishingType.INLAND_WATERS,
-    title: 'NEMUNO ŽEMUPYJE, ŠVENTOSIOS UPĖJE:',
-    totalLabel: 'Iš viso Nemuno žemupyje, Šventosios upėje:',
-  },
-  {
-    type: FishingType.POLDERS,
-    title: 'POLDERIUOSE:',
-    totalLabel: 'Iš viso polderiuose:',
-  },
-];
-
-const SUMMARY_TITLE =
-  'ŽVEJYBOS VERSLINĖS ŽVEJYBOS ĮRANKIAIS KURŠIŲ MARIOSE, NEMUNO ŽEMUPYJE, ' +
-  'ŠVENTOJOJE (PAJŪRIO) UPĖSE ATASKAITŲ SUVESTINĖ (KG.)';
-
-// 1 (eil. nr.) + 1 (pavadinimas) + rūšys + „Kitos žuvys" + „IŠ VISO"
-const SUMMARY_TOTAL_COL = 2 + SUMMARY_MAIN_COLUMNS.length + 2;
-// Tuščias skiriamasis stulpelis, tada „Kontrolinė suma" ir detalizacija.
-const SUMMARY_CONTROL_COL = SUMMARY_TOTAL_COL + 2;
-const SUMMARY_LAST_COL = SUMMARY_CONTROL_COL + SUMMARY_OTHER_COLUMNS.length + 2;
-
-type SummaryTotals = { main: number[]; other: number[] };
-
-const emptyTotals = (): SummaryTotals => ({
-  main: SUMMARY_MAIN_COLUMNS.map(() => 0),
-  // +1 — paskutinis „Kitos" stulpelis nesuklasifikuotoms rūšims.
-  other: [...SUMMARY_OTHER_COLUMNS.map(() => 0), 0],
-});
-
-const addTotals = (target: SummaryTotals, source: SummaryTotals) => {
-  source.main.forEach((value, i) => (target.main[i] += value));
-  source.other.forEach((value, i) => (target.other[i] += value));
-};
-
-// Kilogramai suvedami su dešimtainėmis dalimis, tad sumos kaupia float paklaidą.
-const round2 = (value: number) => Math.round(value * 100) / 100;
-
-// Rūšys sutapdinamos pagal `label`, o registro rašyba per aplinkas skiriasi
-// (dev turėjo `karpiai`, prod — `Karpis`). Normalizavimas padengia raidžių
-// registrą ir tarpus; skirtingi žodžiai lieka nesutapę ir atsiduria
-// diagnostiniame lape, o ne tyliai „Kitose".
-const normalizeLabel = (label: string) => label.trim().toLowerCase().replace(/\s+/g, ' ');
-
-type CatchSummaryRow = {
-  fishing_type: string;
-  tenant_name: string | null;
-  first_name: string | null;
-  last_name: string | null;
-  data: Record<string, number> | null;
+type CatchSummaryParams = {
+  dateFrom?: string;
+  dateTo?: string;
+  types?: FishingType[];
+  locationId?: string;
+  locationName?: string;
+  fishTypes?: string[];
+  toolTypes?: string[];
+  byMonths?: boolean;
+  byToolTypes?: boolean;
 };
 
 interface Fields extends CommonFields {
@@ -564,50 +484,75 @@ export default class ResearchesService extends moleculer.Service {
     params: {
       dateFrom: 'string|optional',
       dateTo: 'string|optional',
-      type: {
-        type: 'enum',
-        values: Object.values(FishingType),
+      types: {
+        type: 'array',
+        items: { type: 'enum', values: Object.values(FishingType) },
         optional: true,
+        convert: true,
       },
       locationId: 'string|optional',
       locationName: 'string|optional',
       // Priimam kaip string'us: FE siunčia tokius id, kokius pats gavo iš
-      // `fishTypes`, o mes juos verčiam į etiketes (žr. resolveSelectedFishLabels).
+      // `fishTypes` / `toolTypes`, o mes juos verčiam į etiketes
+      // (žr. resolveSelectedLabels).
       fishTypes: {
         type: 'array',
         items: 'string',
         optional: true,
         convert: true,
       },
+      toolTypes: {
+        type: 'array',
+        items: 'string',
+        optional: true,
+        convert: true,
+      },
+      byMonths: { type: 'boolean', optional: true, convert: true },
+      byToolTypes: { type: 'boolean', optional: true, convert: true },
     },
   })
-  async catchSummary(
-    ctx: Context<
-      {
-        dateFrom?: string;
-        dateTo?: string;
-        type?: FishingType;
-        locationId?: string;
-        locationName?: string;
-        fishTypes?: string[];
-      },
-      ResponseHeadersMeta
-    >,
-  ) {
-    const from = this.parseSummaryDate(ctx.params.dateFrom, 'dateFrom', false);
-    const to = this.parseSummaryDate(ctx.params.dateTo, 'dateTo', true);
+  async catchSummary(ctx: Context<CatchSummaryParams, ResponseHeadersMeta>) {
+    const { types = [], locationId, locationName } = ctx.params;
+    const period: SummaryPeriod = {
+      from: this.parseSummaryDate(ctx.params.dateFrom, 'dateFrom'),
+      to: this.parseSummaryDate(ctx.params.dateTo, 'dateTo'),
+    };
+    const location: CatchLocation | null =
+      locationId && locationName ? { id: locationId, name: locationName } : null;
 
-    const [labelById, selectedLabels, rows] = await Promise.all([
+    const [labelById, fishTypes, toolTypes, shoreRows] = await Promise.all([
       this.fetchFishTypeLabels(ctx),
-      this.resolveSelectedFishLabels(ctx, ctx.params.fishTypes),
-      this.fetchCatchSummaryRows(ctx, { from, to }),
+      this.resolveSelectedLabels(ctx, 'fishTypes', ctx.params.fishTypes),
+      this.resolveSelectedLabels(ctx, 'toolTypes', ctx.params.toolTypes),
+      this.fetchShoreCatchRows(ctx, period, types),
     ]);
+    const boatRows = await this.fetchBoatCatchRows(
+      ctx,
+      shoreRows.map((row) => row.fishing_id),
+    );
 
-    const workbook = this.buildCatchSummaryWorkbook(rows, {
-      labelById,
-      selectedLabels,
-      from,
-      to,
+    const entries = filterCatchEntries(allocateShoreCatch(shoreRows, boatRows), {
+      location,
+      toolTypes,
+    });
+    const summary = summarizeCatch(entries, { labelById, selectedLabels: fishTypes });
+
+    const months = ctx.params.byMonths
+      ? summaryMonths(period, Array.from(summary.byMonth.keys()))
+      : [];
+    if (months.length > SUMMARY_MAX_MONTH_SHEETS) {
+      throw new moleculer.Errors.ValidationError(
+        `Period longer than ${SUMMARY_MAX_MONTH_SHEETS} months cannot be split by months`,
+        'PERIOD_TOO_LONG',
+      );
+    }
+
+    const workbook = buildCatchSummaryWorkbook(summary, {
+      period,
+      months,
+      types,
+      filterLine: describeSummaryFilters({ types, location, toolTypes, fishTypes }),
+      showToolTypes: !!ctx.params.byToolTypes,
     });
 
     const buffer = await workbook.xlsx.writeBuffer();
@@ -620,11 +565,10 @@ export default class ResearchesService extends moleculer.Service {
     return buffer;
   }
 
-  // Bare data (`2026-05-31`) neturi laiko dalies, tad intervalo pabaiga be šito
-  // nukirstų visą paskutinę dieną. FE siunčia jau `endOfDay`, bet endpoint'as
-  // kviečiamas ir tiesiogiai.
+  // FE sends Vilnius start/end-of-day instants, direct callers bare dates —
+  // both reduce to the Vilnius calendar day the SQL compares on.
   @Method
-  parseSummaryDate(value: string | undefined, field: string, endOfDay: boolean): Date | null {
+  parseSummaryDate(value: string | undefined, field: string): string | null {
     if (!value) return null;
 
     const date = new Date(value);
@@ -632,11 +576,7 @@ export default class ResearchesService extends moleculer.Service {
       throw new moleculer.Errors.ValidationError(`Invalid ${field}`);
     }
 
-    if (endOfDay && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
-      date.setHours(23, 59, 59, 999);
-    }
-
-    return date;
+    return toVilniusDate(date);
   }
 
   // `weight_events.data` raktai yra tokie id, kokius atsiuntė klientas. Kad
@@ -654,24 +594,26 @@ export default class ResearchesService extends moleculer.Service {
   }
 
   // Filtro id verčiam į etiketes tuo pačiu keliu, kuriuo juos gavo FE
-  // (`fishTypes.find`), tad sutapimas nepriklauso nuo id kodavimo.
+  // (`fishTypes.find` / `toolTypes.find`), tad sutapimas nepriklauso nuo id
+  // kodavimo.
   @Method
-  async resolveSelectedFishLabels(
+  async resolveSelectedLabels(
     ctx: Context,
-    fishTypes?: string[],
+    service: 'fishTypes' | 'toolTypes',
+    ids?: string[],
   ): Promise<Set<string> | null> {
-    if (!fishTypes?.length) return null;
+    if (!ids?.length) return null;
 
-    const all: Array<{ id: unknown; label: string }> = await ctx.call('fishTypes.find', {
+    const all: Array<{ id: unknown; label: string }> = await ctx.call(`${service}.find`, {
       fields: ['id', 'label'],
     });
 
     const labelById = new Map(all.map((item) => [String(item.id), item.label]));
-    const selected = fishTypes
+    const selected = ids
       .map((id) => labelById.get(String(id)))
       .filter((label): label is string => !!label);
 
-    // Filtras pritaikytas, bet nė viena rūšis neatpažinta — grąžinam tuščią
+    // Filtras pritaikytas, bet nė vienas id neatpažintas — grąžinam tuščią
     // aibę, kad suvestinė būtų tuščia, o ne begalinė (fail closed).
     return new Set(selected);
   }
@@ -682,57 +624,41 @@ export default class ResearchesService extends moleculer.Service {
   // Imam tik krantinius svėrimus (`tools_group_id IS NULL`) — tai oficialus
   // tiksliai pasvertas kiekis, kurį raportuoja ir etaloninė AAD lentelė.
   @Method
-  async fetchCatchSummaryRows(
-    ctx: Context<{
-      type?: FishingType;
-      locationId?: string;
-      locationName?: string;
-    }>,
-    range: { from: Date | null; to: Date | null },
-  ): Promise<CatchSummaryRow[]> {
-    const { type, locationId, locationName } = ctx.params;
-
+  async fetchShoreCatchRows(
+    ctx: Context,
+    period: SummaryPeriod,
+    types: FishingType[],
+  ): Promise<ShoreCatchRow[]> {
     const conditions = [
       'we.deleted_at IS NULL',
       'we.tools_group_id IS NULL',
       'f.deleted_at IS NULL',
     ];
-    const bindings: any[] = [];
+    const bindings: unknown[] = [];
 
-    if (type) {
-      conditions.push('f.type = ?');
-      bindings.push(type);
+    if (types.length) {
+      conditions.push('f.type = ANY(?)');
+      bindings.push(types);
     }
 
-    if (range.from) {
-      conditions.push('COALESCE(we.date, we.created_at) >= ?');
-      bindings.push(range.from);
+    if (period.from) {
+      conditions.push(`${SHORE_CATCH_DAY_SQL} >= ?::date`);
+      bindings.push(period.from);
     }
 
-    if (range.to) {
-      conditions.push('COALESCE(we.date, we.created_at) <= ?');
-      bindings.push(range.to);
-    }
-
-    // Vietovė gyvena įrankių įvykiuose, ne žvejybos eilutėje — tas pats
-    // sutapimas kaip `fishings.applyLocationFilter` (id + pavadinimas, nes
-    // polderių ir barų id gali sutapti).
-    if (locationId && locationName) {
-      conditions.push(
-        `we.fishing_id IN (
-           SELECT fishing_id FROM tools_groups_events
-           WHERE location->>'id' = ? AND location->>'name' = ? AND deleted_at IS NULL
-         )`,
-      );
-      bindings.push(String(locationId), String(locationName));
+    if (period.to) {
+      conditions.push(`${SHORE_CATCH_DAY_SQL} <= ?::date`);
+      bindings.push(period.to);
     }
 
     return this.rawQuery(
       ctx,
-      `SELECT f.type AS fishing_type,
+      `SELECT we.fishing_id,
+              f.type AS fishing_type,
               t.name AS tenant_name,
               u.first_name AS first_name,
               u.last_name AS last_name,
+              to_char(${SHORE_CATCH_DAY_SQL}, 'YYYY-MM') AS month,
               we.data AS data
          FROM weight_events we
          JOIN fishings f ON f.id = we.fishing_id
@@ -743,226 +669,37 @@ export default class ResearchesService extends moleculer.Service {
     );
   }
 
+  // Boat weigh-ins are the only rows that know the gear and the bar. A tools
+  // group holds a single tool type (`connectTools` rejects mixing), and it sits
+  // where it was built — the same bar `toolsGroupsByLocation` lists it under.
+  // Not filtered by date: a trip's boat weigh-ins size its landing whenever
+  // they happened.
   @Method
-  buildCatchSummaryWorkbook(
-    rows: CatchSummaryRow[],
-    opts: {
-      labelById: Map<number, string>;
-      selectedLabels: Set<string> | null;
-      from: Date | null;
-      to: Date | null;
-    },
-  ) {
-    const mainIndexByLabel = new Map<string, number>();
-    SUMMARY_MAIN_COLUMNS.forEach((column, index) =>
-      column.labels.forEach((label) => mainIndexByLabel.set(normalizeLabel(label), index)),
+  async fetchBoatCatchRows(ctx: Context, fishingIds: number[]): Promise<BoatCatchRow[]> {
+    if (!fishingIds.length) return [];
+
+    return this.rawQuery(
+      ctx,
+      `SELECT we.fishing_id,
+              tool_type.label AS tool_type,
+              COALESCE(be.location, we.location)->>'id' AS location_id,
+              COALESCE(be.location, we.location)->>'name' AS location_name,
+              we.data AS data
+         FROM weight_events we
+         JOIN tools_groups tg ON tg.id = we.tools_group_id
+         LEFT JOIN tools_groups_events be
+           ON be.id = tg.build_event_id AND be.deleted_at IS NULL
+         LEFT JOIN LATERAL (
+           SELECT tt.label
+             FROM tools t
+             JOIN tool_types tt ON tt.id = t.tool_type_id
+            WHERE t.id = ANY(tg.tools)
+            ORDER BY t.id
+            LIMIT 1
+         ) tool_type ON TRUE
+        WHERE we.deleted_at IS NULL
+          AND we.fishing_id = ANY(?)`,
+      [Array.from(new Set(fishingIds))],
     );
-
-    const otherIndexByLabel = new Map<string, number>();
-    SUMMARY_OTHER_COLUMNS.forEach((column, index) =>
-      column.labels.forEach((label) => otherIndexByLabel.set(normalizeLabel(label), index)),
-    );
-    const otherRestIndex = SUMMARY_OTHER_COLUMNS.length;
-
-    // Rūšys, kurių nepavyko priskirti nė vienam stulpeliui. Skaičiuoti jos
-    // skaičiuojamos kaip „Kitos" (sumos nesikeičia), bet atskirai išvedamos,
-    // kad pervadinta ar nauja rūšis nedingtų nepastebėta.
-    const unmapped = new Map<string, number>();
-
-    const byZone = new Map<string, Map<string, SummaryTotals>>();
-    SUMMARY_ZONES.forEach((zone) => byZone.set(zone.type, new Map()));
-
-    for (const row of rows) {
-      const zone = byZone.get(row.fishing_type);
-      if (!zone) continue;
-
-      const party =
-        row.tenant_name ||
-        `${row.first_name || ''} ${row.last_name || ''}`.trim() ||
-        'Nenurodyta';
-
-      let totals = zone.get(party);
-      if (!totals) {
-        totals = emptyTotals();
-        zone.set(party, totals);
-      }
-
-      for (const [fishTypeId, weight] of Object.entries(row.data || {})) {
-        const kg = Number(weight);
-        if (!Number.isFinite(kg) || kg === 0) continue;
-
-        const label = opts.labelById.get(Number(fishTypeId));
-
-        // Ištrinta rūšis etiketės nebeturi — su aktyviu filtru ją praleidžiam,
-        // be filtro sumuojam į „Kitos", kad bendra suma nesumažėtų.
-        if (!label) {
-          if (!opts.selectedLabels) {
-            totals.other[otherRestIndex] += kg;
-            unmapped.set(`ID ${fishTypeId}`, (unmapped.get(`ID ${fishTypeId}`) || 0) + kg);
-          }
-          continue;
-        }
-
-        if (opts.selectedLabels && !opts.selectedLabels.has(label)) continue;
-
-        const normalized = normalizeLabel(label);
-
-        const mainIndex = mainIndexByLabel.get(normalized);
-        if (mainIndex !== undefined) {
-          totals.main[mainIndex] += kg;
-          continue;
-        }
-
-        const otherIndex = otherIndexByLabel.get(normalized);
-        if (otherIndex === undefined) {
-          unmapped.set(label, (unmapped.get(label) || 0) + kg);
-        }
-
-        totals.other[otherIndex ?? otherRestIndex] += kg;
-      }
-    }
-
-    return this.renderCatchSummarySheet(byZone, opts, unmapped);
   }
-
-  @Method
-  renderCatchSummarySheet(
-    byZone: Map<string, Map<string, SummaryTotals>>,
-    opts: { from: Date | null; to: Date | null },
-    unmapped: Map<string, number>,
-  ) {
-    const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet('Suvestinė');
-
-    sheet.views = [{ state: 'frozen', xSplit: 2, ySplit: 4 }];
-
-    sheet.mergeCells(1, 1, 1, SUMMARY_LAST_COL);
-    sheet.getCell(1, 1).value = SUMMARY_TITLE;
-    sheet.getCell(1, 1).font = { bold: true };
-    sheet.getCell(1, 1).alignment = { horizontal: 'center', wrapText: true };
-
-    sheet.mergeCells(2, 1, 2, SUMMARY_LAST_COL);
-    sheet.getCell(2, 1).value = `UŽ ${this.formatSummaryPeriod(opts.from, opts.to)}`;
-    sheet.getCell(2, 1).alignment = { horizontal: 'center' };
-
-    sheet.mergeCells(3, SUMMARY_CONTROL_COL, 3, SUMMARY_LAST_COL);
-    sheet.getCell(3, SUMMARY_CONTROL_COL).value = 'Kitos žuvys :';
-    sheet.getCell(3, SUMMARY_CONTROL_COL).font = { bold: true };
-
-    const headerRow = sheet.getRow(4);
-    headerRow.values = [
-      'Eil. Nr.',
-      'ĮMONĖS (ORGANIZACIJOS) PAVADINIMAS',
-      ...SUMMARY_MAIN_COLUMNS.map((column) => column.header),
-      'Kitos žuvys',
-      'IŠ VISO',
-      null,
-      'Kontrolinė suma (iš viso)',
-      ...SUMMARY_OTHER_COLUMNS.map((column) => column.header),
-      'Kitos',
-      'IŠ VISO',
-    ];
-    headerRow.font = { bold: true };
-    headerRow.alignment = { wrapText: true, vertical: 'bottom' };
-
-    let rowIndex = 5;
-    const grandTotals = emptyTotals();
-
-    for (const zone of SUMMARY_ZONES) {
-      const parties = Array.from(byZone.get(zone.type)?.entries() || []).sort((a, b) =>
-        a[0].localeCompare(b[0], 'lt'),
-      );
-
-      const titleRow = sheet.getRow(rowIndex++);
-      titleRow.getCell(1).value = zone.title;
-      titleRow.font = { bold: true };
-
-      const zoneTotals = emptyTotals();
-
-      parties.forEach(([party, totals], index) => {
-        sheet.getRow(rowIndex++).values = this.summaryRowValues(index + 1, party, totals);
-        addTotals(zoneTotals, totals);
-      });
-
-      const totalRow = sheet.getRow(rowIndex++);
-      totalRow.values = this.summaryRowValues('', zone.totalLabel, zoneTotals);
-      totalRow.font = { bold: true };
-
-      addTotals(grandTotals, zoneTotals);
-      rowIndex++;
-    }
-
-    const grandRow = sheet.getRow(rowIndex);
-    grandRow.values = this.summaryRowValues('', 'IŠ VISO:', grandTotals);
-    grandRow.font = { bold: true };
-
-    sheet.getColumn(1).width = 8;
-    sheet.getColumn(2).width = 38;
-    for (let column = 3; column <= SUMMARY_LAST_COL; column++) {
-      sheet.getColumn(column).width = column === SUMMARY_TOTAL_COL + 1 ? 3 : 12;
-    }
-
-    this.appendUnmappedSheet(workbook, unmapped);
-
-    return workbook;
-  }
-
-  // Etalono invariantas: „IŠ VISO" = „Kontrolinė suma" = pagrindinės rūšys +
-  // „Kitos žuvys", o detalizacijos „IŠ VISO" = „Kitos žuvys".
-  @Method
-  summaryRowValues(first: string | number, name: string, totals: SummaryTotals) {
-    const other = round2(totals.other.reduce((sum, value) => sum + value, 0));
-    const total = round2(totals.main.reduce((sum, value) => sum + value, 0) + other);
-
-    return [
-      first,
-      name,
-      ...totals.main.map(round2),
-      other,
-      total,
-      null,
-      total,
-      ...totals.other.slice(0, SUMMARY_OTHER_COLUMNS.length).map(round2),
-      round2(totals.other[SUMMARY_OTHER_COLUMNS.length]),
-      other,
-    ];
-  }
-
-  // Antras lapas atsiranda TIK tada, kai kažko nepavyko priskirti. Švarioje
-  // aplinkoje suvestinė lieka lygiai tokia, kokia yra AAD etalonas.
-  @Method
-  appendUnmappedSheet(workbook: ExcelJS.Workbook, unmapped: Map<string, number>) {
-    if (!unmapped.size) return;
-
-    const sheet = workbook.addWorksheet('Nepriskirtos rūšys');
-
-    sheet.getRow(1).values = [
-      'Šios rūšys nepateko į nė vieną suvestinės stulpelį ir buvo priskaičiuotos prie „Kitos žuvys“.',
-    ];
-    sheet.getRow(1).font = { bold: true };
-
-    const header = sheet.getRow(3);
-    header.values = ['Rūšis registre', 'Kiekis, kg'];
-    header.font = { bold: true };
-
-    Array.from(unmapped.entries())
-      .sort((a, b) => b[1] - a[1])
-      .forEach(([label, kg], index) => {
-        sheet.getRow(4 + index).values = [label, round2(kg)];
-      });
-
-    sheet.getColumn(1).width = 48;
-    sheet.getColumn(2).width = 16;
-  }
-
-  @Method
-  formatSummaryPeriod(from: Date | null, to: Date | null) {
-    const format = (date: Date) => date.toISOString().slice(0, 10);
-
-    if (from && to) return `${format(from)} – ${format(to)}`;
-    if (from) return `LAIKOTARPĮ NUO ${format(from)}`;
-    if (to) return `LAIKOTARPĮ IKI ${format(to)}`;
-    return 'VISĄ LAIKOTARPĮ';
-  }
-
 }
