@@ -3,6 +3,7 @@
 import moleculer, { Context, RestSchema } from 'moleculer';
 import { Action, Method, Service } from 'moleculer-decorators';
 import PostgisMixin from 'moleculer-postgis';
+import moment from 'moment';
 import DbConnection from '../mixins/database.mixin';
 import ProfileMixin from '../mixins/profile.mixin';
 import { coordinatesToGeometry } from '../modules/geometry';
@@ -75,6 +76,27 @@ export type WeightEvent<
   P extends keyof Populates = never,
   F extends keyof (Fields & Populates) = keyof Fields,
 > = Table<Fields, Populates, P, F>;
+// The params schema only checks the ISO-8601 prefix, so strings such as
+// `2026-05-01T00:00:00+99:99` or `2026-02-30` used to reach Postgres, which
+// rejected them with an error that surfaced as a 500 echoing the SQL back to
+// an unauthenticated caller. Strict ISO 8601 parsing catches impossible
+// calendar dates; Date.parse catches offsets outside ±14:00, which moment does
+// not check. (fastest-validator's `custom` is not an option: under Moleculer
+// 0.14 it runs in legacy mode and the errors it collects are dropped inside a
+// multi-type rule.)
+function isIsoDate(value: string): boolean {
+  return moment(value, moment.ISO_8601, true).isValid() && !Number.isNaN(Date.parse(value));
+}
+
+function assertIsoDate(field: string, value?: string) {
+  if (value !== undefined && !isIsoDate(value)) {
+    throw new moleculer.Errors.ValidationError(
+      `The '${field}' field must be a valid ISO 8601 date.`,
+      'ISO_DATE',
+      { field, actual: value },
+    );
+  }
+}
 
 @Service({
   name: 'weightEvents',
@@ -481,7 +503,7 @@ export default class ToolTypesService extends moleculer.Service {
         {
           type: 'string',
           optional: true,
-          // ISO-8601 prefix is enough — Postgres parses the rest.
+          // Shape only; assertIsoDate() in the handler checks the value.
           pattern: '^\\d{4}-\\d{2}-\\d{2}',
         },
         {
@@ -519,8 +541,11 @@ export default class ToolTypesService extends moleculer.Service {
     };
 
     if (typeof date === 'string') {
+      assertIsoDate('date', date);
       query.createdAt = date;
     } else if (date && typeof date === 'object') {
+      assertIsoDate('date.from', date.from);
+      assertIsoDate('date.to', date.to);
       const range: Record<string, string> = {};
       if (date.from) range.$gte = date.from;
       if (date.to) range.$lte = date.to;
