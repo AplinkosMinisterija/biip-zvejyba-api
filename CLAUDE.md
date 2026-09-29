@@ -266,7 +266,9 @@ appear without the `call` prefix (e.g. `mol $ tenants-import --dry`).
   fishing's boat weigh-ins proportionally (`modules/catchSummary.ts`
   `allocateShoreCatch`). Bar = the tools group's BUILD event location. Kg never
   weighed on the boat is „Įrankis nenurodytas" and is excluded by the bar
-  filter. Months and date filters use the Vilnius calendar day. Tests:
+  filter. Months and date filters use the Vilnius calendar day. Species
+  columns come from the `fish_types` registry (priority order, deleted ones
+  only while they carry kg) — no fixed AAD reference columns. Tests:
   `test/unit/catch-summary.spec.ts`, `researches-catch-summary-split.spec.ts`.
 - **gear spans fishings — aggregate from weight events too** — a tools group
   stays in the water between trips, and `tools_groups_events.fishing_id` only

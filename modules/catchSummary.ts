@@ -1,48 +1,6 @@
 import ExcelJS from 'exceljs';
 import { LocationType } from '../types';
 
-// Fixed to the AAD reference sheet, not generated from `fish_types`: a new
-// species would shift the columns and break comparison with historical files.
-type SummaryColumn = { header: string; labels: string[] };
-
-const SUMMARY_MAIN_COLUMNS: SummaryColumn[] = [
-  { header: 'Karšis', labels: ['Karšis'] },
-  // The reference sheet has no column for undersized pikeperch.
-  { header: 'Starkis', labels: ['Sterkas', 'Sterkas (neverslinio dydžio)'] },
-  { header: 'Kuoja', labels: ['Kuoja'] },
-  { header: 'Lydeka', labels: ['Lydeka'] },
-  { header: 'Ešerys', labels: ['Ešerys'] },
-  { header: 'Ungurys', labels: ['Ungurys'] },
-  { header: 'Karosas', labels: ['Karosas', 'Karosas, auksinis', 'Karosas, sidabrinis'] },
-  { header: 'Vėgėlė', labels: ['Vėgėlė'] },
-  { header: 'Stinta', labels: ['Stinta'] },
-  { header: 'Lynas', labels: ['Lynas'] },
-  { header: 'Nėgė', labels: ['Nėgė'] },
-  { header: 'Žiobris', labels: ['Žiobris'] },
-  { header: 'Plakis', labels: ['Plakis'] },
-  { header: 'Salatis', labels: ['Salatis'] },
-  { header: 'Šamas', labels: ['Šamas'] },
-  { header: 'Ožka', labels: ['Ožka'] },
-  { header: 'Karpis', labels: ['Karpis'] },
-];
-
-// A species in neither list lands in the trailing „Kitos“ column.
-const SUMMARY_OTHER_COLUMNS: SummaryColumn[] = [
-  { header: 'Perpelė', labels: ['Perpelė'] },
-  { header: 'Plačiakaktis', labels: ['Plačiakaktis'] },
-  { header: 'Plekšnė', labels: ['Plekšnė'] },
-  { header: 'Šapalas', labels: ['Šapalas'] },
-  { header: 'Sykas', labels: ['Sykas'] },
-  { header: 'Pūgžlys', labels: ['Pūgžlys'] },
-  { header: 'Dyglė', labels: ['Dyglė'] },
-  { header: 'Meknė', labels: ['Meknė'] },
-  { header: 'Raudė', labels: ['Raudė'] },
-  { header: 'Strimelė', labels: ['Strimelė'] },
-  { header: 'Aukšlė', labels: ['Aukšlė'] },
-  { header: 'Šlakis', labels: ['Šlakis'] },
-  { header: 'Lašiša', labels: ['Lašiša'] },
-];
-
 type SummaryZone = {
   type: LocationType;
   title: string;
@@ -116,13 +74,10 @@ export const SUMMARY_UNASSIGNED_TOOL = 'Įrankis nenurodytas';
 // Ten years of month sheets; anything longer is a mistyped period, not a report.
 export const SUMMARY_MAX_MONTH_SHEETS = 120;
 
-// No. + name + species + „Kitos žuvys“ + „IŠ VISO“
-const SUMMARY_TOTAL_COL = 2 + SUMMARY_MAIN_COLUMNS.length + 2;
-// One blank spacer column, then „Kontrolinė suma“ and the „Kitos žuvys“ breakdown.
-const SUMMARY_CONTROL_COL = SUMMARY_TOTAL_COL + 2;
 const SUMMARY_HEADER_ROW = 4;
 
-type SummaryTotals = { main: number[]; other: number[]; byLabel: Map<string, number> };
+// fish type id → kg
+type SummaryTotals = Map<string, number>;
 
 type PartySummary = {
   name: string;
@@ -135,8 +90,12 @@ type SheetSummary = Map<string, Map<string, PartySummary>>;
 export type CatchSummary = {
   all: SheetSummary;
   byMonth: Map<string, SheetSummary>;
-  unmapped: Map<string, number>;
+  fishTypeIds: Set<string>;
 };
+
+export type SummaryFishType = { id: string; label: string; deleted: boolean };
+
+export type SummaryFishColumn = { id: string; label: string };
 
 // Calendar dates (`YYYY-MM-DD`) in Europe/Vilnius.
 export type SummaryPeriod = { from: string | null; to: string | null };
@@ -176,47 +135,17 @@ export type CatchEntry = {
   kg: number;
 };
 
-type ColumnSlot = {
-  group: 'main' | 'other';
-  index: number;
-  label?: string;
-  unmappedAs?: string;
-};
-
-const emptyTotals = (): SummaryTotals => ({
-  main: SUMMARY_MAIN_COLUMNS.map(() => 0),
-  // +1 for the trailing „Kitos“ column.
-  other: [...SUMMARY_OTHER_COLUMNS.map(() => 0), 0],
-  byLabel: new Map(),
-});
+const emptyTotals = (): SummaryTotals => new Map();
 
 const addKg = (kgByKey: Map<string, number>, key: string, kg: number) =>
   kgByKey.set(key, (kgByKey.get(key) || 0) + kg);
 
-const addTotals = (target: SummaryTotals, source: SummaryTotals) => {
-  source.main.forEach((value, i) => (target.main[i] += value));
-  source.other.forEach((value, i) => (target.other[i] += value));
-  source.byLabel.forEach((kg, label) => addKg(target.byLabel, label, kg));
-};
+const addTotals = (target: SummaryTotals, source: SummaryTotals) =>
+  source.forEach((kg, fishTypeId) => addKg(target, fishTypeId, kg));
 
 const round2 = (value: number) => Math.round(value * 100) / 100;
 
 const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
-
-// Registry spelling differs per environment (dev `karpiai`, prod `Karpis`);
-// what still does not match goes to the diagnostics sheet, not silently to „Kitos“.
-const normalizeLabel = (label: string) => label.trim().toLowerCase().replace(/\s+/g, ' ');
-
-const indexByLabel = (columns: SummaryColumn[]) =>
-  new Map(
-    columns.flatMap((column, index) =>
-      column.labels.map((label) => [normalizeLabel(label), index] as const),
-    ),
-  );
-
-const MAIN_INDEX_BY_LABEL = indexByLabel(SUMMARY_MAIN_COLUMNS);
-const OTHER_INDEX_BY_LABEL = indexByLabel(SUMMARY_OTHER_COLUMNS);
-const OTHER_REST_INDEX = SUMMARY_OTHER_COLUMNS.length;
 
 const getOrCreate = <K, V>(map: Map<K, V>, key: K, create: () => V): V => {
   const existing = map.get(key);
@@ -312,47 +241,7 @@ export const filterByLocation = (entries: CatchEntry[], location: CatchLocation 
       )
     : entries;
 
-// Fail closed: unknown ids give an empty set (empty report), never null (everything).
-export const selectLabels = (labelById: Map<string, string>, ids?: string[]) => {
-  if (!ids?.length) return null;
-
-  return new Set(
-    ids.map((id) => labelById.get(String(id))).filter((label): label is string => !!label),
-  );
-};
-
-const columnOfLabel = (label: string): ColumnSlot => {
-  const normalized = normalizeLabel(label);
-
-  const mainIndex = MAIN_INDEX_BY_LABEL.get(normalized);
-  if (mainIndex !== undefined) return { group: 'main', index: mainIndex };
-
-  const otherIndex = OTHER_INDEX_BY_LABEL.get(normalized);
-  if (otherIndex !== undefined) return { group: 'other', index: otherIndex };
-
-  return { group: 'other', index: OTHER_REST_INDEX, unmappedAs: label };
-};
-
-const resolveColumn = (
-  entry: CatchEntry,
-  labelById: Map<string, string>,
-  selectedLabels: Set<string> | null,
-): ColumnSlot | null => {
-  const label = labelById.get(entry.fishTypeId);
-
-  // A deleted species has no label: dropped under a species filter, otherwise
-  // kept in „Kitos“ so the total holds.
-  if (!label) {
-    if (selectedLabels) return null;
-    return { group: 'other', index: OTHER_REST_INDEX, unmappedAs: `ID ${entry.fishTypeId}` };
-  }
-
-  if (selectedLabels && !selectedLabels.has(label)) return null;
-
-  return { ...columnOfLabel(label), label };
-};
-
-const addToSheet = (sheet: SheetSummary, entry: CatchEntry, slot: ColumnSlot) => {
+const addToSheet = (sheet: SheetSummary, entry: CatchEntry) => {
   const parties = getOrCreate(sheet, entry.fishingType, () => new Map<string, PartySummary>());
   const party = getOrCreate(parties, entry.partyKey, () => ({
     name: entry.partyName,
@@ -361,35 +250,48 @@ const addToSheet = (sheet: SheetSummary, entry: CatchEntry, slot: ColumnSlot) =>
   }));
   const tool = getOrCreate(party.byTool, entry.toolType || SUMMARY_UNASSIGNED_TOOL, emptyTotals);
 
-  for (const totals of [party.totals, tool]) {
-    totals[slot.group][slot.index] += entry.kg;
-    if (slot.label) addKg(totals.byLabel, slot.label, entry.kg);
-  }
+  addKg(party.totals, entry.fishTypeId, entry.kg);
+  addKg(tool, entry.fishTypeId, entry.kg);
 };
 
 export const summarizeCatch = (
   entries: CatchEntry[],
-  opts: { labelById: Map<string, string>; selectedLabels: Set<string> | null },
+  selectedFishTypes: Set<string> | null,
 ): CatchSummary => {
-  const summary: CatchSummary = { all: new Map(), byMonth: new Map(), unmapped: new Map() };
+  const summary: CatchSummary = { all: new Map(), byMonth: new Map(), fishTypeIds: new Set() };
 
   for (const entry of entries) {
-    const slot = resolveColumn(entry, opts.labelById, opts.selectedLabels);
-    if (!slot) continue;
+    if (selectedFishTypes && !selectedFishTypes.has(entry.fishTypeId)) continue;
 
-    // Counted in „Kitos“ but also listed, so a renamed species gets noticed. A
-    // species filter gives every pick its own column, so nothing is folded there.
-    if (slot.unmappedAs && !opts.selectedLabels) addKg(summary.unmapped, slot.unmappedAs, entry.kg);
-
-    addToSheet(summary.all, entry, slot);
+    summary.fishTypeIds.add(entry.fishTypeId);
+    addToSheet(summary.all, entry);
     addToSheet(
       getOrCreate(summary.byMonth, entry.month, () => new Map()),
       entry,
-      slot,
     );
   }
 
   return summary;
+};
+
+// No filter: every species in the registry, plus a deleted one that still has
+// kg in old weigh-ins, so no catch drops out of the totals.
+export const summaryFishColumns = (
+  fishTypes: SummaryFishType[],
+  selectedFishTypes: Set<string> | null,
+  fishTypeIdsWithCatch: Set<string>,
+): SummaryFishColumn[] => {
+  const labelById = new Map(fishTypes.map((fishType) => [fishType.id, fishType.label]));
+  const column = (id: string) => ({ id, label: labelById.get(id) ?? `ID ${id}` });
+
+  if (selectedFishTypes) return Array.from(selectedFishTypes, column);
+
+  const listed = fishTypes.filter(
+    (fishType) => !fishType.deleted || fishTypeIdsWithCatch.has(fishType.id),
+  );
+  const unknown = Array.from(fishTypeIdsWithCatch).filter((id) => !labelById.has(id));
+
+  return [...listed.map(({ id }) => column(id)), ...unknown.sort().map(column)];
 };
 
 const nextMonth = (month: string) => {
@@ -453,7 +355,7 @@ const listOrAll = (labels: Iterable<string> | null, all: string) => {
 export const describeSummaryFilters = (filter: {
   types: string[];
   location: CatchLocation | null;
-  fishTypes: Set<string> | null;
+  fishTypes: string[] | null;
 }) => {
   const locationLabel =
     (filter.types.length === 1 && SINGLE_ZONE_LOCATION_LABEL[filter.types[0]]) ||
@@ -469,78 +371,35 @@ export const describeSummaryFilters = (filter: {
   ].join(' · ');
 };
 
-type SheetColumn = { header: string | null; value: (totals: SummaryTotals) => number | null };
+type SheetColumn = { header: string; value: (totals: SummaryTotals) => number };
 
-type ColumnLayout = {
-  columns: SheetColumn[];
-  // Sheet column of the „Kitos žuvys :“ group label — the full reference layout only.
-  otherGroupColumn: number | null;
-};
+const totalKg = (totals: SummaryTotals) => sum(Array.from(totals.values()));
 
-const otherKg = (totals: SummaryTotals) => sum(totals.other);
-const totalKg = (totals: SummaryTotals) => sum(totals.main) + sum(totals.other);
-const kgAt = (slot: ColumnSlot) => (totals: SummaryTotals) => totals[slot.group][slot.index];
-
-// Reference invariant: „IŠ VISO“ = „Kontrolinė suma“ = species + „Kitos žuvys“,
-// and the breakdown's „IŠ VISO“ = „Kitos žuvys“.
-const FULL_LAYOUT: ColumnLayout = {
-  columns: [
-    ...SUMMARY_MAIN_COLUMNS.map((column, index) => ({
-      header: column.header,
-      value: kgAt({ group: 'main', index }),
-    })),
-    { header: 'Kitos žuvys', value: otherKg },
-    { header: 'IŠ VISO', value: totalKg },
-    { header: null, value: () => null },
-    { header: 'Kontrolinė suma (iš viso)', value: totalKg },
-    ...SUMMARY_OTHER_COLUMNS.map((column, index) => ({
-      header: column.header,
-      value: kgAt({ group: 'other', index }),
-    })),
-    { header: 'Kitos', value: kgAt({ group: 'other', index: OTHER_REST_INDEX }) },
-    { header: 'IŠ VISO', value: otherKg },
-  ],
-  otherGroupColumn: SUMMARY_CONTROL_COL,
-};
-
-// The picked species under their registry names, in the order they were picked —
-// labels differ per environment, so no reference renaming or merging here.
-const selectedLayout = (labels: Set<string>): ColumnLayout => ({
-  columns: [
-    ...Array.from(labels, (label) => ({
-      header: label,
-      value: (totals: SummaryTotals) => totals.byLabel.get(label) || 0,
-    })),
-    { header: 'IŠ VISO', value: totalKg },
-  ],
-  otherGroupColumn: null,
-});
+const sheetColumns = (fishColumns: SummaryFishColumn[]): SheetColumn[] => [
+  ...fishColumns.map(({ id, label }) => ({
+    header: label,
+    value: (totals: SummaryTotals) => totals.get(id) || 0,
+  })),
+  { header: 'IŠ VISO', value: totalKg },
+];
 
 const rowValues = (
   columns: SheetColumn[],
   first: string | number,
   name: string,
   totals: SummaryTotals,
-) => [
-  first,
-  name,
-  ...columns.map((column) => {
-    const kg = column.value(totals);
-    return kg === null ? null : round2(kg);
-  }),
-];
+) => [first, name, ...columns.map((column) => round2(column.value(totals)))];
 
 type SheetLayout = {
   periodLine: string;
   filterLine: string;
   zones: SummaryZone[];
   showToolTypes: boolean;
-  columnLayout: ColumnLayout;
+  columns: SheetColumn[];
 };
 
 const renderSheetHeader = (sheet: ExcelJS.Worksheet, layout: SheetLayout) => {
-  const { columns, otherGroupColumn } = layout.columnLayout;
-  const lastCol = 2 + columns.length;
+  const { columns } = layout;
 
   sheet.views = [{ state: 'frozen', xSplit: 2, ySplit: SUMMARY_HEADER_ROW }];
 
@@ -548,20 +407,6 @@ const renderSheetHeader = (sheet: ExcelJS.Worksheet, layout: SheetLayout) => {
   sheet.getCell(1, 1).font = { bold: true };
   sheet.getCell(2, 1).value = layout.periodLine;
   sheet.getCell(3, 1).value = layout.filterLine;
-
-  // Only the full layout is wide enough to centre the title; a few filtered
-  // columns would clip it, so there the text just runs on to the right.
-  if (otherGroupColumn) {
-    sheet.mergeCells(1, 1, 1, lastCol);
-    sheet.getCell(1, 1).alignment = { horizontal: 'center', wrapText: true };
-    sheet.mergeCells(2, 1, 2, lastCol);
-    sheet.getCell(2, 1).alignment = { horizontal: 'center' };
-    sheet.mergeCells(3, 1, 3, otherGroupColumn - 2);
-
-    sheet.mergeCells(3, otherGroupColumn, 3, lastCol);
-    sheet.getCell(3, otherGroupColumn).value = 'Kitos žuvys :';
-    sheet.getCell(3, otherGroupColumn).font = { bold: true };
-  }
 
   const headerRow = sheet.getRow(SUMMARY_HEADER_ROW);
   headerRow.values = [
@@ -576,8 +421,8 @@ const renderSheetHeader = (sheet: ExcelJS.Worksheet, layout: SheetLayout) => {
 
   sheet.getColumn(1).width = 8;
   sheet.getColumn(2).width = layout.showToolTypes ? 46 : 38;
-  columns.forEach((column, index) => {
-    sheet.getColumn(3 + index).width = column.header === null ? 3 : 12;
+  columns.forEach((_column, index) => {
+    sheet.getColumn(3 + index).width = 12;
   });
 };
 
@@ -608,7 +453,7 @@ const renderToolRows = (
 const renderSummarySheet = (sheet: ExcelJS.Worksheet, data: SheetSummary, layout: SheetLayout) => {
   renderSheetHeader(sheet, layout);
 
-  const { columns } = layout.columnLayout;
+  const { columns } = layout;
   let rowIndex = SUMMARY_HEADER_ROW + 1;
   const grandTotals = emptyTotals();
 
@@ -648,38 +493,13 @@ const renderSummarySheet = (sheet: ExcelJS.Worksheet, data: SheetSummary, layout
   grandRow.font = { bold: true };
 };
 
-// Added only when something went unmapped, so a clean run matches the reference.
-const appendUnmappedSheet = (workbook: ExcelJS.Workbook, unmapped: Map<string, number>) => {
-  if (!unmapped.size) return;
-
-  const sheet = workbook.addWorksheet('Nepriskirtos rūšys');
-
-  sheet.getRow(1).values = [
-    'Šios rūšys nepateko į nė vieną suvestinės stulpelį ir buvo priskaičiuotos prie „Kitos žuvys“.',
-  ];
-  sheet.getRow(1).font = { bold: true };
-
-  const header = sheet.getRow(3);
-  header.values = ['Rūšis registre', 'Kiekis, kg'];
-  header.font = { bold: true };
-
-  Array.from(unmapped.entries())
-    .sort((a, b) => b[1] - a[1])
-    .forEach(([label, kg], index) => {
-      sheet.getRow(4 + index).values = [label, round2(kg)];
-    });
-
-  sheet.getColumn(1).width = 48;
-  sheet.getColumn(2).width = 16;
-};
-
 export const buildCatchSummaryWorkbook = (
   summary: CatchSummary,
   opts: {
     period: SummaryPeriod;
     months: string[];
     types: string[];
-    fishTypes: Set<string> | null;
+    fishColumns: SummaryFishColumn[];
     filterLine: string;
     showToolTypes: boolean;
   },
@@ -689,7 +509,7 @@ export const buildCatchSummaryWorkbook = (
     filterLine: opts.filterLine,
     zones: selectedZones(opts.types),
     showToolTypes: opts.showToolTypes,
-    columnLayout: opts.fishTypes ? selectedLayout(opts.fishTypes) : FULL_LAYOUT,
+    columns: sheetColumns(opts.fishColumns),
   };
 
   renderSummarySheet(workbook.addWorksheet('Suvestinė'), summary.all, {
@@ -703,8 +523,6 @@ export const buildCatchSummaryWorkbook = (
       periodLine: `UŽ ${formatMonthTitle(month, opts.period)}`,
     });
   }
-
-  appendUnmappedSheet(workbook, summary.unmapped);
 
   return workbook;
 };

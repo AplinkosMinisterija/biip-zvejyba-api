@@ -51,6 +51,10 @@ const findRow = (sheet: any, name: string) => {
   return found;
 };
 
+// kg in the column headed `header` on the row named `rowName`.
+const kg = (sheet: any, rowName: string, header: string) =>
+  findRow(sheet, rowName)![cellValues(sheet, 4).indexOf(header)];
+
 beforeAll(async () => {
   await broker.start();
   await apiHelper.setup();
@@ -117,7 +121,7 @@ describe('researches.catchSummary — auth', () => {
 });
 
 describe('researches.catchSummary — sheet', () => {
-  it('lays the columns out like the AAD reference sheet', async () => {
+  it('heads the columns with every registry species, then IŠ VISO', async () => {
     const buffer = await broker.call(
       'researches.catchSummary',
       {},
@@ -125,53 +129,24 @@ describe('researches.catchSummary — sheet', () => {
     );
     const header = cellValues(await loadSheet(buffer), 4);
 
-    expect(header[0]).toBe('Eil. Nr.');
-    expect(header[1]).toBe('ĮMONĖS (ORGANIZACIJOS) PAVADINIMAS');
+    // Same order as the app's weighing form: by priority, then name.
+    const registry: any[] = await broker.call('fishTypes.find', { fields: ['label', 'priority'] });
+    const expected = registry
+      .sort(
+        (a, b) =>
+          Number(b.priority || 0) - Number(a.priority || 0) || a.label.localeCompare(b.label, 'lt'),
+      )
+      .map((fishType) => fishType.label);
 
-    // The full list: the reference CSV drops `Š`/`Ž`, which once turned
-    // `Aukšlė` into `Auklė` and sent every aukšlė to „Kitos“.
-    expect(header.slice(2, 19)).toEqual([
-      'Karšis',
-      'Starkis',
-      'Kuoja',
-      'Lydeka',
-      'Ešerys',
-      'Ungurys',
-      'Karosas',
-      'Vėgėlė',
-      'Stinta',
-      'Lynas',
-      'Nėgė',
-      'Žiobris',
-      'Plakis',
-      'Salatis',
-      'Šamas',
-      'Ožka',
-      'Karpis',
+    expect(header).toEqual([
+      'Eil. Nr.',
+      'ĮMONĖS (ORGANIZACIJOS) PAVADINIMAS',
+      ...expected,
+      'IŠ VISO',
     ]);
-    expect(header[19]).toBe('Kitos žuvys');
-    expect(header[20]).toBe('IŠ VISO');
-    expect(header[22]).toBe('Kontrolinė suma (iš viso)');
-    expect(header.slice(23, 36)).toEqual([
-      'Perpelė',
-      'Plačiakaktis',
-      'Plekšnė',
-      'Šapalas',
-      'Sykas',
-      'Pūgžlys',
-      'Dyglė',
-      'Meknė',
-      'Raudė',
-      'Strimelė',
-      'Aukšlė',
-      'Šlakis',
-      'Lašiša',
-    ]);
-    expect(header[36]).toBe('Kitos');
-    expect(header[37]).toBe('IŠ VISO');
   });
 
-  it('sums a tenant into the right zone and folds unlisted species into „Kitos"', async () => {
+  it('sums a tenant into the right zone, every species in its own column', async () => {
     const buffer = await broker.call(
       'researches.catchSummary',
       {},
@@ -180,16 +155,9 @@ describe('researches.catchSummary — sheet', () => {
     const sheet = await loadSheet(buffer);
 
     expect(cellValues(sheet, 5)[0]).toBe('KURŠIŲ MARIOSE:');
-
-    const row = findRow(sheet, 'Company-A')!;
-    expect(row).toBeTruthy();
-    expect(row[2]).toBe(10); // Karšis
-    expect(row[19]).toBe(10); // Kitos žuvys = Perpelė 4 + Seliava 6
-    expect(row[20]).toBe(20); // IŠ VISO
-    expect(row[22]).toBe(20); // Kontrolinė suma
-    expect(row[23]).toBe(4); // Perpelė
-    expect(row[36]).toBe(6); // Seliava → „Kitos"
-    expect(row[37]).toBe(10); // breakdown IŠ VISO = Kitos žuvys
+    expect(
+      ['Karšis', 'Perpelė', 'Seliava', 'IŠ VISO'].map((header) => kg(sheet, 'Company-A', header)),
+    ).toEqual([10, 4, 6, 20]);
   });
 
   it('keeps each zone in its own block and totals them all', async () => {
@@ -200,11 +168,11 @@ describe('researches.catchSummary — sheet', () => {
     );
     const sheet = await loadSheet(buffer);
 
-    expect(findRow(sheet, 'IŠ VISO (Kuršių mariose):')![20]).toBe(20);
-    expect(findRow(sheet, 'Iš viso polderiuose:')![20]).toBe(5);
+    expect(kg(sheet, 'IŠ VISO (Kuršių mariose):', 'IŠ VISO')).toBe(20);
+    expect(kg(sheet, 'Iš viso polderiuose:', 'IŠ VISO')).toBe(5);
     // Company-B fished in polders, so it must stay out of the lagoon block.
-    expect(findRow(sheet, 'Iš viso Nemuno žemupyje, Šventosios upėje:')![20]).toBe(0);
-    expect(findRow(sheet, 'IŠ VISO:')![20]).toBe(25);
+    expect(kg(sheet, 'Iš viso Nemuno žemupyje, Šventosios upėje:', 'IŠ VISO')).toBe(0);
+    expect(kg(sheet, 'IŠ VISO:', 'IŠ VISO')).toBe(25);
   });
 
   it('narrows the totals when a fish-type filter is applied', async () => {
@@ -233,7 +201,7 @@ describe('researches.catchSummary — sheet', () => {
     const sheet = await loadSheet(buffer);
 
     expect(findRow(sheet, 'Company-A')).toBeNull();
-    expect(findRow(sheet, 'IŠ VISO:')![20]).toBe(5);
+    expect(kg(sheet, 'IŠ VISO:', 'IŠ VISO')).toBe(5);
   });
 
   it('excludes catches outside the requested period', async () => {
@@ -243,7 +211,7 @@ describe('researches.catchSummary — sheet', () => {
       { meta: apiHelper.meta(investigator) },
     );
 
-    expect(findRow(await loadSheet(buffer), 'IŠ VISO:')![20]).toBe(0);
+    expect(kg(await loadSheet(buffer), 'IŠ VISO:', 'IŠ VISO')).toBe(0);
   });
 
   it('rejects an unparseable date', async () => {

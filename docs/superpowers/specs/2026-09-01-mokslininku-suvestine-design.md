@@ -26,7 +26,7 @@ eksportas per visas įmones) ir esamą **Mokslinių tyrimų** tabą.
 |---|---|
 | Kurioje aplikacijoje | `biip-zvejyba-web`. Mokslininkas yra USER tipo paskyra, o `RestrictionType.ADMIN` reikalauja ADMIN tipo — į admin portalą jis fiziškai negali įeiti |
 | Kodo vieta | `researches.service.ts` — mokslininko servisas. Vienas endpoint'as nenusipelno nei atskiro serviso, nei modulio |
-| Rūšių stulpeliai | Fiksuotas etaloninis sąrašas ir tvarka. Dinamiškas variantas stulpelius pastumtų vos adminui pridėjus rūšį — lentelė nustotų būti „identiška" |
+| Rūšių stulpeliai | ~~Fiksuotas etaloninis AAD sąrašas~~ → visos `fish_types` registro rūšys (vadovo sprendimas, 2026-09-29). Žr. „Excel structure“ |
 | Migracijos blokai | Praleidžiam. „Stintų migracijos metu", „upinių nėgių migracijos metu" reikalautų modeliuoti migracijos laikotarpį — tokių duomenų neturim, o spėti blogiau nei nerodyti |
 | Duomenų apimtis | Tik agreguota (kg pagal įmonę × rūšį × zoną), visos įmonės. Jokių koordinačių ir žurnalo eilučių |
 | Filtrų opcijos | Jokių naujų endpoint'ų — `locations.getFishingSections` ir `fishTypes` sąrašas jau prieinami USER rolei |
@@ -66,41 +66,27 @@ duomenų ekspozicija, todėl vienintelis vartai yra `auth: INVESTIGATOR`.
 `authorize()` `INVESTIGATOR` šaka priima ir `ADMIN`/`SUPER_ADMIN`
 (administratorius ⊇ mokslininkas).
 
-### Excel struktūra
+### Excel structure
 
-Lapas „Suvestinė":
+Decision 2026-09-29 (head of unit): no fixed AAD reference columns, no
+„Kitos žuvys“ block, no control sum — the columns come from our own
+`fish_types` registry.
 
 ```
 1  ŽVEJYBOS VERSLINĖS ŽVEJYBOS ĮRANKIAIS ... ATASKAITŲ SUVESTINĖ (KG.)
-2  UŽ <laikotarpis>
-3  [grupės antraštė]                                  Kitos žuvys :
-4  Eil.Nr. | PAVADINIMAS | <17 rūšių> | Kitos žuvys | IŠ VISO | | Kontrolinė suma | <13 rūšių> | Kitos | IŠ VISO
-5+ KURŠIŲ MARIOSE       — įmonių eilutės + „IŠ VISO (Kuršių mariose)"
-   santrauka            — Nemuno žemupys / Polderiai / bendra suma
-   NEMUNO ŽEMUPYJE...   — įmonių eilutės + „Iš viso"
-   POLDERIUOSE          — įmonių eilutės + „Iš viso"
+2  UŽ <period>
+3  Vieta: … · Kvadratas: … · Rūšys: …
+4  Eil. Nr. | ĮMONĖS (ORGANIZACIJOS) PAVADINIMAS | <every registry species> | IŠ VISO
+5+ one block per picked zone — company rows (+ tool rows) and the zone total;
+   then the grand „IŠ VISO:“
 ```
 
-Stulpelių tvarka (3–19): Karšis, Starkis, Kuoja, Lydeka, Ešerys, Ungurys,
-Karosas, Vėgėlė, Stinta, Lynas, Nėgė, Žiobris, Plakis, Salatis, Šamas, Ožka,
-Karpis.
-
-Kitos žuvys detalizacija (24–36): Perpelė, Plačiakaktis, Plekšnė, Šapalas,
-Sykas, Pūgžlys, Dyglė, Meknė, Raudė, Strimelė, Auklė, Šlakis, Lašiša.
-
-Rūšių mapinimas pagal `fish_types.label`:
-
-- `Starkis` ← `Sterkas`, `Sterkas (neverslinio dydžio)`
-- `Karosas` ← `Karosas`, `Karosas, auksinis`, `Karosas, sidabrinis`
-- likusios — tikslus sutapimas
-- nerastos krenta į `Kitos žuvys`, o detalizacijoje — į `Kitos`
-
-**Invariantas:** `IŠ VISO` = `Kontrolinė suma` = 17 rūšių + `Kitos žuvys`;
-detalizacijos `IŠ VISO` = `Kitos žuvys`. Patikrinta etalone (Bakevičiaus A. f.
-eilutė: 971 ir 40).
-
-Etalono skiemenuoti stulpeliai („Lyde-/ka") **nekartojami** — tai siauro
-stulpelio tipografijos artefaktas, ne duomenys. Pavadinimai rašomi pilni.
+- Columns: every species in `fish_types`, ordered like the app's weighing
+  form (priority, then name), each under its registry label. A deleted
+  species appears only while old weigh-ins still carry its kg, so no catch
+  drops out of the totals.
+- With a species filter: only the picked species, in the order picked.
+- `IŠ VISO` = the sum of the species columns.
 
 ## Frontend (`biip-zvejyba-web`)
 
@@ -126,7 +112,7 @@ užrakinta `RestrictionType.INVESTIGATOR`.
 1. Mokslininkas nemato žvejo funkcionalumo — nei meniu, nei per tiesioginį URL
 2. „Moksliniai tyrimai" tabas veikia kaip anksčiau
 3. Suvestinės Excel atsisiunčiamas, filtrai veikia (t. p. pagal žuvis)
-4. Stulpeliai, blokai ir kontrolinė suma atitinka etaloną
+4. ~~Stulpeliai, blokai ir kontrolinė suma atitinka etaloną~~ — replaced by registry columns (2026-09-29)
 5. Paprastas žvejys (USER be INVESTIGATOR) į `researches.catchSummary` gauna 401/403
 6. Abu PR'ai draft, užduotis prisegta
 
@@ -150,9 +136,8 @@ užrakinta `RestrictionType.INVESTIGATOR`.
   2026-09-29 — not `01`… as the issue sketched); more than 120 sheets is
   rejected.
 - **Species filter.** With species picked, the sheets show only their columns,
-  headed by the registry label in the order picked, plus „IŠ VISO“ — no
-  reference renaming or merging, because labels differ per environment. With
-  none picked, the full reference layout.
+  headed by the registry label in the order picked, plus „IŠ VISO“. With none
+  picked, every registry species (see „Excel structure“).
 - **Blocks.** Only the picked zones are drawn; none picked = all three.
 - **Header.** Row 3 lists every filter, unset ones as „visi" / „visos".
 - Pure logic lives in `modules/catchSummary.ts`; the service keeps the SQL.

@@ -22,13 +22,14 @@ import {
   CatchLocation,
   SUMMARY_MAX_MONTH_SHEETS,
   ShoreCatchRow,
+  SummaryFishType,
   SummaryPeriod,
   allocateShoreCatch,
   buildCatchSummaryWorkbook,
   describeSummaryFilters,
   filterByLocation,
-  selectLabels,
   summarizeCatch,
+  summaryFishColumns,
   summaryMonths,
   toVilniusDate,
 } from '../modules/catchSummary';
@@ -508,21 +509,21 @@ export default class ResearchesService extends moleculer.Service {
     const location: CatchLocation | null =
       locationId && locationName ? { id: locationId, name: locationName } : null;
 
-    const [fishLabelById, shoreRows] = await Promise.all([
-      this.fetchFishTypeLabels(ctx),
+    const [fishTypes, shoreRows] = await Promise.all([
+      this.fetchFishTypes(ctx),
       this.fetchShoreCatchRows(ctx, period, types),
     ]);
-    const fishTypes = selectLabels(fishLabelById, ctx.params.fishTypes);
+    const selectedFishTypes = ctx.params.fishTypes?.length
+      ? new Set(ctx.params.fishTypes.map(String))
+      : null;
     const boatRows = await this.fetchBoatCatchRows(
       ctx,
       shoreRows.map((row) => row.fishing_id),
     );
 
     const entries = filterByLocation(allocateShoreCatch(shoreRows, boatRows), location);
-    const summary = summarizeCatch(entries, {
-      labelById: fishLabelById,
-      selectedLabels: fishTypes,
-    });
+    const summary = summarizeCatch(entries, selectedFishTypes);
+    const fishColumns = summaryFishColumns(fishTypes, selectedFishTypes, summary.fishTypeIds);
 
     const months = ctx.params.byMonths
       ? summaryMonths(period, Array.from(summary.byMonth.keys()))
@@ -538,8 +539,12 @@ export default class ResearchesService extends moleculer.Service {
       period,
       months,
       types,
-      fishTypes,
-      filterLine: describeSummaryFilters({ types, location, fishTypes }),
+      fishColumns,
+      filterLine: describeSummaryFilters({
+        types,
+        location,
+        fishTypes: selectedFishTypes && fishColumns.map((column) => column.label),
+      }),
       showToolTypes: !!ctx.params.byToolTypes,
     });
 
@@ -568,12 +573,21 @@ export default class ResearchesService extends moleculer.Service {
   }
 
   @Method
-  async fetchFishTypeLabels(ctx: Context): Promise<Map<string, string>> {
-    const rows: Array<{ id: unknown; label: string }> = await ctx.call('fishTypes.find', {
-      fields: ['id', 'label'],
-    });
+  // Deleted species too (`scope: false`): old weigh-ins still carry their kg.
+  // Ordered like the app's weighing form: by priority, then name.
+  async fetchFishTypes(ctx: Context): Promise<SummaryFishType[]> {
+    const rows: Array<{ id: unknown; label: string; priority?: number; deletedAt?: string }> =
+      await ctx.call('fishTypes.find', {
+        fields: ['id', 'label', 'priority', 'deletedAt'],
+        scope: false,
+      });
 
-    return new Map(rows.map((row) => [String(row.id), row.label]));
+    return rows
+      .sort(
+        (a, b) =>
+          Number(b.priority || 0) - Number(a.priority || 0) || a.label.localeCompare(b.label, 'lt'),
+      )
+      .map((row) => ({ id: String(row.id), label: row.label, deleted: !!row.deletedAt }));
   }
 
   // Shore weigh-ins only (`tools_group_id IS NULL`): the official figure the AAD

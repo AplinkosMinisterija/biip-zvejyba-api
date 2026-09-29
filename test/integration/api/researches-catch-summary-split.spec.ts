@@ -25,11 +25,10 @@ const bar = (id: string) => ({
 const NETS = 'Statomieji tinklaičiai 45-50 mm';
 const SMELT_TRAPS = 'Stintų gaudyklės 12, 12-16, 14-20';
 
-// Offsets in `cellValues`: Karšis = 2, Kuoja = 4, Stinta = 10, IŠ VISO = 20.
-const KARSIS = 2;
-const KUOJA = 4;
-const STINTA = 10;
-const TOTAL = 20;
+const KARSIS = 'Karšis';
+const KUOJA = 'Kuoja';
+const STINTA = 'Stinta';
+const TOTAL = 'IŠ VISO';
 
 let investigator: any;
 let toolTypeIdByLabel: Map<string, any>;
@@ -58,6 +57,13 @@ const findRow = (sheet: ExcelJS.Worksheet, name: string) => {
   });
   return found as any[] | null;
 };
+
+const valueIn = (sheet: ExcelJS.Worksheet, row: any[], header: string) =>
+  row[cellValues(sheet, 4).indexOf(header)];
+
+// kg in the column headed `header` on the row named `rowName`.
+const kg = (sheet: ExcelJS.Worksheet, rowName: string, header: string) =>
+  valueIn(sheet, findRow(sheet, rowName)!, header);
 
 const titles = (sheet: ExcelJS.Worksheet) => {
   const found: unknown[] = [];
@@ -158,18 +164,25 @@ describe('researches.catchSummary — tool types', () => {
     const traps = findRow(sheet, SMELT_TRAPS)!;
     const unassigned = findRow(sheet, 'Įrankis nenurodytas')!;
 
-    expect([company[KARSIS], company[STINTA], company[KUOJA], company[TOTAL]]).toEqual([
-      12, 4, 1, 17,
-    ]);
-    expect([nets[KARSIS], nets[TOTAL]]).toEqual([9, 9]);
-    expect([traps[KARSIS], traps[STINTA], traps[TOTAL]]).toEqual([3, 4, 7]);
-    expect([unassigned[KUOJA], unassigned[TOTAL]]).toEqual([1, 1]);
+    expect([
+      valueIn(sheet, company, KARSIS),
+      valueIn(sheet, company, STINTA),
+      valueIn(sheet, company, KUOJA),
+      valueIn(sheet, company, TOTAL),
+    ]).toEqual([12, 4, 1, 17]);
+    expect([valueIn(sheet, nets, KARSIS), valueIn(sheet, nets, TOTAL)]).toEqual([9, 9]);
+    expect([
+      valueIn(sheet, traps, KARSIS),
+      valueIn(sheet, traps, STINTA),
+      valueIn(sheet, traps, TOTAL),
+    ]).toEqual([3, 4, 7]);
+    expect([valueIn(sheet, unassigned, KUOJA), valueIn(sheet, unassigned, TOTAL)]).toEqual([1, 1]);
   });
 
   it('keeps one row per company when the toggle is off', async () => {
     const sheet = (await summary({})).getWorksheet('Suvestinė')!;
 
-    expect(findRow(sheet, 'Company-A')![TOTAL]).toBe(17);
+    expect(kg(sheet, 'Company-A', TOTAL)).toBe(17);
     expect(findRow(sheet, NETS)).toBeNull();
     expect(findRow(sheet, 'Įrankis nenurodytas')).toBeNull();
   });
@@ -182,7 +195,11 @@ describe('researches.catchSummary — bar filter', () => {
     ).getWorksheet('Suvestinė')!;
 
     const company = findRow(sheet, 'Company-A')!;
-    expect([company[KARSIS], company[STINTA], company[TOTAL]]).toEqual([9, 0, 9]);
+    expect([
+      valueIn(sheet, company, KARSIS),
+      valueIn(sheet, company, STINTA),
+      valueIn(sheet, company, TOTAL),
+    ]).toEqual([9, 0, 9]);
     expect(sheet.getCell(3, 1).value).toBe(
       'Vieta: Kuršių marios · Kvadratas: 1 baras · Rūšys: visos',
     );
@@ -191,7 +208,7 @@ describe('researches.catchSummary — bar filter', () => {
   it('shows "visi" when no bar is picked', async () => {
     const sheet = (await summary({ types: ['ESTUARY'] })).getWorksheet('Suvestinė')!;
 
-    expect(findRow(sheet, 'Company-A')![TOTAL]).toBe(17);
+    expect(kg(sheet, 'Company-A', TOTAL)).toBe(17);
     expect(sheet.getCell(3, 1).value).toBe('Vieta: Kuršių marios · Kvadratas: visi · Rūšys: visos');
   });
 });
@@ -204,7 +221,7 @@ describe('researches.catchSummary — zones', () => {
     expect(titles(sheet)).not.toContain('POLDERIUOSE:');
     expect(titles(sheet)).not.toContain('NEMUNO ŽEMUPYJE, ŠVENTOSIOS UPĖJE:');
     expect(findRow(sheet, 'Iš viso polderiuose:')).toBeNull();
-    expect(findRow(sheet, 'IŠ VISO:')![TOTAL]).toBe(17);
+    expect(kg(sheet, 'IŠ VISO:', TOTAL)).toBe(17);
   });
 
   it('accepts the zones as a query-string list over HTTP', async () => {
@@ -249,11 +266,11 @@ describe('researches.catchSummary — months', () => {
       '2025-02',
     ]);
 
-    const monthTotals = ['2024-12', '2025-01', '2025-02'].map(
-      (name) => findRow(workbook.getWorksheet(name)!, 'IŠ VISO:')![TOTAL],
+    const monthTotals = ['2024-12', '2025-01', '2025-02'].map((name) =>
+      kg(workbook.getWorksheet(name)!, 'IŠ VISO:', TOTAL),
     );
     expect(monthTotals).toEqual([0, 17, 0]);
-    expect(findRow(workbook.getWorksheet('Suvestinė')!, 'IŠ VISO:')![TOTAL]).toBe(17);
+    expect(kg(workbook.getWorksheet('Suvestinė')!, 'IŠ VISO:', TOTAL)).toBe(17);
     expect(workbook.getWorksheet('2025-01')!.getCell(2, 1).value).toBe('UŽ 2025 M. SAUSIO MĖN.');
   });
 
@@ -272,8 +289,8 @@ describe('researches.catchSummary — months', () => {
       '2025-01',
       '2025-02',
     ]);
-    expect(findRow(workbook.getWorksheet('2025-01')!, 'IŠ VISO:')![TOTAL]).toBe(0);
-    expect(findRow(workbook.getWorksheet('2025-02')!, 'IŠ VISO:')![TOTAL]).toBe(17);
+    expect(kg(workbook.getWorksheet('2025-01')!, 'IŠ VISO:', TOTAL)).toBe(0);
+    expect(kg(workbook.getWorksheet('2025-02')!, 'IŠ VISO:', TOTAL)).toBe(17);
   });
 
   it('rejects a period too long to split by months', async () => {
@@ -299,10 +316,10 @@ describe('researches.catchSummary — corrections', () => {
     const february = (await summary({ dateFrom: '2025-02-01', dateTo: '2025-02-28' })).getWorksheet(
       'Suvestinė',
     )!;
-    expect(findRow(february, 'Company-A')![TOTAL]).toBe(19);
+    expect(kg(february, 'Company-A', TOTAL)).toBe(19);
 
     const allTime = (await summary({})).getWorksheet('Suvestinė')!;
-    expect(findRow(allTime, 'Company-A')![TOTAL]).toBe(19);
+    expect(kg(allTime, 'Company-A', TOTAL)).toBe(19);
   });
 
   it('keeps a deleted company under its own name', async () => {
@@ -313,6 +330,6 @@ describe('researches.catchSummary — corrections', () => {
     );
 
     const sheet = (await summary({})).getWorksheet('Suvestinė')!;
-    expect(findRow(sheet, 'Company-A')![TOTAL]).toBe(19);
+    expect(kg(sheet, 'Company-A', TOTAL)).toBe(19);
   });
 });

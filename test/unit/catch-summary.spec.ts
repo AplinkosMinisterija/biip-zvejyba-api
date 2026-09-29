@@ -7,13 +7,14 @@ import {
   SUMMARY_MAX_MONTH_SHEETS,
   SUMMARY_UNASSIGNED_TOOL,
   ShoreCatchRow,
+  SummaryFishType,
   allocateShoreCatch,
   buildCatchSummaryWorkbook,
   describeSummaryFilters,
   filterByLocation,
-  selectLabels,
   splitProportionally,
   summarizeCatch,
+  summaryFishColumns,
   summaryMonths,
   toVilniusDate,
 } from '../../modules/catchSummary';
@@ -21,11 +22,11 @@ import {
 const KARSIS = '1';
 const STINTA = '2';
 const KUOJA = '3';
-const labelById = new Map([
-  [KARSIS, 'Karšis'],
-  [STINTA, 'Stinta'],
-  [KUOJA, 'Kuoja'],
-]);
+const fishTypes: SummaryFishType[] = [
+  { id: KARSIS, label: 'Karšis', deleted: false },
+  { id: STINTA, label: 'Stinta', deleted: false },
+  { id: KUOJA, label: 'Kuoja', deleted: false },
+];
 
 const NETS = 'Statomieji tinklaičiai 45-50 mm';
 const SMELT_TRAPS = 'Stintų gaudyklės 12, 12-16, 14-20';
@@ -60,7 +61,7 @@ const boat = (
 });
 
 const summarize = (shoreRows: ShoreCatchRow[], boatRows: BoatCatchRow[]) =>
-  summarizeCatch(allocateShoreCatch(shoreRows, boatRows), { labelById, selectedLabels: null });
+  summarizeCatch(allocateShoreCatch(shoreRows, boatRows), null);
 
 const build = (
   summary: CatchSummary,
@@ -70,7 +71,7 @@ const build = (
     period: { from: null, to: null },
     months: [],
     types: [],
-    fishTypes: null,
+    fishColumns: summaryFishColumns(fishTypes, null, summary.fishTypeIds),
     filterLine: '',
     showToolTypes: false,
     ...opts,
@@ -93,8 +94,11 @@ const titles = (sheet: ExcelJS.Worksheet) => {
   return found;
 };
 
-// Column offsets in `cellValues`: Karšis = 2, Kuoja = 4, Stinta = 10, IŠ VISO = 20.
-const TOTAL = 20;
+const HEADER_ROW = 4;
+
+// kg in the column headed `header`, on the `nth` row named `rowName`.
+const kg = (sheet: ExcelJS.Worksheet, rowName: string, header: string, nth = 0) =>
+  findRows(sheet, rowName)[nth][cellValues(sheet, HEADER_ROW).indexOf(header)];
 
 describe('splitProportionally', () => {
   it('keeps the parts summing to the total in whole cents', () => {
@@ -204,18 +208,6 @@ describe('toVilniusDate', () => {
   });
 });
 
-describe('selectLabels', () => {
-  it('means "no filter" when nothing is picked', () => {
-    expect(selectLabels(labelById, undefined)).toBeNull();
-    expect(selectLabels(labelById, [])).toBeNull();
-  });
-
-  it('fails closed on ids it does not know', () => {
-    expect(selectLabels(labelById, ['999'])).toEqual(new Set());
-    expect(selectLabels(labelById, [KARSIS, '999'])).toEqual(new Set(['Karšis']));
-  });
-});
-
 describe('describeSummaryFilters', () => {
   it('names every filter, "visi"/"visos" for the unset ones', () => {
     expect(describeSummaryFilters({ types: [], location: null, fishTypes: null })).toBe(
@@ -228,7 +220,7 @@ describe('describeSummaryFilters', () => {
       describeSummaryFilters({
         types: ['ESTUARY'],
         location: { id: '12', name: '12' },
-        fishTypes: new Set(['Karšis', 'Stinta']),
+        fishTypes: ['Karšis', 'Stinta'],
       }),
     ).toBe('Vieta: Kuršių marios · Kvadratas: 12 · Rūšys: Karšis, Stinta');
 
@@ -251,6 +243,20 @@ describe('buildCatchSummaryWorkbook', () => {
     [boat(NETS, '1', { [KARSIS]: 6 }), boat(SMELT_TRAPS, '2', { [KARSIS]: 2, [STINTA]: 5 })],
   );
 
+  it('heads the columns with the registry species, then IŠ VISO', () => {
+    const sheet = build(summary, {}).getWorksheet('Suvestinė')!;
+
+    expect(cellValues(sheet, HEADER_ROW)).toEqual([
+      'Eil. Nr.',
+      'ĮMONĖS (ORGANIZACIJOS) PAVADINIMAS',
+      'Karšis',
+      'Stinta',
+      'Kuoja',
+      'IŠ VISO',
+    ]);
+    expect(findRows(sheet, 'UAB Pelona')[0].slice(2)).toEqual([12, 4, 1, 17]);
+  });
+
   it('keeps two fishers apart even when they share a name', () => {
     const namesake: Partial<ShoreCatchRow> = {
       tenant_id: null,
@@ -269,7 +275,7 @@ describe('buildCatchSummaryWorkbook', () => {
       {},
     ).getWorksheet('Suvestinė')!;
 
-    expect(findRows(sheet, 'Jonas Jonaitis').map((row) => row[TOTAL])).toEqual([2, 5]);
+    expect([0, 1].map((nth) => kg(sheet, 'Jonas Jonaitis', 'IŠ VISO', nth))).toEqual([2, 5]);
   });
 
   it('shows only the picked zones', () => {
@@ -278,7 +284,7 @@ describe('buildCatchSummaryWorkbook', () => {
     expect(titles(sheet)).toContain('KURŠIŲ MARIOSE:');
     expect(titles(sheet)).not.toContain('POLDERIUOSE:');
     expect(titles(sheet)).not.toContain('NEMUNO ŽEMUPYJE, ŠVENTOSIOS UPĖJE:');
-    expect(findRows(sheet, 'IŠ VISO:')[0][TOTAL]).toBe(17);
+    expect(kg(sheet, 'IŠ VISO:', 'IŠ VISO')).toBe(17);
   });
 
   it('shows all three zones when none is picked', () => {
@@ -291,7 +297,7 @@ describe('buildCatchSummaryWorkbook', () => {
         'POLDERIUOSE:',
       ]),
     );
-    expect(findRows(sheet, 'IŠ VISO:')[0][TOTAL]).toBe(22);
+    expect(kg(sheet, 'IŠ VISO:', 'IŠ VISO')).toBe(22);
   });
 
   it('writes the filter line under the period', () => {
@@ -309,15 +315,12 @@ describe('buildCatchSummaryWorkbook', () => {
       'Suvestinė',
     )!;
 
-    const company = findRows(sheet, 'UAB Pelona')[0];
-    const nets = findRows(sheet, NETS)[0];
-    const traps = findRows(sheet, SMELT_TRAPS)[0];
-    const unassigned = findRows(sheet, SUMMARY_UNASSIGNED_TOOL)[0];
+    const at = (row: string) => (header: string) => kg(sheet, row, header);
 
-    expect([nets[2], nets[TOTAL]]).toEqual([9, 9]);
-    expect([traps[2], traps[10], traps[TOTAL]]).toEqual([3, 4, 7]);
-    expect([unassigned[4], unassigned[TOTAL]]).toEqual([1, 1]);
-    expect(company[TOTAL]).toBe(17);
+    expect(['Karšis', 'IŠ VISO'].map(at(NETS))).toEqual([9, 9]);
+    expect(['Karšis', 'Stinta', 'IŠ VISO'].map(at(SMELT_TRAPS))).toEqual([3, 4, 7]);
+    expect(['Kuoja', 'IŠ VISO'].map(at(SUMMARY_UNASSIGNED_TOOL))).toEqual([1, 1]);
+    expect(kg(sheet, 'UAB Pelona', 'IŠ VISO')).toBe(17);
   });
 
   it('adds a sheet per month, always named with the year', () => {
@@ -329,8 +332,8 @@ describe('buildCatchSummaryWorkbook', () => {
       '2025-03',
     ]);
     expect(workbook.getWorksheet('2025-02')!.getCell(2, 1).value).toBe('UŽ 2025 M. VASARIO MĖN.');
-    expect(findRows(workbook.getWorksheet('2025-02')!, 'IŠ VISO:')[0][TOTAL]).toBe(17);
-    expect(findRows(workbook.getWorksheet('2025-03')!, 'IŠ VISO:')[0][TOTAL]).toBe(5);
+    expect(kg(workbook.getWorksheet('2025-02')!, 'IŠ VISO:', 'IŠ VISO')).toBe(17);
+    expect(kg(workbook.getWorksheet('2025-03')!, 'IŠ VISO:', 'IŠ VISO')).toBe(5);
   });
 
   it('says which days a clipped month covers', () => {
@@ -352,85 +355,55 @@ describe('buildCatchSummaryWorkbook', () => {
   });
 });
 
-// Dev named species `karpiai`/`ešeriai`, prod `Karpis`/`Ešerys`, and the whole
-// summary once silently turned into „Kitos žuvys“.
-describe('species filter', () => {
-  const STERKAS = '4';
-  const SELIAVA = '5';
-  const labels = new Map([...labelById, [STERKAS, 'Sterkas'], [SELIAVA, 'Seliava']]);
+describe('summaryFishColumns', () => {
+  const registry: SummaryFishType[] = [
+    ...fishTypes,
+    { id: '4', label: 'Seliava', deleted: true },
+    { id: '5', label: 'Vėžys', deleted: true },
+  ];
+  const labels = (columns: { label: string }[]) => columns.map((column) => column.label);
 
-  const sheetFor = (picked: string[], data: Record<string, number>) => {
-    const fishTypes = new Set(picked);
-    const summary = summarizeCatch(allocateShoreCatch([shore(data)], []), {
-      labelById: labels,
-      selectedLabels: fishTypes,
-    });
-    return build(summary, { fishTypes });
-  };
+  it('lists every active species in registry order when nothing is picked', () => {
+    expect(labels(summaryFishColumns(registry, null, new Set([STINTA])))).toEqual([
+      'Karšis',
+      'Stinta',
+      'Kuoja',
+    ]);
+  });
 
-  it('shows only the picked species, in the order picked, then IŠ VISO', () => {
-    const workbook = sheetFor(['Stinta', 'Karšis'], { [KARSIS]: 12, [STINTA]: 4, [KUOJA]: 1 });
-    const sheet = workbook.getWorksheet('Suvestinė')!;
+  it('keeps a deleted species only while old weigh-ins still carry its kg', () => {
+    expect(labels(summaryFishColumns(registry, null, new Set(['4'])))).toEqual([
+      'Karšis',
+      'Stinta',
+      'Kuoja',
+      'Seliava',
+    ]);
+  });
 
-    expect(cellValues(sheet, 4)).toEqual([
-      'Eil. Nr.',
-      'ĮMONĖS (ORGANIZACIJOS) PAVADINIMAS',
+  it('heads a species missing from the registry by its id', () => {
+    expect(labels(summaryFishColumns(registry, null, new Set(['999'])))).toContain('ID 999');
+  });
+
+  it('shows only the picked species, in the order picked', () => {
+    expect(labels(summaryFishColumns(registry, new Set([STINTA, KARSIS]), new Set()))).toEqual([
       'Stinta',
       'Karšis',
-      'IŠ VISO',
     ]);
-    expect(findRows(sheet, 'UAB Pelona')[0]).toEqual([1, 'UAB Pelona', 4, 12, 16]);
-  });
-
-  it('heads each column with the registry name, never a reference one', () => {
-    const sheet = sheetFor(['Sterkas', 'Seliava'], { [STERKAS]: 3, [SELIAVA]: 2 }).getWorksheet(
-      'Suvestinė',
-    )!;
-
-    expect(cellValues(sheet, 4).slice(2)).toEqual(['Sterkas', 'Seliava', 'IŠ VISO']);
-    expect(findRows(sheet, 'UAB Pelona')[0].slice(2)).toEqual([3, 2, 5]);
-  });
-
-  it('does not list a picked species as unmapped', () => {
-    expect(
-      sheetFor(['Seliava'], { [SELIAVA]: 2 }).getWorksheet('Nepriskirtos rūšys'),
-    ).toBeUndefined();
   });
 });
 
-describe('registry spelling', () => {
-  const buildWith = (labels: Map<string, string>, data: Record<string, number>) =>
-    build(
-      summarizeCatch(allocateShoreCatch([shore(data, { tenant_name: 'Rašybos UAB' })], []), {
-        labelById: labels,
-        selectedLabels: null,
-      }),
-      {},
+describe('species filter', () => {
+  it('shows only the picked species, then IŠ VISO', () => {
+    const picked = new Set([STINTA, KARSIS]);
+    const summary = summarizeCatch(
+      allocateShoreCatch([shore({ [KARSIS]: 12, [STINTA]: 4, [KUOJA]: 1 })], []),
+      picked,
     );
+    const sheet = build(summary, {
+      fishColumns: summaryFishColumns(fishTypes, picked, summary.fishTypeIds),
+    }).getWorksheet('Suvestinė')!;
 
-  it('matches regardless of letter case and spacing', () => {
-    const workbook = buildWith(new Map([['1', '  KARPIS ']]), { '1': 5 });
-
-    const row = findRows(workbook.getWorksheet('Suvestinė')!, 'Rašybos UAB')[0];
-    expect(row[18]).toBe(5); // Karpis, not „Kitos žuvys“
-    expect(row[19]).toBe(0);
-    expect(workbook.getWorksheet('Nepriskirtos rūšys')).toBeUndefined();
-  });
-
-  it('counts an unmapped species in „Kitos“ AND lists it on its own sheet', () => {
-    const workbook = buildWith(new Map([['1', 'karpiai']]), { '1': 7 });
-
-    const row = findRows(workbook.getWorksheet('Suvestinė')!, 'Rašybos UAB')[0];
-    expect(row[18]).toBe(0); // not in the Karpis column
-    expect(row[19]).toBe(7); // but the total is intact
-    expect(row[20]).toBe(7);
-
-    const diagnostics = workbook.getWorksheet('Nepriskirtos rūšys')!;
-    expect(cellValues(diagnostics, 4)).toEqual(['karpiai', 7]);
-  });
-
-  it('lists a deleted species by its id', () => {
-    const workbook = buildWith(new Map(), { '999': 3 });
-    expect(cellValues(workbook.getWorksheet('Nepriskirtos rūšys')!, 4)).toEqual(['ID 999', 3]);
+    expect(cellValues(sheet, HEADER_ROW).slice(2)).toEqual(['Stinta', 'Karšis', 'IŠ VISO']);
+    expect(findRows(sheet, 'UAB Pelona')[0]).toEqual([1, 'UAB Pelona', 4, 12, 16]);
   });
 });
