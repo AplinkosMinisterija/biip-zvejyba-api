@@ -292,12 +292,21 @@ export const filterCatchEntries = (
       (!filter.toolTypes || (!!entry.toolType && filter.toolTypes.has(entry.toolType))),
   );
 
+// Fail closed: unknown ids give an empty set (empty report), never null (everything).
+export const selectLabels = (labelById: Map<string, string>, ids?: string[]) => {
+  if (!ids?.length) return null;
+
+  return new Set(
+    ids.map((id) => labelById.get(String(id))).filter((label): label is string => !!label),
+  );
+};
+
 const resolveColumn = (
   entry: CatchEntry,
-  labelById: Map<number, string>,
+  labelById: Map<string, string>,
   selectedLabels: Set<string> | null,
 ): ColumnSlot | null => {
-  const label = labelById.get(Number(entry.fishTypeId));
+  const label = labelById.get(entry.fishTypeId);
 
   // A deleted species has no label: dropped under a species filter, otherwise
   // kept in „Kitos“ so the total holds.
@@ -333,7 +342,7 @@ const addToSheet = (sheet: SheetSummary, entry: CatchEntry, slot: ColumnSlot) =>
 
 export const summarizeCatch = (
   entries: CatchEntry[],
-  opts: { labelById: Map<number, string>; selectedLabels: Set<string> | null },
+  opts: { labelById: Map<string, string>; selectedLabels: Set<string> | null },
 ): CatchSummary => {
   const summary: CatchSummary = { all: new Map(), byMonth: new Map(), unmapped: new Map() };
 

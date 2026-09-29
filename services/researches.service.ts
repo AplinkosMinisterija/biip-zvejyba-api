@@ -18,17 +18,18 @@ import {
 
 import ProfileMixin from '../mixins/profile.mixin';
 import {
-  allocateShoreCatch,
   BoatCatchRow,
-  buildCatchSummaryWorkbook,
   CatchLocation,
+  SUMMARY_MAX_MONTH_SHEETS,
+  ShoreCatchRow,
+  SummaryPeriod,
+  allocateShoreCatch,
+  buildCatchSummaryWorkbook,
   describeSummaryFilters,
   filterCatchEntries,
-  ShoreCatchRow,
+  selectLabels,
   summarizeCatch,
-  SUMMARY_MAX_MONTH_SHEETS,
   summaryMonths,
-  SummaryPeriod,
   toVilniusDate,
 } from '../modules/catchSummary';
 import { GeomFeatureCollection } from '../modules/geometry';
@@ -489,7 +490,6 @@ export default class ResearchesService extends moleculer.Service {
       },
       locationId: 'string|optional',
       locationName: 'string|optional',
-      // Matched by label, not by id encoding — see resolveSelectedLabels.
       fishTypes: {
         type: 'array',
         items: 'string',
@@ -515,12 +515,13 @@ export default class ResearchesService extends moleculer.Service {
     const location: CatchLocation | null =
       locationId && locationName ? { id: locationId, name: locationName } : null;
 
-    const [labelById, fishTypes, toolTypes, shoreRows] = await Promise.all([
-      this.fetchFishTypeLabels(ctx),
-      this.resolveSelectedLabels(ctx, 'fishTypes', ctx.params.fishTypes),
-      this.resolveSelectedLabels(ctx, 'toolTypes', ctx.params.toolTypes),
+    const [fishLabelById, toolLabelById, shoreRows] = await Promise.all([
+      this.fetchLabelsById(ctx, 'fishTypes'),
+      this.fetchLabelsById(ctx, 'toolTypes'),
       this.fetchShoreCatchRows(ctx, period, types),
     ]);
+    const fishTypes = selectLabels(fishLabelById, ctx.params.fishTypes);
+    const toolTypes = selectLabels(toolLabelById, ctx.params.toolTypes);
     const boatRows = await this.fetchBoatCatchRows(
       ctx,
       shoreRows.map((row) => row.fishing_id),
@@ -530,7 +531,10 @@ export default class ResearchesService extends moleculer.Service {
       location,
       toolTypes,
     });
-    const summary = summarizeCatch(entries, { labelById, selectedLabels: fishTypes });
+    const summary = summarizeCatch(entries, {
+      labelById: fishLabelById,
+      selectedLabels: fishTypes,
+    });
 
     const months = ctx.params.byMonths
       ? summaryMonths(period, Array.from(summary.byMonth.keys()))
@@ -574,38 +578,16 @@ export default class ResearchesService extends moleculer.Service {
     return toVilniusDate(date);
   }
 
-  // Raw ids, because `weight_events.data` keys are raw; everything downstream
-  // compares labels so the report does not depend on `secure` id encoding.
   @Method
-  async fetchFishTypeLabels(ctx: Context): Promise<Map<number, string>> {
-    const rows: Array<{ id: number; label: string }> = await this.rawQuery(
-      ctx,
-      `SELECT id, label FROM fish_types WHERE deleted_at IS NULL`,
-    );
-
-    return new Map(rows.map((row) => [Number(row.id), row.label]));
-  }
-
-  // Resolved through the same action the FE got the ids from, so their encoding matches.
-  @Method
-  async resolveSelectedLabels(
+  async fetchLabelsById(
     ctx: Context,
     service: 'fishTypes' | 'toolTypes',
-    ids?: string[],
-  ): Promise<Set<string> | null> {
-    if (!ids?.length) return null;
-
-    const all: Array<{ id: unknown; label: string }> = await ctx.call(`${service}.find`, {
+  ): Promise<Map<string, string>> {
+    const rows: Array<{ id: unknown; label: string }> = await ctx.call(`${service}.find`, {
       fields: ['id', 'label'],
     });
 
-    const labelById = new Map(all.map((item) => [String(item.id), item.label]));
-    const selected = ids
-      .map((id) => labelById.get(String(id)))
-      .filter((label): label is string => !!label);
-
-    // Fail closed: unknown ids give an empty set (empty report), never null (everything).
-    return new Set(selected);
+    return new Map(rows.map((row) => [String(row.id), row.label]));
   }
 
   // Shore weigh-ins only (`tools_group_id IS NULL`): the official figure the AAD

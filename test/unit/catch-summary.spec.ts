@@ -11,6 +11,7 @@ import {
   buildCatchSummaryWorkbook,
   describeSummaryFilters,
   filterCatchEntries,
+  selectLabels,
   splitProportionally,
   summarizeCatch,
   summaryMonths,
@@ -21,9 +22,9 @@ const KARSIS = '1';
 const STINTA = '2';
 const KUOJA = '3';
 const labelById = new Map([
-  [1, 'Karšis'],
-  [2, 'Stinta'],
-  [3, 'Kuoja'],
+  [KARSIS, 'Karšis'],
+  [STINTA, 'Stinta'],
+  [KUOJA, 'Kuoja'],
 ]);
 
 const NETS = 'Statomieji tinklaičiai 45-50 mm';
@@ -208,6 +209,18 @@ describe('toVilniusDate', () => {
   });
 });
 
+describe('selectLabels', () => {
+  it('means "no filter" when nothing is picked', () => {
+    expect(selectLabels(labelById, undefined)).toBeNull();
+    expect(selectLabels(labelById, [])).toBeNull();
+  });
+
+  it('fails closed on ids it does not know', () => {
+    expect(selectLabels(labelById, ['999'])).toEqual(new Set());
+    expect(selectLabels(labelById, [KARSIS, '999'])).toEqual(new Set(['Karšis']));
+  });
+});
+
 describe('describeSummaryFilters', () => {
   it('names every filter, "visi"/"visos" for the unset ones', () => {
     expect(
@@ -328,7 +341,7 @@ describe('buildCatchSummaryWorkbook', () => {
 // Dev named species `karpiai`/`ešeriai`, prod `Karpis`/`Ešerys`, and the whole
 // summary once silently turned into „Kitos žuvys“.
 describe('registry spelling', () => {
-  const buildWith = (labels: Map<number, string>, data: Record<string, number>) =>
+  const buildWith = (labels: Map<string, string>, data: Record<string, number>) =>
     build(
       summarizeCatch(allocateShoreCatch([shore(data, { tenant_name: 'Rašybos UAB' })], []), {
         labelById: labels,
@@ -338,7 +351,7 @@ describe('registry spelling', () => {
     );
 
   it('matches regardless of letter case and spacing', () => {
-    const workbook = buildWith(new Map([[1, '  KARPIS ']]), { '1': 5 });
+    const workbook = buildWith(new Map([['1', '  KARPIS ']]), { '1': 5 });
 
     const row = findRows(workbook.getWorksheet('Suvestinė')!, 'Rašybos UAB')[0];
     expect(row[18]).toBe(5); // Karpis, not „Kitos žuvys“
@@ -347,7 +360,7 @@ describe('registry spelling', () => {
   });
 
   it('counts an unmapped species in „Kitos“ AND lists it on its own sheet', () => {
-    const workbook = buildWith(new Map([[1, 'karpiai']]), { '1': 7 });
+    const workbook = buildWith(new Map([['1', 'karpiai']]), { '1': 7 });
 
     const row = findRows(workbook.getWorksheet('Suvestinė')!, 'Rašybos UAB')[0];
     expect(row[18]).toBe(0); // not in the Karpis column
