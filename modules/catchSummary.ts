@@ -120,10 +120,9 @@ export const SUMMARY_MAX_MONTH_SHEETS = 120;
 const SUMMARY_TOTAL_COL = 2 + SUMMARY_MAIN_COLUMNS.length + 2;
 // One blank spacer column, then „Kontrolinė suma“ and the „Kitos žuvys“ breakdown.
 const SUMMARY_CONTROL_COL = SUMMARY_TOTAL_COL + 2;
-const SUMMARY_LAST_COL = SUMMARY_CONTROL_COL + SUMMARY_OTHER_COLUMNS.length + 2;
 const SUMMARY_HEADER_ROW = 4;
 
-type SummaryTotals = { main: number[]; other: number[] };
+type SummaryTotals = { main: number[]; other: number[]; byLabel: Map<string, number> };
 
 type PartySummary = {
   name: string;
@@ -177,17 +176,27 @@ export type CatchEntry = {
   kg: number;
 };
 
-type ColumnSlot = { group: keyof SummaryTotals; index: number; unmappedAs?: string };
+type ColumnSlot = {
+  group: 'main' | 'other';
+  index: number;
+  label?: string;
+  unmappedAs?: string;
+};
 
 const emptyTotals = (): SummaryTotals => ({
   main: SUMMARY_MAIN_COLUMNS.map(() => 0),
   // +1 for the trailing „Kitos“ column.
   other: [...SUMMARY_OTHER_COLUMNS.map(() => 0), 0],
+  byLabel: new Map(),
 });
+
+const addKg = (kgByKey: Map<string, number>, key: string, kg: number) =>
+  kgByKey.set(key, (kgByKey.get(key) || 0) + kg);
 
 const addTotals = (target: SummaryTotals, source: SummaryTotals) => {
   source.main.forEach((value, i) => (target.main[i] += value));
   source.other.forEach((value, i) => (target.other[i] += value));
+  source.byLabel.forEach((kg, label) => addKg(target.byLabel, label, kg));
 };
 
 const round2 = (value: number) => Math.round(value * 100) / 100;
@@ -312,6 +321,18 @@ export const selectLabels = (labelById: Map<string, string>, ids?: string[]) => 
   );
 };
 
+const columnOfLabel = (label: string): ColumnSlot => {
+  const normalized = normalizeLabel(label);
+
+  const mainIndex = MAIN_INDEX_BY_LABEL.get(normalized);
+  if (mainIndex !== undefined) return { group: 'main', index: mainIndex };
+
+  const otherIndex = OTHER_INDEX_BY_LABEL.get(normalized);
+  if (otherIndex !== undefined) return { group: 'other', index: otherIndex };
+
+  return { group: 'other', index: OTHER_REST_INDEX, unmappedAs: label };
+};
+
 const resolveColumn = (
   entry: CatchEntry,
   labelById: Map<string, string>,
@@ -328,15 +349,7 @@ const resolveColumn = (
 
   if (selectedLabels && !selectedLabels.has(label)) return null;
 
-  const normalized = normalizeLabel(label);
-
-  const mainIndex = MAIN_INDEX_BY_LABEL.get(normalized);
-  if (mainIndex !== undefined) return { group: 'main', index: mainIndex };
-
-  const otherIndex = OTHER_INDEX_BY_LABEL.get(normalized);
-  if (otherIndex !== undefined) return { group: 'other', index: otherIndex };
-
-  return { group: 'other', index: OTHER_REST_INDEX, unmappedAs: label };
+  return { ...columnOfLabel(label), label };
 };
 
 const addToSheet = (sheet: SheetSummary, entry: CatchEntry, slot: ColumnSlot) => {
@@ -348,8 +361,10 @@ const addToSheet = (sheet: SheetSummary, entry: CatchEntry, slot: ColumnSlot) =>
   }));
   const tool = getOrCreate(party.byTool, entry.toolType || SUMMARY_UNASSIGNED_TOOL, emptyTotals);
 
-  party.totals[slot.group][slot.index] += entry.kg;
-  tool[slot.group][slot.index] += entry.kg;
+  for (const totals of [party.totals, tool]) {
+    totals[slot.group][slot.index] += entry.kg;
+    if (slot.label) addKg(totals.byLabel, slot.label, entry.kg);
+  }
 };
 
 export const summarizeCatch = (
@@ -362,13 +377,9 @@ export const summarizeCatch = (
     const slot = resolveColumn(entry, opts.labelById, opts.selectedLabels);
     if (!slot) continue;
 
-    // Counted in „Kitos“ but also listed, so a renamed species gets noticed.
-    if (slot.unmappedAs) {
-      summary.unmapped.set(
-        slot.unmappedAs,
-        (summary.unmapped.get(slot.unmappedAs) || 0) + entry.kg,
-      );
-    }
+    // Counted in „Kitos“ but also listed, so a renamed species gets noticed. A
+    // species filter gives every pick its own column, so nothing is folded there.
+    if (slot.unmappedAs && !opts.selectedLabels) addKg(summary.unmapped, slot.unmappedAs, entry.kg);
 
     addToSheet(summary.all, entry, slot);
     addToSheet(
@@ -458,51 +469,99 @@ export const describeSummaryFilters = (filter: {
   ].join(' · ');
 };
 
+type SheetColumn = { header: string | null; value: (totals: SummaryTotals) => number | null };
+
+type ColumnLayout = {
+  columns: SheetColumn[];
+  // Sheet column of the „Kitos žuvys :“ group label — the full reference layout only.
+  otherGroupColumn: number | null;
+};
+
+const otherKg = (totals: SummaryTotals) => sum(totals.other);
+const totalKg = (totals: SummaryTotals) => sum(totals.main) + sum(totals.other);
+const kgAt = (slot: ColumnSlot) => (totals: SummaryTotals) => totals[slot.group][slot.index];
+
 // Reference invariant: „IŠ VISO“ = „Kontrolinė suma“ = species + „Kitos žuvys“,
 // and the breakdown's „IŠ VISO“ = „Kitos žuvys“.
-const summaryRowValues = (first: string | number, name: string, totals: SummaryTotals) => {
-  const other = round2(sum(totals.other));
-  const total = round2(sum(totals.main) + other);
-
-  return [
-    first,
-    name,
-    ...totals.main.map(round2),
-    other,
-    total,
-    null,
-    total,
-    ...totals.other.slice(0, SUMMARY_OTHER_COLUMNS.length).map(round2),
-    round2(totals.other[SUMMARY_OTHER_COLUMNS.length]),
-    other,
-  ];
+const FULL_LAYOUT: ColumnLayout = {
+  columns: [
+    ...SUMMARY_MAIN_COLUMNS.map((column, index) => ({
+      header: column.header,
+      value: kgAt({ group: 'main', index }),
+    })),
+    { header: 'Kitos žuvys', value: otherKg },
+    { header: 'IŠ VISO', value: totalKg },
+    { header: null, value: () => null },
+    { header: 'Kontrolinė suma (iš viso)', value: totalKg },
+    ...SUMMARY_OTHER_COLUMNS.map((column, index) => ({
+      header: column.header,
+      value: kgAt({ group: 'other', index }),
+    })),
+    { header: 'Kitos', value: kgAt({ group: 'other', index: OTHER_REST_INDEX }) },
+    { header: 'IŠ VISO', value: otherKg },
+  ],
+  otherGroupColumn: SUMMARY_CONTROL_COL,
 };
+
+// The picked species under their registry names, in the order they were picked —
+// labels differ per environment, so no reference renaming or merging here.
+const selectedLayout = (labels: Set<string>): ColumnLayout => ({
+  columns: [
+    ...Array.from(labels, (label) => ({
+      header: label,
+      value: (totals: SummaryTotals) => totals.byLabel.get(label) || 0,
+    })),
+    { header: 'IŠ VISO', value: totalKg },
+  ],
+  otherGroupColumn: null,
+});
+
+const rowValues = (
+  columns: SheetColumn[],
+  first: string | number,
+  name: string,
+  totals: SummaryTotals,
+) => [
+  first,
+  name,
+  ...columns.map((column) => {
+    const kg = column.value(totals);
+    return kg === null ? null : round2(kg);
+  }),
+];
 
 type SheetLayout = {
   periodLine: string;
   filterLine: string;
   zones: SummaryZone[];
   showToolTypes: boolean;
+  columnLayout: ColumnLayout;
 };
 
 const renderSheetHeader = (sheet: ExcelJS.Worksheet, layout: SheetLayout) => {
+  const { columns, otherGroupColumn } = layout.columnLayout;
+  const lastCol = 2 + columns.length;
+
   sheet.views = [{ state: 'frozen', xSplit: 2, ySplit: SUMMARY_HEADER_ROW }];
 
-  sheet.mergeCells(1, 1, 1, SUMMARY_LAST_COL);
   sheet.getCell(1, 1).value = SUMMARY_TITLE;
   sheet.getCell(1, 1).font = { bold: true };
-  sheet.getCell(1, 1).alignment = { horizontal: 'center', wrapText: true };
-
-  sheet.mergeCells(2, 1, 2, SUMMARY_LAST_COL);
   sheet.getCell(2, 1).value = layout.periodLine;
-  sheet.getCell(2, 1).alignment = { horizontal: 'center' };
-
-  sheet.mergeCells(3, 1, 3, SUMMARY_TOTAL_COL);
   sheet.getCell(3, 1).value = layout.filterLine;
 
-  sheet.mergeCells(3, SUMMARY_CONTROL_COL, 3, SUMMARY_LAST_COL);
-  sheet.getCell(3, SUMMARY_CONTROL_COL).value = 'Kitos žuvys :';
-  sheet.getCell(3, SUMMARY_CONTROL_COL).font = { bold: true };
+  // Only the full layout is wide enough to centre the title; a few filtered
+  // columns would clip it, so there the text just runs on to the right.
+  if (otherGroupColumn) {
+    sheet.mergeCells(1, 1, 1, lastCol);
+    sheet.getCell(1, 1).alignment = { horizontal: 'center', wrapText: true };
+    sheet.mergeCells(2, 1, 2, lastCol);
+    sheet.getCell(2, 1).alignment = { horizontal: 'center' };
+    sheet.mergeCells(3, 1, 3, otherGroupColumn - 2);
+
+    sheet.mergeCells(3, otherGroupColumn, 3, lastCol);
+    sheet.getCell(3, otherGroupColumn).value = 'Kitos žuvys :';
+    sheet.getCell(3, otherGroupColumn).font = { bold: true };
+  }
 
   const headerRow = sheet.getRow(SUMMARY_HEADER_ROW);
   headerRow.values = [
@@ -510,23 +569,16 @@ const renderSheetHeader = (sheet: ExcelJS.Worksheet, layout: SheetLayout) => {
     layout.showToolTypes
       ? 'ĮMONĖS (ORGANIZACIJOS) PAVADINIMAS / ĮRANKIO TIPAS'
       : 'ĮMONĖS (ORGANIZACIJOS) PAVADINIMAS',
-    ...SUMMARY_MAIN_COLUMNS.map((column) => column.header),
-    'Kitos žuvys',
-    'IŠ VISO',
-    null,
-    'Kontrolinė suma (iš viso)',
-    ...SUMMARY_OTHER_COLUMNS.map((column) => column.header),
-    'Kitos',
-    'IŠ VISO',
+    ...columns.map((column) => column.header),
   ];
   headerRow.font = { bold: true };
   headerRow.alignment = { wrapText: true, vertical: 'bottom' };
 
   sheet.getColumn(1).width = 8;
   sheet.getColumn(2).width = layout.showToolTypes ? 46 : 38;
-  for (let column = 3; column <= SUMMARY_LAST_COL; column++) {
-    sheet.getColumn(column).width = column === SUMMARY_TOTAL_COL + 1 ? 3 : 12;
-  }
+  columns.forEach((column, index) => {
+    sheet.getColumn(3 + index).width = column.header === null ? 3 : 12;
+  });
 };
 
 const sortedToolRows = (byTool: Map<string, SummaryTotals>) =>
@@ -541,11 +593,12 @@ const renderToolRows = (
   sheet: ExcelJS.Worksheet,
   startRow: number,
   byTool: Map<string, SummaryTotals>,
+  columns: SheetColumn[],
 ) => {
   let rowIndex = startRow;
   for (const [toolType, totals] of sortedToolRows(byTool)) {
     const row = sheet.getRow(rowIndex++);
-    row.values = summaryRowValues('', toolType, totals);
+    row.values = rowValues(columns, '', toolType, totals);
     row.getCell(2).alignment = { indent: 1 };
     if (toolType === SUMMARY_UNASSIGNED_TOOL) row.getCell(2).font = { italic: true };
   }
@@ -555,6 +608,7 @@ const renderToolRows = (
 const renderSummarySheet = (sheet: ExcelJS.Worksheet, data: SheetSummary, layout: SheetLayout) => {
   renderSheetHeader(sheet, layout);
 
+  const { columns } = layout.columnLayout;
   let rowIndex = SUMMARY_HEADER_ROW + 1;
   const grandTotals = emptyTotals();
 
@@ -571,18 +625,18 @@ const renderSummarySheet = (sheet: ExcelJS.Worksheet, data: SheetSummary, layout
 
     parties.forEach((summary, index) => {
       const partyRow = sheet.getRow(rowIndex++);
-      partyRow.values = summaryRowValues(index + 1, summary.name, summary.totals);
+      partyRow.values = rowValues(columns, index + 1, summary.name, summary.totals);
 
       if (layout.showToolTypes) {
         partyRow.font = { bold: true };
-        rowIndex = renderToolRows(sheet, rowIndex, summary.byTool);
+        rowIndex = renderToolRows(sheet, rowIndex, summary.byTool, columns);
       }
 
       addTotals(zoneTotals, summary.totals);
     });
 
     const totalRow = sheet.getRow(rowIndex++);
-    totalRow.values = summaryRowValues('', zone.totalLabel, zoneTotals);
+    totalRow.values = rowValues(columns, '', zone.totalLabel, zoneTotals);
     totalRow.font = { bold: true };
 
     addTotals(grandTotals, zoneTotals);
@@ -590,7 +644,7 @@ const renderSummarySheet = (sheet: ExcelJS.Worksheet, data: SheetSummary, layout
   }
 
   const grandRow = sheet.getRow(rowIndex);
-  grandRow.values = summaryRowValues('', 'IŠ VISO:', grandTotals);
+  grandRow.values = rowValues(columns, '', 'IŠ VISO:', grandTotals);
   grandRow.font = { bold: true };
 };
 
@@ -625,6 +679,7 @@ export const buildCatchSummaryWorkbook = (
     period: SummaryPeriod;
     months: string[];
     types: string[];
+    fishTypes: Set<string> | null;
     filterLine: string;
     showToolTypes: boolean;
   },
@@ -634,6 +689,7 @@ export const buildCatchSummaryWorkbook = (
     filterLine: opts.filterLine,
     zones: selectedZones(opts.types),
     showToolTypes: opts.showToolTypes,
+    columnLayout: opts.fishTypes ? selectedLayout(opts.fishTypes) : FULL_LAYOUT,
   };
 
   renderSummarySheet(workbook.addWorksheet('Suvestinė'), summary.all, {

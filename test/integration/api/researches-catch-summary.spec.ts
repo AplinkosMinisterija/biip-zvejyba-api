@@ -213,11 +213,15 @@ describe('researches.catchSummary — sheet', () => {
       { fishTypes: [String(fishTypeIdByLabel.get('Karšis'))] },
       { meta: apiHelper.meta(investigator) },
     );
-    const row = findRow(await loadSheet(buffer), 'Company-A')!;
+    const sheet = await loadSheet(buffer);
 
-    expect(row[2]).toBe(10); // Karšis kept
-    expect(row[19]).toBe(0); // Perpelė and Seliava filtered out
-    expect(row[20]).toBe(10);
+    expect(cellValues(sheet, 4)).toEqual([
+      'Eil. Nr.',
+      'ĮMONĖS (ORGANIZACIJOS) PAVADINIMAS',
+      'Karšis',
+      'IŠ VISO',
+    ]);
+    expect(findRow(sheet, 'Company-A')).toEqual([1, 'Company-A', 10, 10]);
   });
 
   it('narrows the totals when a fishing-type filter is applied', async () => {

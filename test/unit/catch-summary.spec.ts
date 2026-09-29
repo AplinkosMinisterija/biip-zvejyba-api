@@ -70,6 +70,7 @@ const build = (
     period: { from: null, to: null },
     months: [],
     types: [],
+    fishTypes: null,
     filterLine: '',
     showToolTypes: false,
     ...opts,
@@ -353,6 +354,50 @@ describe('buildCatchSummaryWorkbook', () => {
 
 // Dev named species `karpiai`/`ešeriai`, prod `Karpis`/`Ešerys`, and the whole
 // summary once silently turned into „Kitos žuvys“.
+describe('species filter', () => {
+  const STERKAS = '4';
+  const SELIAVA = '5';
+  const labels = new Map([...labelById, [STERKAS, 'Sterkas'], [SELIAVA, 'Seliava']]);
+
+  const sheetFor = (picked: string[], data: Record<string, number>) => {
+    const fishTypes = new Set(picked);
+    const summary = summarizeCatch(allocateShoreCatch([shore(data)], []), {
+      labelById: labels,
+      selectedLabels: fishTypes,
+    });
+    return build(summary, { fishTypes });
+  };
+
+  it('shows only the picked species, in the order picked, then IŠ VISO', () => {
+    const workbook = sheetFor(['Stinta', 'Karšis'], { [KARSIS]: 12, [STINTA]: 4, [KUOJA]: 1 });
+    const sheet = workbook.getWorksheet('Suvestinė')!;
+
+    expect(cellValues(sheet, 4)).toEqual([
+      'Eil. Nr.',
+      'ĮMONĖS (ORGANIZACIJOS) PAVADINIMAS',
+      'Stinta',
+      'Karšis',
+      'IŠ VISO',
+    ]);
+    expect(findRows(sheet, 'UAB Pelona')[0]).toEqual([1, 'UAB Pelona', 4, 12, 16]);
+  });
+
+  it('heads each column with the registry name, never a reference one', () => {
+    const sheet = sheetFor(['Sterkas', 'Seliava'], { [STERKAS]: 3, [SELIAVA]: 2 }).getWorksheet(
+      'Suvestinė',
+    )!;
+
+    expect(cellValues(sheet, 4).slice(2)).toEqual(['Sterkas', 'Seliava', 'IŠ VISO']);
+    expect(findRows(sheet, 'UAB Pelona')[0].slice(2)).toEqual([3, 2, 5]);
+  });
+
+  it('does not list a picked species as unmapped', () => {
+    expect(
+      sheetFor(['Seliava'], { [SELIAVA]: 2 }).getWorksheet('Nepriskirtos rūšys'),
+    ).toBeUndefined();
+  });
+});
+
 describe('registry spelling', () => {
   const buildWith = (labels: Map<string, string>, data: Record<string, number>) =>
     build(

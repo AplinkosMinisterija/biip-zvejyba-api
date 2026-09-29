@@ -149,6 +149,10 @@ užrakinta `RestrictionType.INVESTIGATOR`.
   month of the period gets a sheet, always named `YYYY-MM` (product decision,
   2026-09-29 — not `01`… as the issue sketched); more than 120 sheets is
   rejected.
+- **Species filter.** With species picked, the sheets show only their columns,
+  headed by the registry label in the order picked, plus „IŠ VISO“ — no
+  reference renaming or merging, because labels differ per environment. With
+  none picked, the full reference layout.
 - **Blocks.** Only the picked zones are drawn; none picked = all three.
 - **Header.** Row 3 lists every filter, unset ones as „visi" / „visos".
 - Pure logic lives in `modules/catchSummary.ts`; the service keeps the SQL.

@@ -538,6 +538,7 @@ export default class ResearchesService extends moleculer.Service {
       period,
       months,
       types,
+      fishTypes,
       filterLine: describeSummaryFilters({ types, location, fishTypes }),
       showToolTypes: !!ctx.params.byToolTypes,
     });
