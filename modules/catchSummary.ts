@@ -125,7 +125,11 @@ const SUMMARY_HEADER_ROW = 4;
 
 type SummaryTotals = { main: number[]; other: number[] };
 
-type PartySummary = { totals: SummaryTotals; byTool: Map<string, SummaryTotals> };
+type PartySummary = {
+  name: string;
+  totals: SummaryTotals;
+  byTool: Map<string, SummaryTotals>;
+};
 
 type SheetSummary = Map<string, Map<string, PartySummary>>;
 
@@ -143,6 +147,8 @@ type FishWeights = Record<string, number> | null;
 export type ShoreCatchRow = {
   fishing_id: number;
   fishing_type: string;
+  tenant_id: number | null;
+  user_id: number | null;
   tenant_name: string | null;
   first_name: string | null;
   last_name: string | null;
@@ -162,7 +168,8 @@ export type CatchLocation = { id: string; name: string };
 
 export type CatchEntry = {
   fishingType: string;
-  party: string;
+  partyKey: string;
+  partyName: string;
   month: string;
   toolType: string | null;
   location: CatchLocation | null;
@@ -219,6 +226,10 @@ const kgOf = (data: FishWeights, fishTypeId: string) => {
 const partyName = (row: ShoreCatchRow) =>
   row.tenant_name || `${row.first_name || ''} ${row.last_name || ''}`.trim() || 'Nenurodyta';
 
+// Keyed by id: two fishers can share a name.
+const partyKey = (row: ShoreCatchRow) =>
+  row.tenant_id ? `tenant:${row.tenant_id}` : `user:${row.user_id}`;
+
 // Splits in whole cents (largest remainder), so the parts always add back up to
 // the total — otherwise a company row could differ from its tool rows by 0.01.
 export const splitProportionally = (total: number, weights: number[]): number[] => {
@@ -248,7 +259,12 @@ export const allocateShoreCatch = (
   boatRows.forEach((row) => getOrCreate(boatByFishing, Number(row.fishing_id), () => []).push(row));
 
   return shoreRows.flatMap((row) => {
-    const base = { fishingType: row.fishing_type, party: partyName(row), month: row.month };
+    const base = {
+      fishingType: row.fishing_type,
+      partyKey: partyKey(row),
+      partyName: partyName(row),
+      month: row.month,
+    };
     const boat = boatByFishing.get(Number(row.fishing_id)) || [];
 
     return Object.keys(row.data || {}).flatMap((fishTypeId): CatchEntry[] => {
@@ -330,7 +346,8 @@ const resolveColumn = (
 
 const addToSheet = (sheet: SheetSummary, entry: CatchEntry, slot: ColumnSlot) => {
   const parties = getOrCreate(sheet, entry.fishingType, () => new Map<string, PartySummary>());
-  const party = getOrCreate(parties, entry.party, () => ({
+  const party = getOrCreate(parties, entry.partyKey, () => ({
+    name: entry.partyName,
     totals: emptyTotals(),
     byTool: new Map<string, SummaryTotals>(),
   }));
@@ -552,8 +569,8 @@ const renderSummarySheet = (sheet: ExcelJS.Worksheet, data: SheetSummary, layout
   const grandTotals = emptyTotals();
 
   for (const zone of layout.zones) {
-    const parties = Array.from(data.get(zone.type)?.entries() || []).sort((a, b) =>
-      a[0].localeCompare(b[0], 'lt'),
+    const parties = Array.from(data.get(zone.type)?.values() || []).sort((a, b) =>
+      a.name.localeCompare(b.name, 'lt'),
     );
 
     const titleRow = sheet.getRow(rowIndex++);
@@ -562,9 +579,9 @@ const renderSummarySheet = (sheet: ExcelJS.Worksheet, data: SheetSummary, layout
 
     const zoneTotals = emptyTotals();
 
-    parties.forEach(([party, summary], index) => {
+    parties.forEach((summary, index) => {
       const partyRow = sheet.getRow(rowIndex++);
-      partyRow.values = summaryRowValues(index + 1, party, summary.totals);
+      partyRow.values = summaryRowValues(index + 1, summary.name, summary.totals);
 
       if (layout.showToolTypes) {
         partyRow.font = { bold: true };

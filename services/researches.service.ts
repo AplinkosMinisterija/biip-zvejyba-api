@@ -60,7 +60,7 @@ const publicFields = [
 ];
 
 // Caught-on day as the fisher lives it; FE sends Vilnius day bounds.
-const SHORE_CATCH_DAY_SQL = `(COALESCE(we.date, we.created_at) AT TIME ZONE 'Europe/Vilnius')::date`;
+const SHORE_CATCH_DAY_SQL = `(we.caught_at AT TIME ZONE 'Europe/Vilnius')::date`;
 
 type CatchSummaryParams = {
   dateFrom?: string;
@@ -598,11 +598,7 @@ export default class ResearchesService extends moleculer.Service {
     period: SummaryPeriod,
     types: FishingType[],
   ): Promise<ShoreCatchRow[]> {
-    const conditions = [
-      'we.deleted_at IS NULL',
-      'we.tools_group_id IS NULL',
-      'f.deleted_at IS NULL',
-    ];
+    const conditions = ['f.deleted_at IS NULL'];
     const bindings: unknown[] = [];
 
     if (types.length) {
@@ -624,14 +620,26 @@ export default class ResearchesService extends moleculer.Service {
       ctx,
       `SELECT we.fishing_id,
               f.type AS fishing_type,
+              we.tenant_id AS tenant_id,
+              we.user_id AS user_id,
               t.name AS tenant_name,
               u.first_name AS first_name,
               u.last_name AS last_name,
               to_char(${SHORE_CATCH_DAY_SQL}, 'YYYY-MM') AS month,
               we.data AS data
-         FROM weight_events we
+         FROM (
+           -- Re-submitting the shore form inserts a new row and the edit trigger
+           -- never retires the old one (tools_group_id is NULL): the latest
+           -- counts, dated by the first — the landing day.
+           SELECT DISTINCT ON (fishing_id)
+                  fishing_id, tenant_id, user_id, data,
+                  MIN(COALESCE(date, created_at)) OVER (PARTITION BY fishing_id) AS caught_at
+             FROM weight_events
+            WHERE deleted_at IS NULL AND tools_group_id IS NULL
+            ORDER BY fishing_id, created_at DESC, id DESC
+         ) we
          JOIN fishings f ON f.id = we.fishing_id
-         LEFT JOIN tenants t ON t.id = we.tenant_id AND t.deleted_at IS NULL
+         LEFT JOIN tenants t ON t.id = we.tenant_id
          LEFT JOIN users u ON u.id = we.user_id
         WHERE ${conditions.join(' AND ')}`,
       bindings,

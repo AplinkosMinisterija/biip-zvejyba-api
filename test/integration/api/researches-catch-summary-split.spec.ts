@@ -34,6 +34,8 @@ const TOTAL = 20;
 let investigator: any;
 let toolTypeIdByLabel: Map<string, any>;
 let fishingId: number;
+let ownerMeta: any;
+let fish: Map<string, any>;
 
 const loadWorkbook = async (buffer: any) => {
   const workbook = new ExcelJS.Workbook();
@@ -80,12 +82,13 @@ beforeAll(async () => {
   });
 
   const meta = apiHelper.meta(apiHelper.ownerA, apiHelper.tenantA.tenant.id);
+  ownerMeta = meta;
   const headers = apiHelper.getHeaders(apiHelper.ownerA.token, apiHelper.tenantA.tenant.id);
 
   const toolTypes: any[] = await broker.call('toolTypes.find');
   toolTypeIdByLabel = new Map(toolTypes.map((toolType) => [toolType.label, toolType.id]));
   const fishTypes: any[] = await broker.call('fishTypes.find');
-  const fish = new Map(fishTypes.map((fishType) => [fishType.label, fishType.id]));
+  fish = new Map(fishTypes.map((fishType) => [fishType.label, fishType.id]));
 
   for (const [sealNr, label] of [
     ['S-SPLIT-1', NETS],
@@ -284,5 +287,39 @@ describe('researches.catchSummary — months', () => {
     await expect(
       summary({ dateFrom: '1900-01-01', dateTo: '2025-01-01', byMonths: true }),
     ).rejects.toThrow(/months/);
+  });
+});
+
+// Runs after the months block: the shore row is dated 2025-02-01 (Vilnius) by now.
+describe('researches.catchSummary — corrections', () => {
+  it('counts only the latest shore weigh-in, on the day of the first', async () => {
+    // Re-submitting the shore form inserts a second row; the first one stays.
+    await broker.call(
+      'weightEvents.createWeightEvent',
+      {
+        coordinates: coords,
+        data: { [fish.get('Karšis')]: 14, [fish.get('Stinta')]: 4, [fish.get('Kuoja')]: 1 },
+      },
+      { meta: ownerMeta },
+    );
+
+    const february = (await summary({ dateFrom: '2025-02-01', dateTo: '2025-02-28' })).getWorksheet(
+      'Suvestinė',
+    )!;
+    expect(findRow(february, 'Company-A')![TOTAL]).toBe(19);
+
+    const allTime = (await summary({})).getWorksheet('Suvestinė')!;
+    expect(findRow(allTime, 'Company-A')![TOTAL]).toBe(19);
+  });
+
+  it('keeps a deleted company under its own name', async () => {
+    await broker.call(
+      'tenants.remove',
+      { id: apiHelper.tenantA.tenant.id },
+      { meta: apiHelper.meta(apiHelper.adminA) },
+    );
+
+    const sheet = (await summary({})).getWorksheet('Suvestinė')!;
+    expect(findRow(sheet, 'Company-A')![TOTAL]).toBe(19);
   });
 });

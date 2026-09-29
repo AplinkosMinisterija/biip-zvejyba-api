@@ -36,6 +36,8 @@ const shore = (
 ): ShoreCatchRow => ({
   fishing_id: 1,
   fishing_type: 'ESTUARY',
+  tenant_id: 1,
+  user_id: 1,
   tenant_name: 'UAB Pelona',
   first_name: null,
   last_name: null,
@@ -259,6 +261,27 @@ describe('buildCatchSummaryWorkbook', () => {
     ],
     [boat(NETS, '1', { [KARSIS]: 6 }), boat(SMELT_TRAPS, '2', { [KARSIS]: 2, [STINTA]: 5 })],
   );
+
+  it('keeps two fishers apart even when they share a name', () => {
+    const namesake: Partial<ShoreCatchRow> = {
+      tenant_id: null,
+      tenant_name: null,
+      first_name: 'Jonas',
+      last_name: 'Jonaitis',
+    };
+    const sheet = build(
+      summarize(
+        [
+          shore({ [KARSIS]: 2 }, { ...namesake, fishing_id: 3, user_id: 7 }),
+          shore({ [KARSIS]: 5 }, { ...namesake, fishing_id: 4, user_id: 8 }),
+        ],
+        [],
+      ),
+      {},
+    ).getWorksheet('Suvestinė')!;
+
+    expect(findRows(sheet, 'Jonas Jonaitis').map((row) => row[TOTAL])).toEqual([2, 5]);
+  });
 
   it('shows only the picked zones', () => {
     const sheet = build(summary, { types: ['ESTUARY'] }).getWorksheet('Suvestinė')!;
