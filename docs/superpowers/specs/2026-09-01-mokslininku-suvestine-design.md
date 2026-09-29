@@ -50,7 +50,6 @@ Parametrai (visi optional):
 | `types` | `ESTUARY` / `INLAND_WATERS` / `POLDERS` masyvas |
 | `locationId` + `locationName` | konkretus kvadratas / telkinys / polderis |
 | `fishTypes` | rūšių id masyvas |
-| `toolTypes` | įrankių tipų id masyvas |
 | `byMonths`, `byToolTypes` | mėnesių lapai / įrankių eilutės po įmone |
 
 Imami **tik krantiniai svėrimai** (`tools_group_id IS NULL`) — tai oficialus
@@ -143,8 +142,9 @@ užrakinta `RestrictionType.INVESTIGATOR`.
   build-event `location`). Each species' shore kg is split over the same
   fishing's boat weigh-ins in proportion to their kg for that species, in whole
   cents so the parts add back up. A species never weighed on the boat stays
-  unattributed → row „Įrankis nenurodytas", and it drops out under a bar or
-  tool-type filter.
+  unattributed → row „Įrankis nenurodytas", and it drops out under a bar
+  filter. There is no tool-type filter: the report always covers every tool
+  (product decision, 2026-09-29).
 - **Months.** Bucketed by the shore weigh-in's Vilnius calendar day. Every
   month of the period gets a sheet (`01`…, or `YYYY-MM` when the period crosses
   a year); more than 120 sheets is rejected.

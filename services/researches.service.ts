@@ -26,7 +26,7 @@ import {
   allocateShoreCatch,
   buildCatchSummaryWorkbook,
   describeSummaryFilters,
-  filterCatchEntries,
+  filterByLocation,
   selectLabels,
   summarizeCatch,
   summaryMonths,
@@ -69,7 +69,6 @@ type CatchSummaryParams = {
   locationId?: string;
   locationName?: string;
   fishTypes?: string[];
-  toolTypes?: string[];
   byMonths?: boolean;
   byToolTypes?: boolean;
 };
@@ -496,12 +495,6 @@ export default class ResearchesService extends moleculer.Service {
         optional: true,
         convert: true,
       },
-      toolTypes: {
-        type: 'array',
-        items: 'string',
-        optional: true,
-        convert: true,
-      },
       byMonths: { type: 'boolean', optional: true, convert: true },
       byToolTypes: { type: 'boolean', optional: true, convert: true },
     },
@@ -515,22 +508,17 @@ export default class ResearchesService extends moleculer.Service {
     const location: CatchLocation | null =
       locationId && locationName ? { id: locationId, name: locationName } : null;
 
-    const [fishLabelById, toolLabelById, shoreRows] = await Promise.all([
-      this.fetchLabelsById(ctx, 'fishTypes'),
-      this.fetchLabelsById(ctx, 'toolTypes'),
+    const [fishLabelById, shoreRows] = await Promise.all([
+      this.fetchFishTypeLabels(ctx),
       this.fetchShoreCatchRows(ctx, period, types),
     ]);
     const fishTypes = selectLabels(fishLabelById, ctx.params.fishTypes);
-    const toolTypes = selectLabels(toolLabelById, ctx.params.toolTypes);
     const boatRows = await this.fetchBoatCatchRows(
       ctx,
       shoreRows.map((row) => row.fishing_id),
     );
 
-    const entries = filterCatchEntries(allocateShoreCatch(shoreRows, boatRows), {
-      location,
-      toolTypes,
-    });
+    const entries = filterByLocation(allocateShoreCatch(shoreRows, boatRows), location);
     const summary = summarizeCatch(entries, {
       labelById: fishLabelById,
       selectedLabels: fishTypes,
@@ -550,7 +538,7 @@ export default class ResearchesService extends moleculer.Service {
       period,
       months,
       types,
-      filterLine: describeSummaryFilters({ types, location, toolTypes, fishTypes }),
+      filterLine: describeSummaryFilters({ types, location, fishTypes }),
       showToolTypes: !!ctx.params.byToolTypes,
     });
 
@@ -579,11 +567,8 @@ export default class ResearchesService extends moleculer.Service {
   }
 
   @Method
-  async fetchLabelsById(
-    ctx: Context,
-    service: 'fishTypes' | 'toolTypes',
-  ): Promise<Map<string, string>> {
-    const rows: Array<{ id: unknown; label: string }> = await ctx.call(`${service}.find`, {
+  async fetchFishTypeLabels(ctx: Context): Promise<Map<string, string>> {
+    const rows: Array<{ id: unknown; label: string }> = await ctx.call('fishTypes.find', {
       fields: ['id', 'label'],
     });
 

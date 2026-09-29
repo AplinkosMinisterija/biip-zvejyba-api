@@ -296,17 +296,12 @@ export const allocateShoreCatch = (
 };
 
 // Polder and bar ids collide, so a location matches on id AND name.
-export const filterCatchEntries = (
-  entries: CatchEntry[],
-  filter: { location: CatchLocation | null; toolTypes: Set<string> | null },
-) =>
-  entries.filter(
-    (entry) =>
-      (!filter.location ||
-        (entry.location?.id === filter.location.id &&
-          entry.location?.name === filter.location.name)) &&
-      (!filter.toolTypes || (!!entry.toolType && filter.toolTypes.has(entry.toolType))),
-  );
+export const filterByLocation = (entries: CatchEntry[], location: CatchLocation | null) =>
+  location
+    ? entries.filter(
+        (entry) => entry.location?.id === location.id && entry.location?.name === location.name,
+      )
+    : entries;
 
 // Fail closed: unknown ids give an empty set (empty report), never null (everything).
 export const selectLabels = (labelById: Map<string, string>, ids?: string[]) => {
@@ -450,7 +445,6 @@ const listOrAll = (labels: Iterable<string> | null, all: string) => {
 export const describeSummaryFilters = (filter: {
   types: string[];
   location: CatchLocation | null;
-  toolTypes: Set<string> | null;
   fishTypes: Set<string> | null;
 }) => {
   const locationLabel =
@@ -463,7 +457,6 @@ export const describeSummaryFilters = (filter: {
   return [
     `Vieta: ${listOrAll(zones, 'visos')}`,
     `${locationLabel}: ${filter.location?.name || 'visi'}`,
-    `Įrankiai: ${listOrAll(filter.toolTypes, 'visi')}`,
     `Rūšys: ${listOrAll(filter.fishTypes, 'visos')}`,
   ].join(' · ');
 };

@@ -10,7 +10,7 @@ import {
   allocateShoreCatch,
   buildCatchSummaryWorkbook,
   describeSummaryFilters,
-  filterCatchEntries,
+  filterByLocation,
   selectLabels,
   splitProportionally,
   summarizeCatch,
@@ -147,31 +147,23 @@ describe('allocateShoreCatch', () => {
   });
 });
 
-describe('filterCatchEntries', () => {
+describe('filterByLocation', () => {
   const entries = allocateShoreCatch(
     [shore({ [KARSIS]: 12, [KUOJA]: 1 })],
     [boat(NETS, '1', { [KARSIS]: 6 }), boat(SMELT_TRAPS, '2', { [KARSIS]: 2 })],
   );
 
   it('keeps only the catch attributed to the picked bar', () => {
-    const kept = filterCatchEntries(entries, {
-      location: { id: '2', name: '2 baras' },
-      toolTypes: null,
-    });
+    const kept = filterByLocation(entries, { id: '2', name: '2 baras' });
     expect(kept.map((entry) => entry.kg)).toEqual([3]);
   });
 
   it('matches the bar on id AND name — polder and bar ids collide', () => {
-    const kept = filterCatchEntries(entries, {
-      location: { id: '2', name: 'Polderis 2' },
-      toolTypes: null,
-    });
-    expect(kept).toEqual([]);
+    expect(filterByLocation(entries, { id: '2', name: 'Polderis 2' })).toEqual([]);
   });
 
-  it('keeps only the picked tool types, never the unattributed kg', () => {
-    const kept = filterCatchEntries(entries, { location: null, toolTypes: new Set([NETS]) });
-    expect(kept.map((entry) => [entry.toolType, entry.kg])).toEqual([[NETS, 9]]);
+  it('keeps everything when no bar is picked', () => {
+    expect(filterByLocation(entries, null)).toBe(entries);
   });
 });
 
@@ -225,9 +217,9 @@ describe('selectLabels', () => {
 
 describe('describeSummaryFilters', () => {
   it('names every filter, "visi"/"visos" for the unset ones', () => {
-    expect(
-      describeSummaryFilters({ types: [], location: null, toolTypes: null, fishTypes: null }),
-    ).toBe('Vieta: visos · Kvadratas / polderis: visi · Įrankiai: visi · Rūšys: visos');
+    expect(describeSummaryFilters({ types: [], location: null, fishTypes: null })).toBe(
+      'Vieta: visos · Kvadratas / polderis: visi · Rūšys: visos',
+    );
   });
 
   it('labels the second field after the single picked zone', () => {
@@ -235,21 +227,17 @@ describe('describeSummaryFilters', () => {
       describeSummaryFilters({
         types: ['ESTUARY'],
         location: { id: '12', name: '12' },
-        toolTypes: new Set([NETS]),
         fishTypes: new Set(['Karšis', 'Stinta']),
       }),
-    ).toBe(`Vieta: Kuršių marios · Kvadratas: 12 · Įrankiai: ${NETS} · Rūšys: Karšis, Stinta`);
+    ).toBe('Vieta: Kuršių marios · Kvadratas: 12 · Rūšys: Karšis, Stinta');
 
     expect(
       describeSummaryFilters({
         types: ['POLDERS', 'ESTUARY'],
         location: null,
-        toolTypes: null,
         fishTypes: null,
       }),
-    ).toBe(
-      'Vieta: Kuršių marios, polderiai · Kvadratas / polderis: visi · Įrankiai: visi · Rūšys: visos',
-    );
+    ).toBe('Vieta: Kuršių marios, polderiai · Kvadratas / polderis: visi · Rūšys: visos');
   });
 });
 
@@ -308,13 +296,11 @@ describe('buildCatchSummaryWorkbook', () => {
   it('writes the filter line under the period', () => {
     const sheet = build(summary, {
       period: { from: '2025-01-01', to: '2025-05-31' },
-      filterLine: 'Vieta: Kuršių marios · Kvadratas: visi · Įrankiai: visi · Rūšys: visos',
+      filterLine: 'Vieta: Kuršių marios · Kvadratas: visi · Rūšys: visos',
     }).getWorksheet('Suvestinė')!;
 
     expect(sheet.getCell(2, 1).value).toBe('UŽ 2025-01-01 – 2025-05-31');
-    expect(sheet.getCell(3, 1).value).toBe(
-      'Vieta: Kuršių marios · Kvadratas: visi · Įrankiai: visi · Rūšys: visos',
-    );
+    expect(sheet.getCell(3, 1).value).toBe('Vieta: Kuršių marios · Kvadratas: visi · Rūšys: visos');
   });
 
   it('lists the tool rows under the company, summing to it', () => {
