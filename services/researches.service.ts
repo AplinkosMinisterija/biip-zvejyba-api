@@ -11,14 +11,32 @@ import {
   CommonFields,
   CommonPopulates,
   FILE_TYPES,
+  ResponseHeadersMeta,
   RestrictionType,
   Table,
 } from '../types';
 
 import ProfileMixin from '../mixins/profile.mixin';
+import {
+  BoatCatchRow,
+  CatchLocation,
+  SUMMARY_MAX_MONTH_SHEETS,
+  ShoreCatchRow,
+  SummaryFishType,
+  SummaryPeriod,
+  allocateShoreCatch,
+  buildCatchSummaryWorkbook,
+  describeSummaryFilters,
+  filterByLocation,
+  summarizeCatch,
+  summaryFishColumns,
+  summaryMonths,
+  toVilniusDate,
+} from '../modules/catchSummary';
 import { GeomFeatureCollection } from '../modules/geometry';
 import { getFolderName } from '../utils';
 import { UserAuthMeta } from './api.service';
+import { FishingType } from './fishings.service';
 import { ResearchFish } from './researches.fishes.service';
 import { Tenant } from './tenants.service';
 import { User } from './users.service';
@@ -41,6 +59,20 @@ const publicFields = [
   'totalFishesAbundance',
   'totalBiomass',
 ];
+
+// Caught-on day as the fisher lives it; FE sends Vilnius day bounds.
+const SHORE_CATCH_DAY_SQL = `(we.caught_at AT TIME ZONE 'Europe/Vilnius')::date`;
+
+type CatchSummaryParams = {
+  dateFrom?: string;
+  dateTo?: string;
+  types?: FishingType[];
+  locationId?: string;
+  locationName?: string;
+  fishTypes?: string[];
+  byMonths?: boolean;
+  byToolTypes?: boolean;
+};
 
 interface Fields extends CommonFields {
   id: number;
@@ -438,5 +470,213 @@ export default class ResearchesService extends moleculer.Service {
       };
       ctx.params.waterBodyData = waterBody;
     }
+  }
+
+  @Action({
+    rest: <RestSchema>{
+      method: 'GET',
+      path: '/catchSummary',
+    },
+    // Cross-tenant by design (bypasses ProfileMixin), so the role is the only gate.
+    auth: RestrictionType.INVESTIGATOR,
+    params: {
+      dateFrom: 'string|optional',
+      dateTo: 'string|optional',
+      types: {
+        type: 'array',
+        items: { type: 'enum', values: Object.values(FishingType) },
+        optional: true,
+        convert: true,
+      },
+      locationId: 'string|optional',
+      locationName: 'string|optional',
+      fishTypes: {
+        type: 'array',
+        items: 'string',
+        optional: true,
+        convert: true,
+      },
+      byMonths: { type: 'boolean', optional: true, convert: true },
+      byToolTypes: { type: 'boolean', optional: true, convert: true },
+    },
+  })
+  async catchSummary(ctx: Context<CatchSummaryParams, ResponseHeadersMeta>) {
+    const { types = [], locationId, locationName } = ctx.params;
+    const period: SummaryPeriod = {
+      from: this.parseSummaryDate(ctx.params.dateFrom, 'dateFrom'),
+      to: this.parseSummaryDate(ctx.params.dateTo, 'dateTo'),
+    };
+    const location: CatchLocation | null =
+      locationId && locationName ? { id: locationId, name: locationName } : null;
+
+    const [fishTypes, shoreRows] = await Promise.all([
+      this.fetchFishTypes(ctx),
+      this.fetchShoreCatchRows(ctx, period, types),
+    ]);
+    const selectedFishTypes = ctx.params.fishTypes?.length
+      ? new Set(ctx.params.fishTypes.map(String))
+      : null;
+    const boatRows = await this.fetchBoatCatchRows(
+      ctx,
+      shoreRows.map((row) => row.fishing_id),
+    );
+
+    const entries = filterByLocation(allocateShoreCatch(shoreRows, boatRows), location);
+    const summary = summarizeCatch(entries, selectedFishTypes);
+    const fishColumns = summaryFishColumns(fishTypes, selectedFishTypes, summary.fishTypeIds);
+
+    const months = ctx.params.byMonths
+      ? summaryMonths(period, Array.from(summary.byMonth.keys()))
+      : [];
+    if (months.length > SUMMARY_MAX_MONTH_SHEETS) {
+      throw new moleculer.Errors.ValidationError(
+        `Period longer than ${SUMMARY_MAX_MONTH_SHEETS} months cannot be split by months`,
+        'PERIOD_TOO_LONG',
+      );
+    }
+
+    const workbook = buildCatchSummaryWorkbook(summary, {
+      period,
+      months,
+      types,
+      fishColumns,
+      filterLine: describeSummaryFilters({
+        types,
+        location,
+        fishTypes: selectedFishTypes && fishColumns.map((column) => column.label),
+      }),
+      showToolTypes: !!ctx.params.byToolTypes,
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+
+    ctx.meta.$responseHeaders = {
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': 'attachment; filename="versliniai_sugavimai_suvestine.xlsx"',
+    };
+
+    return buffer;
+  }
+
+  // FE sends Vilnius start/end-of-day instants, direct callers bare dates —
+  // both reduce to the Vilnius calendar day the SQL compares on.
+  @Method
+  parseSummaryDate(value: string | undefined, field: string): string | null {
+    if (!value) return null;
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      throw new moleculer.Errors.ValidationError(`Invalid ${field}`);
+    }
+
+    return toVilniusDate(date);
+  }
+
+  @Method
+  // Deleted species too (`scope: false`): old weigh-ins still carry their kg.
+  // Ordered like the app's weighing form: by priority, then name.
+  async fetchFishTypes(ctx: Context): Promise<SummaryFishType[]> {
+    const rows: Array<{ id: unknown; label: string; priority?: number; deletedAt?: string }> =
+      await ctx.call('fishTypes.find', {
+        fields: ['id', 'label', 'priority', 'deletedAt'],
+        scope: false,
+      });
+
+    return rows
+      .sort(
+        (a, b) =>
+          Number(b.priority || 0) - Number(a.priority || 0) || a.label.localeCompare(b.label, 'lt'),
+      )
+      .map((row) => ({ id: String(row.id), label: row.label, deleted: !!row.deletedAt }));
+  }
+
+  // Shore weigh-ins only (`tools_group_id IS NULL`): the official figure the AAD
+  // sheet reports. Raw SQL — see CLAUDE.md „Virtual-field populate gotchas“.
+  @Method
+  async fetchShoreCatchRows(
+    ctx: Context,
+    period: SummaryPeriod,
+    types: FishingType[],
+  ): Promise<ShoreCatchRow[]> {
+    const conditions = ['f.deleted_at IS NULL'];
+    const bindings: unknown[] = [];
+
+    if (types.length) {
+      conditions.push('f.type = ANY(?)');
+      bindings.push(types);
+    }
+
+    if (period.from) {
+      conditions.push(`${SHORE_CATCH_DAY_SQL} >= ?::date`);
+      bindings.push(period.from);
+    }
+
+    if (period.to) {
+      conditions.push(`${SHORE_CATCH_DAY_SQL} <= ?::date`);
+      bindings.push(period.to);
+    }
+
+    return this.rawQuery(
+      ctx,
+      `SELECT we.fishing_id,
+              f.type AS fishing_type,
+              we.tenant_id AS tenant_id,
+              we.user_id AS user_id,
+              t.name AS tenant_name,
+              u.first_name AS first_name,
+              u.last_name AS last_name,
+              to_char(${SHORE_CATCH_DAY_SQL}, 'YYYY-MM') AS month,
+              we.data AS data
+         FROM (
+           -- Re-submitting the shore form inserts a new row and the edit trigger
+           -- never retires the old one (tools_group_id is NULL): the latest
+           -- counts, dated by the first — the landing day.
+           SELECT DISTINCT ON (fishing_id)
+                  fishing_id, tenant_id, user_id, data,
+                  MIN(COALESCE(date, created_at)) OVER (PARTITION BY fishing_id) AS caught_at
+             FROM weight_events
+            WHERE deleted_at IS NULL AND tools_group_id IS NULL
+            ORDER BY fishing_id, created_at DESC, id DESC
+         ) we
+         JOIN fishings f ON f.id = we.fishing_id
+         LEFT JOIN tenants t ON t.id = we.tenant_id
+         LEFT JOIN users u ON u.id = we.user_id
+        WHERE ${conditions.join(' AND ')}`,
+      bindings,
+    );
+  }
+
+  // Boat weigh-ins are the only rows that know the gear and the bar. A tools
+  // group holds a single tool type (`connectTools` rejects mixing), and it sits
+  // where it was built — the same bar `toolsGroupsByLocation` lists it under.
+  // Not filtered by date: a trip's boat weigh-ins size its landing whenever
+  // they happened.
+  @Method
+  async fetchBoatCatchRows(ctx: Context, fishingIds: number[]): Promise<BoatCatchRow[]> {
+    if (!fishingIds.length) return [];
+
+    return this.rawQuery(
+      ctx,
+      `SELECT we.fishing_id,
+              tool_type.label AS tool_type,
+              COALESCE(be.location, we.location)->>'id' AS location_id,
+              COALESCE(be.location, we.location)->>'name' AS location_name,
+              we.data AS data
+         FROM weight_events we
+         JOIN tools_groups tg ON tg.id = we.tools_group_id
+         LEFT JOIN tools_groups_events be
+           ON be.id = tg.build_event_id AND be.deleted_at IS NULL
+         LEFT JOIN LATERAL (
+           SELECT tt.label
+             FROM tools t
+             JOIN tool_types tt ON tt.id = t.tool_type_id
+            WHERE t.id = ANY(tg.tools)
+            ORDER BY t.id
+            LIMIT 1
+         ) tool_type ON TRUE
+        WHERE we.deleted_at IS NULL
+          AND we.fishing_id = ANY(?)`,
+      [Array.from(new Set(fishingIds))],
+    );
   }
 }

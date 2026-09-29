@@ -159,11 +159,7 @@ export default class ApiService extends moleculer.Service {
     // Freelancer mode sends no `x-profile` header at all (FE skips it when
     // `isNaN(profileId)`), so missing/empty header is the freelancer path.
     const profileHeader = req.headers['x-profile'];
-    if (
-      profileHeader != null &&
-      profileHeader !== '' &&
-      authUser.type === AuthUserRole.USER
-    ) {
+    if (profileHeader != null && profileHeader !== '' && authUser.type === AuthUserRole.USER) {
       const tenantsMap = (user as any)?.tenants || {};
       if (!Object.prototype.hasOwnProperty.call(tenantsMap, String(profileHeader))) {
         throw new ApiGateway.Errors.UnAuthorizedError('NO_RIGHTS', {
@@ -220,7 +216,13 @@ export default class ApiService extends moleculer.Service {
       return accesses.includes(access) || accesses.includes('*');
     }
 
-    if (restrictionType === RestrictionType.INVESTIGATOR && !hasAccess('INVESTIGATOR', accesses)) {
+    // Admin accounts carry no INVESTIGATOR access, yet AAD officers must see
+    // everything a scientist sees.
+    const canInvestigate =
+      [AuthUserRole.ADMIN, AuthUserRole.SUPER_ADMIN].includes(authUser?.type) ||
+      hasAccess('INVESTIGATOR', accesses);
+
+    if (restrictionType === RestrictionType.INVESTIGATOR && !canInvestigate) {
       throw new ApiGateway.Errors.UnAuthorizedError('NO_RIGHTS', {
         error: 'Unauthorized',
       });
