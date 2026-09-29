@@ -319,16 +319,20 @@ describe('buildCatchSummaryWorkbook', () => {
     expect(company[TOTAL]).toBe(17);
   });
 
-  it('adds a sheet per month, named by month number within one year', () => {
+  it('adds a sheet per month, always named with the year', () => {
     const workbook = build(summary, { months: ['2025-02', '2025-03'] });
 
-    expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(['Suvestinė', '02', '03']);
-    expect(workbook.getWorksheet('02')!.getCell(2, 1).value).toBe('UŽ 2025 M. VASARIO MĖN.');
-    expect(findRows(workbook.getWorksheet('02')!, 'IŠ VISO:')[0][TOTAL]).toBe(17);
-    expect(findRows(workbook.getWorksheet('03')!, 'IŠ VISO:')[0][TOTAL]).toBe(5);
+    expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual([
+      'Suvestinė',
+      '2025-02',
+      '2025-03',
+    ]);
+    expect(workbook.getWorksheet('2025-02')!.getCell(2, 1).value).toBe('UŽ 2025 M. VASARIO MĖN.');
+    expect(findRows(workbook.getWorksheet('2025-02')!, 'IŠ VISO:')[0][TOTAL]).toBe(17);
+    expect(findRows(workbook.getWorksheet('2025-03')!, 'IŠ VISO:')[0][TOTAL]).toBe(5);
   });
 
-  it('names month sheets with the year when the period crosses one', () => {
+  it('says which days a clipped month covers', () => {
     const workbook = build(summary, {
       months: ['2024-12', '2025-01'],
       period: { from: '2024-12-10', to: '2025-01-31' },

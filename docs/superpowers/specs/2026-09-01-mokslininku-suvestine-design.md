@@ -146,8 +146,9 @@ užrakinta `RestrictionType.INVESTIGATOR`.
   filter. There is no tool-type filter: the report always covers every tool
   (product decision, 2026-09-29).
 - **Months.** Bucketed by the shore weigh-in's Vilnius calendar day. Every
-  month of the period gets a sheet (`01`…, or `YYYY-MM` when the period crosses
-  a year); more than 120 sheets is rejected.
+  month of the period gets a sheet, always named `YYYY-MM` (product decision,
+  2026-09-29 — not `01`… as the issue sketched); more than 120 sheets is
+  rejected.
 - **Blocks.** Only the picked zones are drawn; none picked = all three.
 - **Header.** Row 3 lists every filter, unset ones as „visi" / „visos".
 - Pure logic lives in `modules/catchSummary.ts`; the service keeps the SQL.

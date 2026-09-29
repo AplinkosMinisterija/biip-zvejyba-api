@@ -267,9 +267,13 @@ describe('researches.catchSummary — months', () => {
       byMonths: true,
     });
 
-    expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(['Suvestinė', '01', '02']);
-    expect(findRow(workbook.getWorksheet('01')!, 'IŠ VISO:')![TOTAL]).toBe(0);
-    expect(findRow(workbook.getWorksheet('02')!, 'IŠ VISO:')![TOTAL]).toBe(17);
+    expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual([
+      'Suvestinė',
+      '2025-01',
+      '2025-02',
+    ]);
+    expect(findRow(workbook.getWorksheet('2025-01')!, 'IŠ VISO:')![TOTAL]).toBe(0);
+    expect(findRow(workbook.getWorksheet('2025-02')!, 'IŠ VISO:')![TOTAL]).toBe(17);
   });
 
   it('rejects a period too long to split by months', async () => {

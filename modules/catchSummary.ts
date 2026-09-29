@@ -406,9 +406,6 @@ export const summaryMonths = (period: SummaryPeriod, dataMonths: string[]): stri
   return months;
 };
 
-const monthSheetName = (month: string, spansYears: boolean) =>
-  spansYears ? month : month.slice(5);
-
 const lastDayOfMonth = (month: string) => {
   const [year, monthNumber] = month.split('-').map(Number);
   return `${month}-${new Date(Date.UTC(year, monthNumber, 0)).getUTCDate()}`;
@@ -644,15 +641,11 @@ export const buildCatchSummaryWorkbook = (
     periodLine: `UŽ ${formatSummaryPeriod(opts.period)}`,
   });
 
-  const spansYears =
-    opts.months.length > 0 &&
-    opts.months[0].slice(0, 4) !== opts.months[opts.months.length - 1].slice(0, 4);
   for (const month of opts.months) {
-    renderSummarySheet(
-      workbook.addWorksheet(monthSheetName(month, spansYears)),
-      summary.byMonth.get(month) || new Map(),
-      { ...layout, periodLine: `UŽ ${formatMonthTitle(month, opts.period)}` },
-    );
+    renderSummarySheet(workbook.addWorksheet(month), summary.byMonth.get(month) || new Map(), {
+      ...layout,
+      periodLine: `UŽ ${formatMonthTitle(month, opts.period)}`,
+    });
   }
 
   appendUnmappedSheet(workbook, summary.unmapped);
