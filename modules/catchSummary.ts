@@ -1,17 +1,13 @@
 import ExcelJS from 'exceljs';
 import { LocationType } from '../types';
 
-// Verslinių sugavimų suvestinės stulpeliai. Tvarka ir sudėtis pakartoja AAD
-// rankomis pildytą etaloninę lentelę („Versliniai sugavimai … (Suvestinė)"),
-// todėl sąmoningai NEGENERUOJAMA iš `fish_types`: adminui pridėjus rūšį
-// stulpeliai pasislinktų ir suvestinė nustotų sutapti su istoriniais failais.
-// `labels` — `fish_types.label` reikšmės, krentančios į tą patį stulpelį.
+// Fixed to the AAD reference sheet, not generated from `fish_types`: a new
+// species would shift the columns and break comparison with historical files.
 type SummaryColumn = { header: string; labels: string[] };
 
 const SUMMARY_MAIN_COLUMNS: SummaryColumn[] = [
   { header: 'Karšis', labels: ['Karšis'] },
-  // Etalone „Starkis", registre „Sterkas". Neverslinio dydžio sterkas
-  // etalone atskiro stulpelio neturi, tad sumuojamas čia pat.
+  // The reference sheet has no column for undersized pikeperch.
   { header: 'Starkis', labels: ['Sterkas', 'Sterkas (neverslinio dydžio)'] },
   { header: 'Kuoja', labels: ['Kuoja'] },
   { header: 'Lydeka', labels: ['Lydeka'] },
@@ -30,8 +26,7 @@ const SUMMARY_MAIN_COLUMNS: SummaryColumn[] = [
   { header: 'Karpis', labels: ['Karpis'] },
 ];
 
-// „Kitos žuvys" detalizacija (etalono dešinysis blokas). Rūšis, nepatekusi nei
-// čia, nei į pagrindinius stulpelius, sumuojama į paskutinį „Kitos" stulpelį.
+// A species in neither list lands in the trailing „Kitos“ column.
 const SUMMARY_OTHER_COLUMNS: SummaryColumn[] = [
   { header: 'Perpelė', labels: ['Perpelė'] },
   { header: 'Plačiakaktis', labels: ['Plačiakaktis'] },
@@ -55,9 +50,8 @@ type SummaryZone = {
   filterLabel: string;
 };
 
-// Etalone kiekviena zona turi savo bloką. `INLAND_WATERS` blokas pakeičia
-// etalono „stintų / upinių nėgių migracijos metu" lenteles — migracijos
-// laikotarpio duomenų modelyje neturim, tad rodom visą zoną be skaidymo.
+// INLAND_WATERS replaces the reference's smelt / river-lamprey migration
+// blocks: the migration period is not modelled.
 const SUMMARY_ZONES: SummaryZone[] = [
   {
     type: LocationType.ESTUARY,
@@ -122,9 +116,9 @@ export const SUMMARY_UNASSIGNED_TOOL = 'Įrankis nenurodytas';
 // Ten years of month sheets; anything longer is a mistyped period, not a report.
 export const SUMMARY_MAX_MONTH_SHEETS = 120;
 
-// 1 (eil. nr.) + 1 (pavadinimas) + rūšys + „Kitos žuvys" + „IŠ VISO"
+// No. + name + species + „Kitos žuvys“ + „IŠ VISO“
 const SUMMARY_TOTAL_COL = 2 + SUMMARY_MAIN_COLUMNS.length + 2;
-// Tuščias skiriamasis stulpelis, tada „Kontrolinė suma" ir detalizacija.
+// One blank spacer column, then „Kontrolinė suma“ and the „Kitos žuvys“ breakdown.
 const SUMMARY_CONTROL_COL = SUMMARY_TOTAL_COL + 2;
 const SUMMARY_LAST_COL = SUMMARY_CONTROL_COL + SUMMARY_OTHER_COLUMNS.length + 2;
 const SUMMARY_HEADER_ROW = 4;
@@ -180,7 +174,7 @@ type ColumnSlot = { group: keyof SummaryTotals; index: number; unmappedAs?: stri
 
 const emptyTotals = (): SummaryTotals => ({
   main: SUMMARY_MAIN_COLUMNS.map(() => 0),
-  // +1 — paskutinis „Kitos" stulpelis nesuklasifikuotoms rūšims.
+  // +1 for the trailing „Kitos“ column.
   other: [...SUMMARY_OTHER_COLUMNS.map(() => 0), 0],
 });
 
@@ -189,15 +183,12 @@ const addTotals = (target: SummaryTotals, source: SummaryTotals) => {
   source.other.forEach((value, i) => (target.other[i] += value));
 };
 
-// Kilogramai suvedami su dešimtainėmis dalimis, tad sumos kaupia float paklaidą.
 const round2 = (value: number) => Math.round(value * 100) / 100;
 
 const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
 
-// Rūšys sutapdinamos pagal `label`, o registro rašyba per aplinkas skiriasi
-// (dev turėjo `karpiai`, prod — `Karpis`). Normalizavimas padengia raidžių
-// registrą ir tarpus; skirtingi žodžiai lieka nesutapę ir atsiduria
-// diagnostiniame lape, o ne tyliai „Kitose".
+// Registry spelling differs per environment (dev `karpiai`, prod `Karpis`);
+// what still does not match goes to the diagnostics sheet, not silently to „Kitos“.
 const normalizeLabel = (label: string) => label.trim().toLowerCase().replace(/\s+/g, ' ');
 
 const indexByLabel = (columns: SummaryColumn[]) =>
@@ -308,8 +299,8 @@ const resolveColumn = (
 ): ColumnSlot | null => {
   const label = labelById.get(Number(entry.fishTypeId));
 
-  // Ištrinta rūšis etiketės nebeturi — su aktyviu filtru ją praleidžiam,
-  // be filtro sumuojam į „Kitos", kad bendra suma nesumažėtų.
+  // A deleted species has no label: dropped under a species filter, otherwise
+  // kept in „Kitos“ so the total holds.
   if (!label) {
     if (selectedLabels) return null;
     return { group: 'other', index: OTHER_REST_INDEX, unmappedAs: `ID ${entry.fishTypeId}` };
@@ -350,9 +341,7 @@ export const summarizeCatch = (
     const slot = resolveColumn(entry, opts.labelById, opts.selectedLabels);
     if (!slot) continue;
 
-    // Rūšys, kurių nepavyko priskirti nė vienam stulpeliui. Skaičiuoti jos
-    // skaičiuojamos kaip „Kitos" (sumos nesikeičia), bet atskirai išvedamos,
-    // kad pervadinta ar nauja rūšis nedingtų nepastebėta.
+    // Counted in „Kitos“ but also listed, so a renamed species gets noticed.
     if (slot.unmappedAs) {
       summary.unmapped.set(
         slot.unmappedAs,
@@ -453,8 +442,8 @@ export const describeSummaryFilters = (filter: {
   ].join(' · ');
 };
 
-// Etalono invariantas: „IŠ VISO" = „Kontrolinė suma" = pagrindinės rūšys +
-// „Kitos žuvys", o detalizacijos „IŠ VISO" = „Kitos žuvys".
+// Reference invariant: „IŠ VISO“ = „Kontrolinė suma“ = species + „Kitos žuvys“,
+// and the breakdown's „IŠ VISO“ = „Kitos žuvys“.
 const summaryRowValues = (first: string | number, name: string, totals: SummaryTotals) => {
   const other = round2(sum(totals.other));
   const total = round2(sum(totals.main) + other);
@@ -589,8 +578,7 @@ const renderSummarySheet = (sheet: ExcelJS.Worksheet, data: SheetSummary, layout
   grandRow.font = { bold: true };
 };
 
-// Antras lapas atsiranda TIK tada, kai kažko nepavyko priskirti. Švarioje
-// aplinkoje suvestinė lieka lygiai tokia, kokia yra AAD etalonas.
+// Added only when something went unmapped, so a clean run matches the reference.
 const appendUnmappedSheet = (workbook: ExcelJS.Workbook, unmapped: Map<string, number>) => {
   if (!unmapped.size) return;
 

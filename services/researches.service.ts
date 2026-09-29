@@ -476,10 +476,7 @@ export default class ResearchesService extends moleculer.Service {
       method: 'GET',
       path: '/catchSummary',
     },
-    // Vienintelė vieta, kur mokslininkas mato ne savo duomenis: suvestinė
-    // sąmoningai apeina ProfileMixin scope'ą ir sumuoja VISŲ įmonių sugavimus,
-    // tad rolė čia yra visa apsauga. ADMIN taip pat praeina (api.service
-    // `authorize` traktuoja administratorių kaip mokslininko supersetą).
+    // Cross-tenant by design (bypasses ProfileMixin), so the role is the only gate.
     auth: RestrictionType.INVESTIGATOR,
     params: {
       dateFrom: 'string|optional',
@@ -492,9 +489,7 @@ export default class ResearchesService extends moleculer.Service {
       },
       locationId: 'string|optional',
       locationName: 'string|optional',
-      // Priimam kaip string'us: FE siunčia tokius id, kokius pats gavo iš
-      // `fishTypes` / `toolTypes`, o mes juos verčiam į etiketes
-      // (žr. resolveSelectedLabels).
+      // Matched by label, not by id encoding — see resolveSelectedLabels.
       fishTypes: {
         type: 'array',
         items: 'string',
@@ -579,10 +574,8 @@ export default class ResearchesService extends moleculer.Service {
     return toVilniusDate(date);
   }
 
-  // `weight_events.data` raktai yra tokie id, kokius atsiuntė klientas. Kad
-  // suvestinė nepriklausytų nuo id transportavimo (`secure: true` šiandien yra
-  // no-op — `encodeID` niekur neperrašytas, bet tai gali pasikeisti), visur
-  // toliau lyginam pagal `label`. Etiketes imam raw SQL'u — žalius id.
+  // Raw ids, because `weight_events.data` keys are raw; everything downstream
+  // compares labels so the report does not depend on `secure` id encoding.
   @Method
   async fetchFishTypeLabels(ctx: Context): Promise<Map<number, string>> {
     const rows: Array<{ id: number; label: string }> = await this.rawQuery(
@@ -593,9 +586,7 @@ export default class ResearchesService extends moleculer.Service {
     return new Map(rows.map((row) => [Number(row.id), row.label]));
   }
 
-  // Filtro id verčiam į etiketes tuo pačiu keliu, kuriuo juos gavo FE
-  // (`fishTypes.find` / `toolTypes.find`), tad sutapimas nepriklauso nuo id
-  // kodavimo.
+  // Resolved through the same action the FE got the ids from, so their encoding matches.
   @Method
   async resolveSelectedLabels(
     ctx: Context,
@@ -613,16 +604,12 @@ export default class ResearchesService extends moleculer.Service {
       .map((id) => labelById.get(String(id)))
       .filter((label): label is string => !!label);
 
-    // Filtras pritaikytas, bet nė vienas id neatpažintas — grąžinam tuščią
-    // aibę, kad suvestinė būtų tuščia, o ne begalinė (fail closed).
+    // Fail closed: unknown ids give an empty set (empty report), never null (everything).
     return new Set(selected);
   }
 
-  // Agregacijai naudojam raw SQL: moleculer DSL + secure id + ProfileMixin
-  // scope'ai tokiuose skaičiavimuose sluoksniuojasi taip, kad rezultato realiai
-  // neįmanoma peržiūrėti (CLAUDE.md → „Virtual-field populate gotchas" 2 p.).
-  // Imam tik krantinius svėrimus (`tools_group_id IS NULL`) — tai oficialus
-  // tiksliai pasvertas kiekis, kurį raportuoja ir etaloninė AAD lentelė.
+  // Shore weigh-ins only (`tools_group_id IS NULL`): the official figure the AAD
+  // sheet reports. Raw SQL — see CLAUDE.md „Virtual-field populate gotchas“.
   @Method
   async fetchShoreCatchRows(
     ctx: Context,

@@ -16,8 +16,7 @@ const coords = { x: 21.13, y: 55.71 };
 let investigator: any;
 let fishTypeIdByLabel: Map<string, any>;
 
-// Kiekviena zona turi savo bloką, tad sėjam po žvejybą skirtingiems tenant'ams
-// ir skirtingiems tipams — taip patikrinam ir blokų atskyrimą.
+// One fishing per tenant and zone, so block separation is exercised too.
 async function seedShoreCatch(owner: any, tenantId: any, type: string, data: any) {
   const meta = apiHelper.meta(owner, tenantId);
   const toolTypes: any[] = await broker.call('toolTypes.find');
@@ -43,7 +42,6 @@ const loadSheet = async (buffer: any) => {
 const cellValues = (sheet: any, rowIndex: number) =>
   (sheet.getRow(rowIndex).values as any[]).slice(1);
 
-// Suranda eilutę pagal B stulpelį (pavadinimą).
 const findRow = (sheet: any, name: string) => {
   let found: any[] | null = null;
   sheet.eachRow((row: any, index: number) => {
@@ -65,8 +63,8 @@ beforeAll(async () => {
   const fishTypes: any[] = await broker.call('fishTypes.find');
   fishTypeIdByLabel = new Map(fishTypes.map((fish) => [fish.label, fish.id]));
 
-  // Karšis → pagrindinis stulpelis, Perpelė → „kitos žuvys" detalizacija,
-  // Seliava → nei ten, nei ten, tad turi kristi į detalizacijos „Kitos".
+  // Karšis → main column, Perpelė → „Kitos žuvys“ breakdown, Seliava → neither,
+  // so it must land in the breakdown's „Kitos“.
   await seedShoreCatch(apiHelper.ownerA, apiHelper.tenantA.tenant.id, 'ESTUARY', {
     [fishTypeIdByLabel.get('Karšis')]: 10,
     [fishTypeIdByLabel.get('Perpelė')]: 4,
@@ -91,9 +89,8 @@ describe('researches.catchSummary — auth', () => {
     expect([401, 403]).toContain(res.status);
   });
 
-  // Gateway'us sukasi su `mappingPolicy: 'all'`, tad veiksmas pasiekiamas ir
-  // per fallback URL'ą — rolė turi galioti ir ten (CLAUDE.md → „Action
-  // exposure").
+  // `mappingPolicy: 'all'` also publishes the action on the fallback URL
+  // (CLAUDE.md „Action exposure“).
   it('applies the same gate on the mappingPolicy fallback URL', async () => {
     const res = await request(apiService.server)
       .post('/zvejyba/api/researches/catchSummary')
@@ -110,8 +107,7 @@ describe('researches.catchSummary — auth', () => {
     expect(res.headers['content-disposition']).toContain('versliniai_sugavimai_suvestine.xlsx');
   });
 
-  // Administratorius neturi INVESTIGATOR prieigos flag'o, bet turi matyti
-  // viską, ką mato mokslininkas (api.service `authorize` supersetas).
+  // Admin accounts carry no INVESTIGATOR access (api.service `authorize`).
   it('lets an ADMIN download the xlsx too', async () => {
     await request(apiService.server)
       .get(url)
@@ -132,9 +128,8 @@ describe('researches.catchSummary — sheet', () => {
     expect(header[0]).toBe('Eil. Nr.');
     expect(header[1]).toBe('ĮMONĖS (ORGANIZACIJOS) PAVADINIMAS');
 
-    // Visas sąrašas, ne pavyzdys. Etalono CSV `Š`/`Ž` numeta visai
-    // (`KURŠIŲ` → `KURI?`), tad iš jo skaitomi pavadinimai lengvai iškraipomi —
-    // taip `Aukšlė` buvo virtusi `Auklė` ir aukšlės krisdavo į „Kitos".
+    // The full list: the reference CSV drops `Š`/`Ž`, which once turned
+    // `Aukšlė` into `Auklė` and sent every aukšlė to „Kitos“.
     expect(header.slice(2, 19)).toEqual([
       'Karšis',
       'Starkis',
@@ -194,7 +189,7 @@ describe('researches.catchSummary — sheet', () => {
     expect(row[22]).toBe(20); // Kontrolinė suma
     expect(row[23]).toBe(4); // Perpelė
     expect(row[36]).toBe(6); // Seliava → „Kitos"
-    expect(row[37]).toBe(10); // detalizacijos IŠ VISO = Kitos žuvys
+    expect(row[37]).toBe(10); // breakdown IŠ VISO = Kitos žuvys
   });
 
   it('keeps each zone in its own block and totals them all', async () => {
@@ -207,7 +202,7 @@ describe('researches.catchSummary — sheet', () => {
 
     expect(findRow(sheet, 'IŠ VISO (Kuršių mariose):')![20]).toBe(20);
     expect(findRow(sheet, 'Iš viso polderiuose:')![20]).toBe(5);
-    // Company-B žvejojo polderiuose, tad į Kuršių marių bloką patekti negali.
+    // Company-B fished in polders, so it must stay out of the lagoon block.
     expect(findRow(sheet, 'Iš viso Nemuno žemupyje, Šventosios upėje:')![20]).toBe(0);
     expect(findRow(sheet, 'IŠ VISO:')![20]).toBe(25);
   });
@@ -220,8 +215,8 @@ describe('researches.catchSummary — sheet', () => {
     );
     const row = findRow(await loadSheet(buffer), 'Company-A')!;
 
-    expect(row[2]).toBe(10); // Karšis liko
-    expect(row[19]).toBe(0); // Perpelė ir Seliava atfiltruotos
+    expect(row[2]).toBe(10); // Karšis kept
+    expect(row[19]).toBe(0); // Perpelė and Seliava filtered out
     expect(row[20]).toBe(10);
   });
 

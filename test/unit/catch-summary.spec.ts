@@ -325,11 +325,9 @@ describe('buildCatchSummaryWorkbook', () => {
   });
 });
 
-// Dev registre rūšys vadinosi `karpiai`/`ešeriai`, prod — `Karpis`/`Ešerys`,
-// ir visa suvestinė tyliai virsdavo „Kitos žuvys". Registro rašyba per
-// aplinkas skiriasi, tad sutapdinimas privalo būti atsparus, o nesutapimas
-// matomas.
-describe('registro rašybos atsparumas', () => {
+// Dev named species `karpiai`/`ešeriai`, prod `Karpis`/`Ešerys`, and the whole
+// summary once silently turned into „Kitos žuvys“.
+describe('registry spelling', () => {
   const buildWith = (labels: Map<number, string>, data: Record<string, number>) =>
     build(
       summarizeCatch(allocateShoreCatch([shore(data, { tenant_name: 'Rašybos UAB' })], []), {
@@ -339,28 +337,28 @@ describe('registro rašybos atsparumas', () => {
       {},
     );
 
-  it('sutapdina nepaisant raidžių registro ir tarpų', () => {
+  it('matches regardless of letter case and spacing', () => {
     const workbook = buildWith(new Map([[1, '  KARPIS ']]), { '1': 5 });
 
     const row = findRows(workbook.getWorksheet('Suvestinė')!, 'Rašybos UAB')[0];
-    expect(row[18]).toBe(5); // Karpis, ne „Kitos žuvys"
+    expect(row[18]).toBe(5); // Karpis, not „Kitos žuvys“
     expect(row[19]).toBe(0);
     expect(workbook.getWorksheet('Nepriskirtos rūšys')).toBeUndefined();
   });
 
-  it('nepriskirtą rūšį suskaičiuoja į „Kitos" IR išveda atskirame lape', () => {
+  it('counts an unmapped species in „Kitos“ AND lists it on its own sheet', () => {
     const workbook = buildWith(new Map([[1, 'karpiai']]), { '1': 7 });
 
     const row = findRows(workbook.getWorksheet('Suvestinė')!, 'Rašybos UAB')[0];
-    expect(row[18]).toBe(0); // į Karpis stulpelį nepateko
-    expect(row[19]).toBe(7); // bet bendra suma nenukentėjo
+    expect(row[18]).toBe(0); // not in the Karpis column
+    expect(row[19]).toBe(7); // but the total is intact
     expect(row[20]).toBe(7);
 
     const diagnostics = workbook.getWorksheet('Nepriskirtos rūšys')!;
     expect(cellValues(diagnostics, 4)).toEqual(['karpiai', 7]);
   });
 
-  it('ištrintą rūšį išveda pagal id', () => {
+  it('lists a deleted species by its id', () => {
     const workbook = buildWith(new Map(), { '999': 3 });
     expect(cellValues(workbook.getWorksheet('Nepriskirtos rūšys')!, 4)).toEqual(['ID 999', 3]);
   });
