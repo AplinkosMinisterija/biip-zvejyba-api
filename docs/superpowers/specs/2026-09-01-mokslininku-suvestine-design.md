@@ -128,9 +128,9 @@ užrakinta `RestrictionType.INVESTIGATOR`.
   build-event `location`). Each species' shore kg is split over the same
   fishing's boat weigh-ins in proportion to their kg for that species, in whole
   cents so the parts add back up. A species never weighed on the boat stays
-  unattributed → row „Įrankis nenurodytas", and it drops out under a bar
-  filter. There is no tool-type filter: the report always covers every tool
-  (product decision, 2026-09-29).
+  unattributed → row „Įrankis nenurodytas", and it drops out under a bar or
+  tool-type filter. The tool-type filter was dropped on 2026-09-29 and brought
+  back on 2026-10-05 (`toolTypes` = tool type ids).
 - **Months.** Bucketed by the shore weigh-in's Vilnius calendar day. Every
   month of the period gets a sheet, always named `YYYY-MM` (product decision,
   2026-09-29 — not `01`… as the issue sketched); more than 120 sheets is

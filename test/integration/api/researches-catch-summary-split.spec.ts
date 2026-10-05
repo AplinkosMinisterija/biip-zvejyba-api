@@ -186,6 +186,19 @@ describe('researches.catchSummary — tool types', () => {
     expect(findRow(sheet, NETS)).toBeNull();
     expect(findRow(sheet, 'Įrankis nenurodytas')).toBeNull();
   });
+
+  it('keeps only the kg caught with the picked tool types', async () => {
+    const sheet = (
+      await summary({ toolTypes: [String(toolTypeIdByLabel.get(SMELT_TRAPS))] })
+    ).getWorksheet('Suvestinė')!;
+
+    // Karšis 3 + Stinta 4 from the smelt traps; the net's Karšis and the
+    // never-weighed Kuoja drop out.
+    expect([KARSIS, STINTA, KUOJA, TOTAL].map((header) => kg(sheet, 'Company-A', header))).toEqual([
+      3, 4, 0, 7,
+    ]);
+    expect(sheet.getCell(3, 1).value).toContain(`Įrankiai: ${SMELT_TRAPS}`);
+  });
 });
 
 describe('researches.catchSummary — bar filter', () => {
@@ -201,7 +214,7 @@ describe('researches.catchSummary — bar filter', () => {
       valueIn(sheet, company, TOTAL),
     ]).toEqual([9, 0, 9]);
     expect(sheet.getCell(3, 1).value).toBe(
-      'Vieta: Kuršių marios · Kvadratas: 1 baras · Rūšys: visos',
+      'Vieta: Kuršių marios · Kvadratas: 1 baras · Įrankiai: visi · Rūšys: visos',
     );
   });
 
@@ -209,7 +222,9 @@ describe('researches.catchSummary — bar filter', () => {
     const sheet = (await summary({ types: ['ESTUARY'] })).getWorksheet('Suvestinė')!;
 
     expect(kg(sheet, 'Company-A', TOTAL)).toBe(17);
-    expect(sheet.getCell(3, 1).value).toBe('Vieta: Kuršių marios · Kvadratas: visi · Rūšys: visos');
+    expect(sheet.getCell(3, 1).value).toBe(
+      'Vieta: Kuršių marios · Kvadratas: visi · Įrankiai: visi · Rūšys: visos',
+    );
   });
 });
 
