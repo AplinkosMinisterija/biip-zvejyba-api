@@ -684,7 +684,7 @@ export default class ResearchesService extends moleculer.Service {
     return this.rawQuery(
       ctx,
       `SELECT we.fishing_id,
-              tool_type.id AS tool_type_id,
+              tool_type.id::text AS tool_type_id,
               tool_type.label AS tool_type,
               COALESCE(be.location, we.location)->>'id' AS location_id,
               COALESCE(be.location, we.location)->>'name' AS location_name,

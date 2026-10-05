@@ -31,7 +31,7 @@ const fishTypes: SummaryFishType[] = [
 
 const NETS = 'Statomieji tinklaičiai 45-50 mm';
 const SMELT_TRAPS = 'Stintų gaudyklės 12, 12-16, 14-20';
-const TOOL_TYPE_ID: Record<string, number> = { [NETS]: 1, [SMELT_TRAPS]: 2 };
+const TOOL_TYPE_ID: Record<string, string> = { [NETS]: '1', [SMELT_TRAPS]: '2' };
 
 const shore = (
   data: Record<string, number>,
@@ -182,12 +182,12 @@ describe('filterByToolTypes', () => {
   );
 
   it('keeps only the kg caught with the picked tool types', () => {
-    const kept = filterByToolTypes(entries, new Set([String(TOOL_TYPE_ID[NETS])]));
+    const kept = filterByToolTypes(entries, new Set([TOOL_TYPE_ID[NETS]]));
     expect(kept.map((entry) => [entry.toolType, entry.kg])).toEqual([[NETS, 9]]);
   });
 
   it('leaves out kg never weighed on the boat', () => {
-    const kept = filterByToolTypes(entries, new Set(Object.values(TOOL_TYPE_ID).map(String)));
+    const kept = filterByToolTypes(entries, new Set(Object.values(TOOL_TYPE_ID)));
     expect(kept.some((entry) => entry.toolTypeId === null)).toBe(false);
   });
 

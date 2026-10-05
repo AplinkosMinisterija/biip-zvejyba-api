@@ -116,7 +116,7 @@ export type ShoreCatchRow = {
 
 export type BoatCatchRow = {
   fishing_id: number;
-  tool_type_id: number | null;
+  tool_type_id: string | null;
   tool_type: string | null;
   location_id: string | null;
   location_name: string | null;
@@ -225,7 +225,7 @@ export const allocateShoreCatch = (
         ...base,
         fishTypeId,
         kg: parts[index],
-        toolTypeId: boatRow.tool_type_id === null ? null : String(boatRow.tool_type_id),
+        toolTypeId: boatRow.tool_type_id,
         toolType: boatRow.tool_type,
         location:
           boatRow.location_id && boatRow.location_name
