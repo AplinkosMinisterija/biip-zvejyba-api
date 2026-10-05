@@ -28,6 +28,7 @@ import {
   buildCatchSummaryWorkbook,
   describeSummaryFilters,
   filterByLocation,
+  filterByToolTypes,
   summarizeCatch,
   summaryFishColumns,
   summaryMonths,
@@ -70,6 +71,7 @@ type CatchSummaryParams = {
   locationId?: string;
   locationName?: string;
   fishTypes?: string[];
+  toolTypes?: string[];
   byMonths?: boolean;
   byToolTypes?: boolean;
 };
@@ -496,6 +498,12 @@ export default class ResearchesService extends moleculer.Service {
         optional: true,
         convert: true,
       },
+      toolTypes: {
+        type: 'array',
+        items: 'string',
+        optional: true,
+        convert: true,
+      },
       byMonths: { type: 'boolean', optional: true, convert: true },
       byToolTypes: { type: 'boolean', optional: true, convert: true },
     },
@@ -509,19 +517,26 @@ export default class ResearchesService extends moleculer.Service {
     const location: CatchLocation | null =
       locationId && locationName ? { id: locationId, name: locationName } : null;
 
-    const [fishTypes, shoreRows] = await Promise.all([
-      this.fetchFishTypes(ctx),
-      this.fetchShoreCatchRows(ctx, period, types),
-    ]);
     const selectedFishTypes = ctx.params.fishTypes?.length
       ? new Set(ctx.params.fishTypes.map(String))
       : null;
+    const selectedToolTypes = ctx.params.toolTypes?.length
+      ? new Set(ctx.params.toolTypes.map(String))
+      : null;
+    const [fishTypes, toolTypeLabels, shoreRows] = await Promise.all([
+      this.fetchFishTypes(ctx),
+      selectedToolTypes && this.fetchToolTypeLabels(ctx, selectedToolTypes),
+      this.fetchShoreCatchRows(ctx, period, types),
+    ]);
     const boatRows = await this.fetchBoatCatchRows(
       ctx,
       shoreRows.map((row) => row.fishing_id),
     );
 
-    const entries = filterByLocation(allocateShoreCatch(shoreRows, boatRows), location);
+    const entries = filterByToolTypes(
+      filterByLocation(allocateShoreCatch(shoreRows, boatRows), location),
+      selectedToolTypes,
+    );
     const summary = summarizeCatch(entries, selectedFishTypes);
     const fishColumns = summaryFishColumns(fishTypes, selectedFishTypes, summary.fishTypeIds);
 
@@ -543,6 +558,7 @@ export default class ResearchesService extends moleculer.Service {
       filterLine: describeSummaryFilters({
         types,
         location,
+        toolTypes: toolTypeLabels,
         fishTypes: selectedFishTypes && fishColumns.map((column) => column.label),
       }),
       showToolTypes: !!ctx.params.byToolTypes,
@@ -588,6 +604,16 @@ export default class ResearchesService extends moleculer.Service {
           Number(b.priority || 0) - Number(a.priority || 0) || a.label.localeCompare(b.label, 'lt'),
       )
       .map((row) => ({ id: String(row.id), label: row.label, deleted: !!row.deletedAt }));
+  }
+
+  @Method
+  async fetchToolTypeLabels(ctx: Context, ids: Set<string>): Promise<string[]> {
+    const rows: Array<{ id: unknown; label: string }> = await ctx.call('toolTypes.find', {
+      fields: ['id', 'label'],
+    });
+    const labelById = new Map(rows.map((row) => [String(row.id), row.label]));
+
+    return Array.from(ids, (id) => labelById.get(id) ?? `ID ${id}`);
   }
 
   // Shore weigh-ins only (`tools_group_id IS NULL`): the official figure the AAD
@@ -658,6 +684,7 @@ export default class ResearchesService extends moleculer.Service {
     return this.rawQuery(
       ctx,
       `SELECT we.fishing_id,
+              tool_type.id AS tool_type_id,
               tool_type.label AS tool_type,
               COALESCE(be.location, we.location)->>'id' AS location_id,
               COALESCE(be.location, we.location)->>'name' AS location_name,
@@ -667,7 +694,7 @@ export default class ResearchesService extends moleculer.Service {
          LEFT JOIN tools_groups_events be
            ON be.id = tg.build_event_id AND be.deleted_at IS NULL
          LEFT JOIN LATERAL (
-           SELECT tt.label
+           SELECT tt.id, tt.label
              FROM tools t
              JOIN tool_types tt ON tt.id = t.tool_type_id
             WHERE t.id = ANY(tg.tools)

@@ -12,6 +12,7 @@ import {
   buildCatchSummaryWorkbook,
   describeSummaryFilters,
   filterByLocation,
+  filterByToolTypes,
   splitProportionally,
   summarizeCatch,
   summaryFishColumns,
@@ -30,6 +31,7 @@ const fishTypes: SummaryFishType[] = [
 
 const NETS = 'Statomieji tinklaičiai 45-50 mm';
 const SMELT_TRAPS = 'Stintų gaudyklės 12, 12-16, 14-20';
+const TOOL_TYPE_ID: Record<string, number> = { [NETS]: 1, [SMELT_TRAPS]: 2 };
 
 const shore = (
   data: Record<string, number>,
@@ -54,6 +56,7 @@ const boat = (
   fishingId = 1,
 ): BoatCatchRow => ({
   fishing_id: fishingId,
+  tool_type_id: TOOL_TYPE_ID[toolType],
   tool_type: toolType,
   location_id: locationId,
   location_name: `${locationId} baras`,
@@ -172,6 +175,27 @@ describe('filterByLocation', () => {
   });
 });
 
+describe('filterByToolTypes', () => {
+  const entries = allocateShoreCatch(
+    [shore({ [KARSIS]: 12, [KUOJA]: 1 })],
+    [boat(NETS, '1', { [KARSIS]: 6 }), boat(SMELT_TRAPS, '2', { [KARSIS]: 2 })],
+  );
+
+  it('keeps only the kg caught with the picked tool types', () => {
+    const kept = filterByToolTypes(entries, new Set([String(TOOL_TYPE_ID[NETS])]));
+    expect(kept.map((entry) => [entry.toolType, entry.kg])).toEqual([[NETS, 9]]);
+  });
+
+  it('leaves out kg never weighed on the boat', () => {
+    const kept = filterByToolTypes(entries, new Set(Object.values(TOOL_TYPE_ID).map(String)));
+    expect(kept.some((entry) => entry.toolTypeId === null)).toBe(false);
+  });
+
+  it('keeps everything when no tool type is picked', () => {
+    expect(filterByToolTypes(entries, null)).toBe(entries);
+  });
+});
+
 describe('summaryMonths', () => {
   it('lists every month of the period, empty ones too', () => {
     expect(summaryMonths({ from: '2024-11-15', to: '2025-02-10' }, ['2025-01'])).toEqual([
@@ -210,9 +234,9 @@ describe('toVilniusDate', () => {
 
 describe('describeSummaryFilters', () => {
   it('names every filter, "visi"/"visos" for the unset ones', () => {
-    expect(describeSummaryFilters({ types: [], location: null, fishTypes: null })).toBe(
-      'Vieta: visos · Kvadratas / polderis: visi · Rūšys: visos',
-    );
+    expect(
+      describeSummaryFilters({ types: [], location: null, toolTypes: null, fishTypes: null }),
+    ).toBe('Vieta: visos · Kvadratas / polderis: visi · Įrankiai: visi · Rūšys: visos');
   });
 
   it('labels the second field after the single picked zone', () => {
@@ -220,17 +244,21 @@ describe('describeSummaryFilters', () => {
       describeSummaryFilters({
         types: ['ESTUARY'],
         location: { id: '12', name: '12' },
+        toolTypes: [NETS],
         fishTypes: ['Karšis', 'Stinta'],
       }),
-    ).toBe('Vieta: Kuršių marios · Kvadratas: 12 · Rūšys: Karšis, Stinta');
+    ).toBe(`Vieta: Kuršių marios · Kvadratas: 12 · Įrankiai: ${NETS} · Rūšys: Karšis, Stinta`);
 
     expect(
       describeSummaryFilters({
         types: ['POLDERS', 'ESTUARY'],
         location: null,
+        toolTypes: null,
         fishTypes: null,
       }),
-    ).toBe('Vieta: Kuršių marios, polderiai · Kvadratas / polderis: visi · Rūšys: visos');
+    ).toBe(
+      'Vieta: Kuršių marios, polderiai · Kvadratas / polderis: visi · Įrankiai: visi · Rūšys: visos',
+    );
   });
 });
 

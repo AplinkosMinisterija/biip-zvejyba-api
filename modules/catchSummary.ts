@@ -116,6 +116,7 @@ export type ShoreCatchRow = {
 
 export type BoatCatchRow = {
   fishing_id: number;
+  tool_type_id: number | null;
   tool_type: string | null;
   location_id: string | null;
   location_name: string | null;
@@ -129,6 +130,7 @@ export type CatchEntry = {
   partyKey: string;
   partyName: string;
   month: string;
+  toolTypeId: string | null;
   toolType: string | null;
   location: CatchLocation | null;
   fishTypeId: string;
@@ -211,7 +213,7 @@ export const allocateShoreCatch = (
 
       const weighed = boat.filter((boatRow) => kgOf(boatRow.data, fishTypeId) > 0);
       if (kg < 0 || !weighed.length) {
-        return [{ ...base, fishTypeId, kg, toolType: null, location: null }];
+        return [{ ...base, fishTypeId, kg, toolTypeId: null, toolType: null, location: null }];
       }
 
       const parts = splitProportionally(
@@ -223,6 +225,7 @@ export const allocateShoreCatch = (
         ...base,
         fishTypeId,
         kg: parts[index],
+        toolTypeId: boatRow.tool_type_id === null ? null : String(boatRow.tool_type_id),
         toolType: boatRow.tool_type,
         location:
           boatRow.location_id && boatRow.location_name
@@ -239,6 +242,12 @@ export const filterByLocation = (entries: CatchEntry[], location: CatchLocation 
     ? entries.filter(
         (entry) => entry.location?.id === location.id && entry.location?.name === location.name,
       )
+    : entries;
+
+// Kg never weighed on the boat has no tool, so a tool filter leaves it out.
+export const filterByToolTypes = (entries: CatchEntry[], toolTypeIds: Set<string> | null) =>
+  toolTypeIds
+    ? entries.filter((entry) => !!entry.toolTypeId && toolTypeIds.has(entry.toolTypeId))
     : entries;
 
 const addToSheet = (sheet: SheetSummary, entry: CatchEntry) => {
@@ -355,6 +364,7 @@ const listOrAll = (labels: Iterable<string> | null, all: string) => {
 export const describeSummaryFilters = (filter: {
   types: string[];
   location: CatchLocation | null;
+  toolTypes: string[] | null;
   fishTypes: string[] | null;
 }) => {
   const locationLabel =
@@ -367,6 +377,7 @@ export const describeSummaryFilters = (filter: {
   return [
     `Vieta: ${listOrAll(zones, 'visos')}`,
     `${locationLabel}: ${filter.location?.name || 'visi'}`,
+    `Įrankiai: ${listOrAll(filter.toolTypes, 'visi')}`,
     `Rūšys: ${listOrAll(filter.fishTypes, 'visos')}`,
   ].join(' · ');
 };
