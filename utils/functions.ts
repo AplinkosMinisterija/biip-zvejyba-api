@@ -1,7 +1,13 @@
 import { Context } from 'moleculer';
 import { AuthUserRole, UserAuthMeta } from '../services/api.service';
-import { TenantUserRole } from '../services/tenantUsers.service';
+import { AuthGroupRole, TenantUserRole } from '../services/tenantUsers.service';
 import { throwNoRightsError } from '../types';
+
+// Our three tenant roles collapse into the auth server's two-role group model.
+export const roleToAuthGroupRole = (role: TenantUserRole): AuthGroupRole =>
+  role === TenantUserRole.OWNER || role === TenantUserRole.USER_ADMIN
+    ? AuthGroupRole.ADMIN
+    : AuthGroupRole.USER;
 
 export const validateCanEditTenantUser = (ctx: Context<any, UserAuthMeta>, err: string) => {
   const { profile } = ctx.meta;

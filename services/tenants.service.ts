@@ -6,6 +6,7 @@ import {
   COMMON_DEFAULT_SCOPES,
   COMMON_FIELDS,
   COMMON_SCOPES,
+  CommonFields,
   EntityChangedParams,
   INNER_AUTH_GROUP_IDS,
   RestrictionType,
@@ -183,15 +184,26 @@ export default class TenantsService extends moleculer.Service {
       companyCode,
     });
 
-    const tenant: Tenant = await this.createEntity(ctx, {
-      authGroup: authGroup.id,
+    const tenantData = {
       email: companyEmail,
       phone: companyPhone,
       name: companyName,
       address: companyAddress,
       code: companyCode,
       isInvestigator,
+    };
+
+    // The auth server keeps company groups and hands the same one back when a
+    // company is invited again, so a deleted company must reuse its own row
+    // instead of leaving two tenants pointing at one auth group.
+    const existingTenant: Tenant & Partial<CommonFields> = await this.findEntity(null, {
+      query: { authGroup: authGroup.id },
+      scope: false,
     });
+
+    const tenant: Tenant = existingTenant
+      ? await this.restoreTenant(ctx, existingTenant, tenantData)
+      : await this.createEntity(ctx, { ...tenantData, authGroup: authGroup.id });
 
     if (ownerRequired) {
       await ctx.call('tenantUsers.invite', {
@@ -206,6 +218,36 @@ export default class TenantsService extends moleculer.Service {
     }
 
     return tenant;
+  }
+
+  @Method
+  async restoreTenant(
+    ctx: Context<any, UserAuthMeta>,
+    tenant: Tenant & Partial<CommonFields>,
+    data: Record<string, any>,
+  ) {
+    if (!tenant.deletedAt) {
+      throw new moleculer.Errors.MoleculerClientError(
+        'Tenant already exists',
+        422,
+        'ALREADY_EXISTS',
+      );
+    }
+
+    const deletedAt = new Date(tenant.deletedAt);
+
+    await this.updateEntity(
+      ctx,
+      { id: tenant.id, $set: { deletedAt: null, deletedBy: null } },
+      { raw: true, permissive: true, scope: false },
+    );
+
+    await ctx.call('tenantUsers.restoreRemovedWithTenant', {
+      tenant: Number(tenant.id),
+      deletedFrom: deletedAt.toISOString(),
+    });
+
+    return this.updateEntity(ctx, { id: tenant.id, ...data });
   }
 
   // `tenants.removed` two-step cleanup:
