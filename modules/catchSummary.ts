@@ -502,6 +502,7 @@ const renderZoneBlock = (
   });
 
   if (zoneByTool.size) {
+    rowIndex++;
     const labelRow = sheet.getRow(rowIndex++);
     labelRow.getCell(2).value = SUMMARY_ZONE_TOOL_TOTALS_LABEL;
     labelRow.font = { bold: true };
