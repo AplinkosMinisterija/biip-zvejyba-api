@@ -6,6 +6,7 @@ import {
   CatchSummary,
   SUMMARY_MAX_MONTH_SHEETS,
   SUMMARY_UNASSIGNED_TOOL,
+  SUMMARY_ZONE_TOOL_TOTALS_LABEL,
   ShoreCatchRow,
   SummaryFishType,
   allocateShoreCatch,
@@ -98,6 +99,28 @@ const titles = (sheet: ExcelJS.Worksheet) => {
 };
 
 const HEADER_ROW = 4;
+
+const ESTUARY_TOTAL = 'IŠ VISO (Kuršių mariose):';
+
+const rowNamed = (sheet: ExcelJS.Worksheet, name: string, after = 0) => {
+  let found = 0;
+  sheet.eachRow((row, index) => {
+    if (!found && index > after && row.getCell(2).value === name) found = index;
+  });
+  return found;
+};
+
+// [name, IŠ VISO] of every gear row between the subsection label and the zone total.
+const gearSubtotals = (sheet: ExcelJS.Worksheet, zoneTotalLabel: string) => {
+  const label = rowNamed(sheet, SUMMARY_ZONE_TOOL_TOTALS_LABEL);
+  const zoneTotal = rowNamed(sheet, zoneTotalLabel, label);
+  const totalColumn = cellValues(sheet, HEADER_ROW).indexOf('IŠ VISO');
+
+  return Array.from({ length: zoneTotal - label - 1 }, (_value, offset) => {
+    const values = cellValues(sheet, label + 1 + offset);
+    return [values[1], values[totalColumn]];
+  });
+};
 
 // kg in the column headed `header`, on the `nth` row named `rowName`.
 const kg = (sheet: ExcelJS.Worksheet, rowName: string, header: string, nth = 0) =>
@@ -236,7 +259,7 @@ describe('describeSummaryFilters', () => {
   it('names every filter, "visi"/"visos" for the unset ones', () => {
     expect(
       describeSummaryFilters({ types: [], location: null, toolTypes: null, fishTypes: null }),
-    ).toBe('Vieta: visos · Kvadratas / polderis: visi · Įrankiai: visi · Rūšys: visos');
+    ).toBe('Vieta: visos · Žvejybos barai / polderis: visi · Įrankiai: visi · Rūšys: visos');
   });
 
   it('labels the second field after the single picked zone', () => {
@@ -247,7 +270,9 @@ describe('describeSummaryFilters', () => {
         toolTypes: [NETS],
         fishTypes: ['Karšis', 'Stinta'],
       }),
-    ).toBe(`Vieta: Kuršių marios · Kvadratas: 12 · Įrankiai: ${NETS} · Rūšys: Karšis, Stinta`);
+    ).toBe(
+      `Vieta: Kuršių marios · Žvejybos barai: 12 · Įrankiai: ${NETS} · Rūšys: Karšis, Stinta`,
+    );
 
     expect(
       describeSummaryFilters({
@@ -257,7 +282,7 @@ describe('describeSummaryFilters', () => {
         fishTypes: null,
       }),
     ).toBe(
-      'Vieta: Kuršių marios, polderiai · Kvadratas / polderis: visi · Įrankiai: visi · Rūšys: visos',
+      'Vieta: Kuršių marios, polderiai · Žvejybos barai / polderis: visi · Įrankiai: visi · Rūšys: visos',
     );
   });
 });
@@ -331,11 +356,13 @@ describe('buildCatchSummaryWorkbook', () => {
   it('writes the filter line under the period', () => {
     const sheet = build(summary, {
       period: { from: '2025-01-01', to: '2025-05-31' },
-      filterLine: 'Vieta: Kuršių marios · Kvadratas: visi · Rūšys: visos',
+      filterLine: 'Vieta: Kuršių marios · Žvejybos barai: visi · Rūšys: visos',
     }).getWorksheet('Suvestinė')!;
 
     expect(sheet.getCell(2, 1).value).toBe('UŽ 2025-01-01 – 2025-05-31');
-    expect(sheet.getCell(3, 1).value).toBe('Vieta: Kuršių marios · Kvadratas: visi · Rūšys: visos');
+    expect(sheet.getCell(3, 1).value).toBe(
+      'Vieta: Kuršių marios · Žvejybos barai: visi · Rūšys: visos',
+    );
   });
 
   it('lists the tool rows under the company, summing to it', () => {
@@ -349,6 +376,47 @@ describe('buildCatchSummaryWorkbook', () => {
     expect(['Karšis', 'Stinta', 'IŠ VISO'].map(at(SMELT_TRAPS))).toEqual([3, 4, 7]);
     expect(['Kuoja', 'IŠ VISO'].map(at(SUMMARY_UNASSIGNED_TOOL))).toEqual([1, 1]);
     expect(kg(sheet, 'UAB Pelona', 'IŠ VISO')).toBe(17);
+  });
+
+  it('sums the gear of every company per zone, unassigned last', () => {
+    const twoCompanies = summarize(
+      [
+        shore({ [KARSIS]: 12, [KUOJA]: 1 }),
+        shore({ [KARSIS]: 4 }, { fishing_id: 2, tenant_id: 2, tenant_name: 'UAB Žuvėdra' }),
+      ],
+      [
+        boat(NETS, '1', { [KARSIS]: 6 }),
+        boat(SMELT_TRAPS, '2', { [KARSIS]: 2 }),
+        boat(NETS, '1', { [KARSIS]: 1 }, 2),
+      ],
+    );
+    const sheet = build(twoCompanies, {
+      types: ['ESTUARY'],
+      showToolTypes: true,
+    }).getWorksheet('Suvestinė')!;
+
+    expect(gearSubtotals(sheet, ESTUARY_TOTAL)).toEqual([
+      [NETS, 13],
+      [SMELT_TRAPS, 3],
+      [SUMMARY_UNASSIGNED_TOOL, 1],
+    ]);
+    expect(kg(sheet, ESTUARY_TOTAL, 'IŠ VISO')).toBe(17);
+  });
+
+  it('leaves the gear subtotals out while the tool types stay off', () => {
+    const sheet = build(summary, { types: ['ESTUARY'] }).getWorksheet('Suvestinė')!;
+
+    expect(findRows(sheet, SUMMARY_ZONE_TOOL_TOTALS_LABEL)).toEqual([]);
+  });
+
+  it('repeats the gear subtotals on every month sheet', () => {
+    const workbook = build(summary, { months: ['2025-02'], showToolTypes: true });
+
+    expect(gearSubtotals(workbook.getWorksheet('2025-02')!, ESTUARY_TOTAL)).toEqual([
+      [NETS, 9],
+      [SMELT_TRAPS, 7],
+      [SUMMARY_UNASSIGNED_TOOL, 1],
+    ]);
   });
 
   it('adds a sheet per month, always named with the year', () => {

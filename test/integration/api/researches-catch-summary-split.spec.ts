@@ -25,6 +25,9 @@ const bar = (id: string) => ({
 const NETS = 'Statomieji tinklaičiai 45-50 mm';
 const SMELT_TRAPS = 'Stintų gaudyklės 12, 12-16, 14-20';
 
+const ZONE_TOOL_TOTALS = 'Pagal įrankių tipus (visos įmonės):';
+const ESTUARY_TOTAL = 'IŠ VISO (Kuršių mariose):';
+
 const KARSIS = 'Karšis';
 const KUOJA = 'Kuoja';
 const STINTA = 'Stinta';
@@ -64,6 +67,25 @@ const valueIn = (sheet: ExcelJS.Worksheet, row: any[], header: string) =>
 // kg in the column headed `header` on the row named `rowName`.
 const kg = (sheet: ExcelJS.Worksheet, rowName: string, header: string) =>
   valueIn(sheet, findRow(sheet, rowName)!, header);
+
+const rowNamed = (sheet: ExcelJS.Worksheet, name: string, after = 0) => {
+  let found = 0;
+  sheet.eachRow((row, index) => {
+    if (!found && index > after && row.getCell(2).value === name) found = index;
+  });
+  return found;
+};
+
+// [name, IŠ VISO] of every gear row between the subsection label and the zone total.
+const gearSubtotals = (sheet: ExcelJS.Worksheet, zoneTotalLabel: string) => {
+  const label = rowNamed(sheet, ZONE_TOOL_TOTALS);
+  const zoneTotal = rowNamed(sheet, zoneTotalLabel, label);
+
+  return Array.from({ length: zoneTotal - label - 1 }, (_value, offset) => {
+    const values = cellValues(sheet, label + 1 + offset);
+    return [values[1], valueIn(sheet, values, TOTAL)];
+  });
+};
 
 const titles = (sheet: ExcelJS.Worksheet) => {
   const found: unknown[] = [];
@@ -179,12 +201,26 @@ describe('researches.catchSummary — tool types', () => {
     expect([valueIn(sheet, unassigned, KUOJA), valueIn(sheet, unassigned, TOTAL)]).toEqual([1, 1]);
   });
 
+  it('lists the zone gear totals right before the zone total', async () => {
+    const sheet = (await summary({ types: ['ESTUARY'], byToolTypes: true })).getWorksheet(
+      'Suvestinė',
+    )!;
+
+    expect(gearSubtotals(sheet, ESTUARY_TOTAL)).toEqual([
+      [NETS, 9],
+      [SMELT_TRAPS, 7],
+      ['Įrankis nenurodytas', 1],
+    ]);
+    expect(kg(sheet, ESTUARY_TOTAL, TOTAL)).toBe(17);
+  });
+
   it('keeps one row per company when the toggle is off', async () => {
     const sheet = (await summary({})).getWorksheet('Suvestinė')!;
 
     expect(kg(sheet, 'Company-A', TOTAL)).toBe(17);
     expect(findRow(sheet, NETS)).toBeNull();
     expect(findRow(sheet, 'Įrankis nenurodytas')).toBeNull();
+    expect(findRow(sheet, ZONE_TOOL_TOTALS)).toBeNull();
   });
 
   it('keeps only the kg caught with the picked tool types', async () => {
@@ -214,7 +250,7 @@ describe('researches.catchSummary — bar filter', () => {
       valueIn(sheet, company, TOTAL),
     ]).toEqual([9, 0, 9]);
     expect(sheet.getCell(3, 1).value).toBe(
-      'Vieta: Kuršių marios · Kvadratas: 1 baras · Įrankiai: visi · Rūšys: visos',
+      'Vieta: Kuršių marios · Žvejybos barai: 1 baras · Įrankiai: visi · Rūšys: visos',
     );
   });
 
@@ -223,7 +259,7 @@ describe('researches.catchSummary — bar filter', () => {
 
     expect(kg(sheet, 'Company-A', TOTAL)).toBe(17);
     expect(sheet.getCell(3, 1).value).toBe(
-      'Vieta: Kuršių marios · Kvadratas: visi · Įrankiai: visi · Rūšys: visos',
+      'Vieta: Kuršių marios · Žvejybos barai: visi · Įrankiai: visi · Rūšys: visos',
     );
   });
 });
