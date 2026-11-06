@@ -400,6 +400,8 @@ describe('buildCatchSummaryWorkbook', () => {
       [SMELT_TRAPS, 3],
       [SUMMARY_UNASSIGNED_TOOL, 1],
     ]);
+    // A blank row sets the subsection apart from the companies above it.
+    expect(cellValues(sheet, rowNamed(sheet, SUMMARY_ZONE_TOOL_TOTALS_LABEL) - 1)).toEqual([]);
     expect(kg(sheet, ESTUARY_TOTAL, 'IŠ VISO')).toBe(17);
   });
 
