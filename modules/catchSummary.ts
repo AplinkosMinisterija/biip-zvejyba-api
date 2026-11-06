@@ -32,7 +32,7 @@ const SUMMARY_ZONES: SummaryZone[] = [
 ];
 
 const SINGLE_ZONE_LOCATION_LABEL: Record<string, string> = {
-  [LocationType.ESTUARY]: 'Kvadratas',
+  [LocationType.ESTUARY]: 'Žvejybos barai',
   [LocationType.POLDERS]: 'Polderis',
 };
 
@@ -70,6 +70,8 @@ export const toVilniusDate = (date: Date) => {
 };
 
 export const SUMMARY_UNASSIGNED_TOOL = 'Įrankis nenurodytas';
+
+export const SUMMARY_ZONE_TOOL_TOTALS_LABEL = 'Pagal įrankių tipus (visos įmonės):';
 
 // Ten years of month sheets; anything longer is a mistyped period, not a report.
 export const SUMMARY_MAX_MONTH_SHEETS = 120;
@@ -369,7 +371,7 @@ export const describeSummaryFilters = (filter: {
 }) => {
   const locationLabel =
     (filter.types.length === 1 && SINGLE_ZONE_LOCATION_LABEL[filter.types[0]]) ||
-    'Kvadratas / polderis';
+    'Žvejybos barai / polderis';
   const zones = filter.types.length
     ? selectedZones(filter.types).map((zone) => zone.filterLabel)
     : null;
@@ -461,46 +463,79 @@ const renderToolRows = (
   return rowIndex;
 };
 
+const addByTool = (target: Map<string, SummaryTotals>, source: Map<string, SummaryTotals>) =>
+  source.forEach((totals, toolType) =>
+    addTotals(getOrCreate(target, toolType, emptyTotals), totals),
+  );
+
+const sortedParties = (parties: Map<string, PartySummary> | undefined) =>
+  Array.from(parties?.values() || []).sort((a, b) => a.name.localeCompare(b.name, 'lt'));
+
+// Returns the next free row index and the zone's totals.
+const renderZoneBlock = (
+  sheet: ExcelJS.Worksheet,
+  startRow: number,
+  zone: SummaryZone,
+  parties: PartySummary[],
+  layout: SheetLayout,
+): { nextRow: number; totals: SummaryTotals } => {
+  const { columns } = layout;
+  let rowIndex = startRow;
+  const zoneTotals = emptyTotals();
+  const zoneByTool = new Map<string, SummaryTotals>();
+
+  const titleRow = sheet.getRow(rowIndex++);
+  titleRow.getCell(1).value = zone.title;
+  titleRow.font = { bold: true };
+
+  parties.forEach((party, index) => {
+    const partyRow = sheet.getRow(rowIndex++);
+    partyRow.values = rowValues(columns, index + 1, party.name, party.totals);
+
+    if (layout.showToolTypes) {
+      partyRow.font = { bold: true };
+      rowIndex = renderToolRows(sheet, rowIndex, party.byTool, columns);
+      addByTool(zoneByTool, party.byTool);
+    }
+
+    addTotals(zoneTotals, party.totals);
+  });
+
+  if (zoneByTool.size) {
+    const labelRow = sheet.getRow(rowIndex++);
+    labelRow.getCell(2).value = SUMMARY_ZONE_TOOL_TOTALS_LABEL;
+    labelRow.font = { bold: true };
+    rowIndex = renderToolRows(sheet, rowIndex, zoneByTool, columns);
+  }
+
+  const totalRow = sheet.getRow(rowIndex++);
+  totalRow.values = rowValues(columns, '', zone.totalLabel, zoneTotals);
+  totalRow.font = { bold: true };
+
+  return { nextRow: rowIndex, totals: zoneTotals };
+};
+
 const renderSummarySheet = (sheet: ExcelJS.Worksheet, data: SheetSummary, layout: SheetLayout) => {
   renderSheetHeader(sheet, layout);
 
-  const { columns } = layout;
   let rowIndex = SUMMARY_HEADER_ROW + 1;
   const grandTotals = emptyTotals();
 
   for (const zone of layout.zones) {
-    const parties = Array.from(data.get(zone.type)?.values() || []).sort((a, b) =>
-      a.name.localeCompare(b.name, 'lt'),
+    const { nextRow, totals } = renderZoneBlock(
+      sheet,
+      rowIndex,
+      zone,
+      sortedParties(data.get(zone.type)),
+      layout,
     );
 
-    const titleRow = sheet.getRow(rowIndex++);
-    titleRow.getCell(1).value = zone.title;
-    titleRow.font = { bold: true };
-
-    const zoneTotals = emptyTotals();
-
-    parties.forEach((summary, index) => {
-      const partyRow = sheet.getRow(rowIndex++);
-      partyRow.values = rowValues(columns, index + 1, summary.name, summary.totals);
-
-      if (layout.showToolTypes) {
-        partyRow.font = { bold: true };
-        rowIndex = renderToolRows(sheet, rowIndex, summary.byTool, columns);
-      }
-
-      addTotals(zoneTotals, summary.totals);
-    });
-
-    const totalRow = sheet.getRow(rowIndex++);
-    totalRow.values = rowValues(columns, '', zone.totalLabel, zoneTotals);
-    totalRow.font = { bold: true };
-
-    addTotals(grandTotals, zoneTotals);
-    rowIndex++;
+    addTotals(grandTotals, totals);
+    rowIndex = nextRow + 1;
   }
 
   const grandRow = sheet.getRow(rowIndex);
-  grandRow.values = rowValues(columns, '', 'IŠ VISO:', grandTotals);
+  grandRow.values = rowValues(layout.columns, '', 'IŠ VISO:', grandTotals);
   grandRow.font = { bold: true };
 };
 

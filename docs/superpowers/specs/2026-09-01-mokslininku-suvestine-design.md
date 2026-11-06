@@ -47,10 +47,10 @@ Parametrai (visi optional):
 | Param | Reikšmė |
 |---|---|
 | `dateFrom`, `dateTo` | laikotarpis (`weight_events.date`, Vilniaus kalendorinė diena) |
-| `types` | `ESTUARY` / `INLAND_WATERS` / `POLDERS` masyvas |
-| `locationId` + `locationName` | konkretus kvadratas / telkinys / polderis |
+| `types` | `ESTUARY` / `INLAND_WATERS` / `POLDERS` masyvas (FE siūlo tik `ESTUARY` ir `POLDERS`) |
+| `locationId` + `locationName` | konkretus baras / telkinys / polderis |
 | `fishTypes` | rūšių id masyvas |
-| `byMonths`, `byToolTypes` | mėnesių lapai / įrankių eilutės po įmone |
+| `byMonths`, `byToolTypes` | mėnesių lapai / įrankių eilutės po įmone ir vietos poskyris |
 
 Imami **tik krantiniai svėrimai** (`tools_group_id IS NULL`) — tai oficialus
 tiksliai pasvertas kiekis, kurį etaloninė lentelė ir raportuoja.
@@ -72,12 +72,19 @@ Decision 2026-09-29 (head of unit): no fixed AAD reference columns, no
 „Kitos žuvys“ block, no control sum — the columns come from our own
 `fish_types` registry.
 
+Decision 2026-11-05 (PM, issue #162): „Nemuno žemupys, Šventoji“ leaves the
+zone filter — its water bodies come from UETK, so there is nothing to pick
+from — but its Excel block stays, keeping that catch in the grand total. The
+bar filter is named „Žvejybos barai“, and with `byToolTypes` every zone block
+carries a „Pagal įrankių tipus (visos įmonės):“ subsection before its total.
+
 ```
 1  ŽVEJYBOS VERSLINĖS ŽVEJYBOS ĮRANKIAIS ... ATASKAITŲ SUVESTINĖ (KG.)
 2  UŽ <period>
-3  Vieta: … · Kvadratas: … · Rūšys: …
+3  Vieta: … · Žvejybos barai: … · Įrankiai: … · Rūšys: …
 4  Eil. Nr. | ĮMONĖS (ORGANIZACIJOS) PAVADINIMAS | <every registry species> | IŠ VISO
-5+ one block per picked zone — company rows (+ tool rows) and the zone total;
+5+ one block per picked zone — company rows (+ tool rows), with `byToolTypes`
+   the „Pagal įrankių tipus (visos įmonės):“ subsection, then the zone total;
    then the grand „IŠ VISO:“
 ```
 
@@ -99,8 +106,11 @@ Decision 2026-09-29 (head of unit): no fixed AAD reference columns, no
 | `src/utils/functions.ts` | `handleGetCatchSummaryExcel` |
 | `src/utils/texts.ts` | filtrų etiketės |
 
-Filtrai (`DynamicFilter`, kaip žvejybos žurnale): žvejybos rūšis, vietovė
-(Kuršių marių kvadratai), **žuvų rūšys** (`multiselect`), laikotarpis nuo / iki.
+Filtrai (`DynamicFilter`, kaip žvejybos žurnale): žvejybos vieta (Kuršių
+marios / polderiai, `multiselect`), **žvejybos barai** arba **polderis** —
+rodomas tik kai pasirinkta viena vieta, **žuvų rūšys** ir **įrankio tipas**
+(`multiselect`), laikotarpis nuo / iki. Virš atsisiuntimo mygtuko —
+„Ataskaitos forma“ su jungikliais `byMonths` / `byToolTypes`.
 
 Slėpimas FE pusėje yra **UX, ne apsauga** — žvejo endpoint'ai jau
 ProfileMixin-scoped, tad mokslininko profilis matytų tik savo (tuščią)
