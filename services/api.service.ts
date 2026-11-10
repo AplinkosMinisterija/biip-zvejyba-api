@@ -5,6 +5,7 @@ import moleculer, { Context } from 'moleculer';
 import { Action, Method, Service } from 'moleculer-decorators';
 import ApiGateway from 'moleculer-web';
 import { RequestMessage, RestrictionType } from '../types';
+import { stripClientRaw } from '../utils/sanitizeClientParams';
 import { User } from './users.service';
 
 export interface UserAuthMeta {
@@ -45,6 +46,8 @@ export enum AuthUserRole {
     routes: [
       {
         path: '/api',
+        // Removes client-supplied `$raw` (raw SQL) from params.
+        onBeforeCall: stripClientRaw,
         whitelist: [
           // Access to any actions in all services under "/api" URL
           '**',
