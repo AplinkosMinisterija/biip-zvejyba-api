@@ -430,13 +430,34 @@ export default class UsersService extends moleculer.Service {
     }>,
   ) {
     const { personalCode, email, phone, firstName, lastName, isInvestigator } = ctx.params;
-    // it will throw error if user already exists
     const authUser: any = await ctx.call('auth.users.invite', {
       personalCode,
       notify: [email],
-      throwErrors: true,
+      throwErrors: false,
+      notifyIfExists: true,
     });
-    //add to freelancer group
+
+    // With `throwErrors: false` the auth side resolves to an empty/null body
+    // rather than throwing when it cannot return a usable user. Guard it --
+    // otherwise the `.id` reads below surface as a generic 500.
+    if (!authUser?.id) {
+      throw new moleculer.Errors.MoleculerClientError(
+        'Auth service did not return a user for the invite',
+        502,
+        'AUTH_INVITE_FAILED',
+      );
+    }
+
+    // The auth user can already exist from an invite that failed after auth
+    // committed it, so only our own record proves the person is really here.
+    const existingUser: User = await ctx.call('users.findOne', {
+      query: { authUser: authUser.id },
+    });
+
+    if (existingUser) {
+      throw new moleculer.Errors.ValidationError('User already exists.', 'AUTH_USER_EXISTS');
+    }
+
     await ctx.call('auth.users.assignToGroup', {
       id: authUser.id,
       groupId: Number(process.env.FREELANCER_GROUP_ID),
